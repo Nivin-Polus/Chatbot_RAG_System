@@ -1,10 +1,42 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import api from "../api/api";
 
 export default function ChatWindow() {
   const [messages, setMessages] = useState([]);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
+  const [typingText, setTypingText] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
+  const messagesEndRef = useRef(null);
+  const typingIntervalRef = useRef(null);
+
+  // Auto-scroll to bottom
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isTyping]);
+
+  // Typing animation function
+  const typeMessage = (text, callback) => {
+    setIsTyping(true);
+    setTypingText("");
+    let index = 0;
+    
+    typingIntervalRef.current = setInterval(() => {
+      if (index < text.length) {
+        setTypingText(prev => prev + text.charAt(index));
+        index++;
+      } else {
+        clearInterval(typingIntervalRef.current);
+        setIsTyping(false);
+        setTypingText("");
+        callback();
+      }
+    }, 30); // Adjust typing speed here (lower = faster)
+  };
 
   const sendQuestion = async () => {
     if (!question.trim() || loading) return;
@@ -15,7 +47,16 @@ export default function ChatWindow() {
     
     try {
       const res = await api.post("/chat/ask", { question });
-      setMessages(prev => [...prev, { user: false, text: res.data.answer }]);
+      const responseText = res.data.answer; // Backend now returns {answer: "text"}
+      
+      // Start typing animation
+      typeMessage(responseText, () => {
+        setMessages(prev => [...prev, { 
+          user: false, 
+          text: responseText,
+          formatted: true
+        }]);
+      });
     } catch (err) {
       const errorMsg = err.response?.data?.detail || "Failed to get response";
       setMessages(prev => [...prev, { user: false, text: errorMsg, error: true }]);
@@ -43,14 +84,41 @@ export default function ChatWindow() {
         )}
         {messages.map((m, i) => (
           <div key={i} className={`message ${m.user ? "user" : "bot"} ${m.error ? "error" : ""}`}>
-            <div className="message-content">{m.text}</div>
+            <div className={`message-content ${m.formatted ? "formatted-response" : ""}`}>
+              {m.formatted ? (
+                <div dangerouslySetInnerHTML={{ 
+                  __html: m.text
+                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/\n\d+\./g, '<br/>$&')
+                    .replace(/\n-/g, '<br/>•')
+                    .replace(/\n/g, '<br/>')
+                }} />
+              ) : (
+                m.text
+              )}
+            </div>
           </div>
         ))}
+        {isTyping && (
+          <div className="message bot typing-message">
+            <div className="message-content formatted-response">
+              <div dangerouslySetInnerHTML={{ 
+                __html: typingText
+                  .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                  .replace(/\n\d+\./g, '<br/>$&')
+                  .replace(/\n-/g, '<br/>•')
+                  .replace(/\n/g, '<br/>')
+              }} />
+              <span className="typing-cursor">|</span>
+            </div>
+          </div>
+        )}
         {loading && (
           <div className="message bot">
             <div className="message-content typing">Thinking...</div>
           </div>
         )}
+        <div ref={messagesEndRef} />
       </div>
       <div className="input-section">
         <textarea

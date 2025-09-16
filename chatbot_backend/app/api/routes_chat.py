@@ -9,6 +9,7 @@ from app.api.routes_auth import get_current_user
 from app.utils.prompt_guard import is_safe_prompt
 import redis
 import logging
+import json
 
 # Initialize FastAPI router
 router = APIRouter()
@@ -59,19 +60,19 @@ async def ask_question(request: ChatRequest, current_user: str = Depends(get_cur
     if r:
         cached_answer = r.get(cache_key)
         if cached_answer:
-            answer = cached_answer.decode("utf-8")
+            answer_text = cached_answer.decode("utf-8")
             logger.info(f"[CACHE HIT] User: {current_user}, Question: {question}")
-            return ChatResponse(answer=answer)
+            return ChatResponse(answer=answer_text)
 
     # Call RAG pipeline
-    answer = rag.answer(question, top_k=top_k)
+    answer_text = rag.answer(question, top_k=top_k)
 
     # Store in Redis
     if r:
-        r.set(cache_key, answer, ex=60*60*24)  # TTL 24 hours
+        r.set(cache_key, answer_text, ex=60*60*24)  # TTL 24 hours
         logger.info(f"[CACHE STORE] User: {current_user}, Question: {question}")
 
     # Log query and answer
-    logger.info(f"User: {current_user}, Question: {question}, Answer: {answer}")
+    logger.info(f"User: {current_user}, Question: {question}, Answer: {answer_text}")
 
-    return ChatResponse(answer=answer)
+    return ChatResponse(answer=answer_text)

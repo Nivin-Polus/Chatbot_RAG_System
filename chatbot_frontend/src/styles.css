@@ -333,6 +333,63 @@ body {
   font-weight: 500;
 }
 
+/* Formatted Response Styles */
+.formatted-response {
+  line-height: 1.6;
+}
+
+.formatted-response strong {
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+.formatted-response br {
+  margin-bottom: 8px;
+}
+
+/* Typing Animation Styles */
+.typing-message {
+  animation: fadeIn 0.3s ease-in;
+}
+
+.typing-cursor {
+  animation: blink 1s infinite;
+  font-weight: bold;
+  color: #667eea;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Enhanced Message Styling */
+.message.bot .message-content.formatted-response {
+  background: #f8f9fa;
+  border-left: 4px solid #667eea;
+  padding: 16px 20px;
+}
+
+.message.bot .message-content.formatted-response ul,
+.message.bot .message-content.formatted-response ol {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.message.bot .message-content.formatted-response li {
+  margin-bottom: 4px;
+}
+
+/* Auto-scroll smooth behavior */
+.messages {
+  scroll-behavior: smooth;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .main-content {

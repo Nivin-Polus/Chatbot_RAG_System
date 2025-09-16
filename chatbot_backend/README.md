@@ -70,8 +70,7 @@ Create a `.env` file in the backend root:
 ```env
 # 🤖 Claude AI Configuration
 CLAUDE_API_KEY=your_claude_api_key_here
-CLAUDE_API_URL=https://api.anthropic.com/v1/complete
-CLAUDE_MODEL=claude-v1
+CLAUDE_MODEL=claude-3-haiku-20240307
 CLAUDE_MAX_TOKENS=1000
 CLAUDE_TEMPERATURE=0.0
 
@@ -173,6 +172,14 @@ curl -X POST "http://localhost:8000/chat/ask" \
   -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"question": "What is the main topic of the uploaded documents?"}'
+```
+
+**Response Format:**
+```json
+{
+  "summary": "Brief 2-3 bullet point answer",
+  "detailed": "Comprehensive detailed answer with context"
+}
 ```
 
 ---

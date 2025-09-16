@@ -116,13 +116,16 @@ The frontend automatically connects to the backend API. Ensure:
 ### Features
 - **Multi-line input** with Enter to send (Shift+Enter for new line)
 - **Message history** with user/bot distinction
+- **Dual-response format** - Summary and detailed answers
+- **Expandable details** - "Show More Details" button for comprehensive answers
 - **Loading indicators** while processing
 - **Error messages** for failed requests
 - **Welcome message** for new users
 
 ### Message Types
 - **User messages**: Blue bubbles on the right
-- **Bot responses**: Gray bubbles on the left
+- **Bot responses**: Gray bubbles on the left with summary answers
+- **Detailed answers**: Expandable sections with comprehensive information
 - **Error messages**: Red bubbles for failed requests
 - **Typing indicator**: Animated "Thinking..." message
 
@@ -375,7 +378,7 @@ npm run eject
 - `POST /files/upload` - File upload
 - `GET /files/list` - List files
 - `DELETE /files/{id}` - Delete file
-- `POST /chat/ask` - Chat with documents
+- `POST /chat/ask` - Chat with documents (returns summary + detailed answers)
 
 ### Backend Requirements
 - CORS enabled for frontend domain
