@@ -3,12 +3,12 @@
 from datetime import datetime, timedelta
 from typing import Optional
 from passlib.context import CryptContext
-from jose import jwt
+import jwt
 
 from app.config import settings
 
-# Password hashing context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Password hashing context (using argon2 instead of bcrypt to avoid Rust dependencies)
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 
 # Hash a plain password

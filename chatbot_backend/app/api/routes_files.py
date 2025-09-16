@@ -42,7 +42,14 @@ async def upload_file(
     file_id = str(uuid4())
 
     # Store embeddings in Qdrant
-    vector_store.insert(file_id=file_id, chunks=text_chunks)
+    for i, chunk in enumerate(text_chunks):
+        chunk_metadata = {
+            "file_id": file_id,
+            "file_name": uploaded_file.filename,
+            "chunk_index": i,
+            "text": chunk
+        }
+        vector_store.add_document(chunk, chunk_metadata)
 
     # Store metadata
     metadata = FileMeta(

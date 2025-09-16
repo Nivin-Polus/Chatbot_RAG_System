@@ -36,21 +36,27 @@ class RAG:
         """
         try:
             response = requests.post(
-                self.endpoint,
-                headers={"Authorization": f"Bearer {self.api_key}"},
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": self.api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
                 json={
-                    "model": self.model,
-                    "prompt": prompt,
-                    "max_tokens_to_sample": self.max_tokens,
-                    "temperature": self.temperature
+                    "model": "claude-3-haiku-20240307",
+                    "max_tokens": self.max_tokens,
+                    "messages": [
+                        {"role": "user", "content": prompt}
+                    ]
                 },
                 timeout=20
             )
             response.raise_for_status()
             data = response.json()
-            return data.get("completion", "").strip()
-        except Exception:
-            return "I wasn’t able to retrieve a confident answer, please refine your question."
+            return data.get("content", [{}])[0].get("text", "").strip()
+        except Exception as e:
+            print(f"Claude API Error: {e}")
+            return "I wasn't able to retrieve a confident answer, please refine your question."
 
     def answer(self, query: str, top_k: int = 5) -> str:
         chunks = self.retrieve_chunks(query, top_k=top_k)

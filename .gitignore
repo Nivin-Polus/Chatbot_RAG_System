@@ -1,0 +1,143 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Node.js
+chatbot_frontend/node_modules/
+chatbot_frontend/npm-debug.log*
+chatbot_frontend/yarn-debug.log*
+chatbot_frontend/yarn-error.log*
+chatbot_frontend/package-lock.json
+chatbot_frontend/build/
+chatbot_frontend/dist/
+
+# Python Backend
+chatbot_backend/__pycache__/
+chatbot_backend/**/__pycache__/
+chatbot_backend/*.pyc
+chatbot_backend/venv/
+chatbot_backend/.pytest_cache/
+chatbot_backend/htmlcov/
+chatbot_backend/.coverage
+
+# Build outputs
+dist/
+build/
+.next/
+.nuxt/
+out/
+
+# Logs
+*.log
+logs/
+chatbot_backend/*.log
+chatbot_frontend/*.log
+
+# Runtime data
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage reports
+coverage/
+.nyc_output
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Cache directories
+.cache/
+.parcel-cache/
+.eslintcache
+chatbot_backend/.cache/
+chatbot_frontend/.cache/
+
+# Editor directories and files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific paths
+qdrant_storage/
+chatbot_backend/uploads/
+chatbot_backend/files/
+chatbot_backend/models/
+chatbot_backend/qdrant_storage/
+
+# Environment files
+.env*
+!.env.example
+chatbot_backend/.env
+chatbot_backend/.env.local
+chatbot_frontend/.env
+chatbot_frontend/.env.local
+chatbot_frontend/.env.development.local
+chatbot_frontend/.env.production.local
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+chatbot_backend/*.db
+chatbot_backend/*.sqlite
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Temporary files
+tmp/
+temp/
+chatbot_backend/tmp/
+chatbot_frontend/tmp/
+
+# Compressed files
+*.zip
+*.tar.gz
+*.rar
+
+# Model downloads and cache
+chatbot_backend/.cache/
+chatbot_backend/sentence_transformers/
+chatbot_backend/.transformers_cache/
+chatbot_backend/.env

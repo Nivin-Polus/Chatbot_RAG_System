@@ -5,7 +5,7 @@ from typing import List
 from math import ceil
 
 # PDF
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 
 # DOCX
 from docx import Document

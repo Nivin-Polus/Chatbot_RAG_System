@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE_MB: int = Field(25, env="MAX_FILE_SIZE_MB")
     ALLOWED_FILE_TYPES: str = Field("pdf,docx,pptx,xlsx,txt", env="ALLOWED_FILE_TYPES")
 
+    class Config:
+        env_file = ".env"
+
 
 # Instantiate settings
 settings = Settings()
