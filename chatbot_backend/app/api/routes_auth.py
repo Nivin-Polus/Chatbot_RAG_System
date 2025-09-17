@@ -15,7 +15,13 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 fake_users_db = {
     "admin": {
         "username": "admin",
-        "password_hash": get_password_hash("admin123")  # hashed password
+        "password_hash": get_password_hash("admin123"),
+        "role": "admin"
+    },
+    "user": {
+        "username": "user",
+        "password_hash": get_password_hash("user123"),
+        "role": "user"
     }
 }
 
@@ -31,10 +37,10 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user_dict["username"]}, expires_delta=access_token_expires
+        data={"sub": user_dict["username"], "role": user_dict["role"]}, expires_delta=access_token_expires
     )
 
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": access_token, "token_type": "bearer", "role": user_dict["role"]}
 
 
 # Dependency to get current user from JWT
@@ -45,8 +51,9 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         username: str = payload.get("sub")
+        role: str = payload.get("role")
         if username is None:
             raise HTTPException(status_code=401, detail="Invalid token")
-        return username
+        return {"username": username, "role": role}
     except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")

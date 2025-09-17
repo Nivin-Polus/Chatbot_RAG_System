@@ -9,7 +9,7 @@ export default function Login({ onLogin }) {
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
-      const formData = new FormData();
+      const formData = new URLSearchParams();
       formData.append('username', username);
       formData.append('password', password);
       
@@ -17,9 +17,11 @@ export default function Login({ onLogin }) {
         headers: { "Content-Type": "application/x-www-form-urlencoded" }
       });
       localStorage.setItem("access_token", res.data.access_token);
+      localStorage.setItem("user_role", res.data.role);
       onLogin();
     } catch (err) {
-      setError("Invalid credentials");
+      console.error("Login error:", err);
+      setError(err.response?.data?.detail || "Invalid credentials");
     }
   };
 

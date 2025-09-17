@@ -6,6 +6,7 @@ export default function FileUploader() {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [expandedFiles, setExpandedFiles] = useState(new Set());
 
   const loadFiles = async () => {
     try {
@@ -60,6 +61,16 @@ export default function FileUploader() {
     }
   };
 
+  const toggleExpanded = (fileId) => {
+    const newExpanded = new Set(expandedFiles);
+    if (newExpanded.has(fileId)) {
+      newExpanded.delete(fileId);
+    } else {
+      newExpanded.add(fileId);
+    }
+    setExpandedFiles(newExpanded);
+  };
+
   return (
     <div className="file-uploader">
       <h3>File Management</h3>
@@ -92,20 +103,42 @@ export default function FileUploader() {
         {files.length === 0 ? (
           <p>No files uploaded yet.</p>
         ) : (
-          <ul>
+          <div className="files-table">
             {files.map(file => (
-              <li key={file.file_id} className="file-item">
-                <span>{file.file_name}</span>
-                <span className="file-meta">by {file.uploaded_by}</span>
-                <button 
-                  onClick={() => handleDelete(file.file_id)}
-                  className="delete-btn"
-                >
-                  Delete
-                </button>
-              </li>
+              <div key={file.file_id} className="file-row">
+                <div className="file-row-header" onClick={() => toggleExpanded(file.file_id)}>
+                  <div className="file-info">
+                    <span className="expand-icon">
+                      {expandedFiles.has(file.file_id) ? '▼' : '▶'}
+                    </span>
+                    <span className="file-name">{file.file_name}</span>
+                  </div>
+                  <div className="file-actions">
+                    <span className="file-meta">by {file.uploaded_by}</span>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(file.file_id);
+                      }}
+                      className="delete-btn"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+                {expandedFiles.has(file.file_id) && (
+                  <div className="file-row-content">
+                    <div className="file-details">
+                      <p><strong>File ID:</strong> {file.file_id}</p>
+                      <p><strong>Uploaded by:</strong> {file.uploaded_by}</p>
+                      <p><strong>File Name:</strong> {file.file_name}</p>
+                      <p><strong>Status:</strong> <span className="status-active">Active</span></p>
+                    </div>
+                  </div>
+                )}
+              </div>
             ))}
-          </ul>
+          </div>
         )}
       </div>
     </div>

@@ -38,15 +38,33 @@ class VectorStore:
     def _ensure_collection(self):
         if self.client:
             try:
-                self.client.get_collection(self.collection_name)
+                # Try to check if collection exists using collection_exists method
+                if self.client.collection_exists(self.collection_name):
+                    logger.info(f"Qdrant collection '{self.collection_name}' already exists.")
+                    return
             except:
-                self.client.recreate_collection(
+                # If collection_exists method doesn't work, try alternative approach
+                pass
+            
+            try:
+                # Try to create collection - if it exists, this will fail with 409
+                from qdrant_client.http.models import VectorParams
+                self.client.create_collection(
                     collection_name=self.collection_name,
-                    vectors_config={"size": 384, "distance": self.Distance.COSINE}
+                    vectors_config=VectorParams(size=384, distance=self.Distance.COSINE)
                 )
                 logger.info(f"Qdrant collection '{self.collection_name}' created.")
+            except Exception as create_error:
+                if "already exists" in str(create_error):
+                    logger.info(f"Qdrant collection '{self.collection_name}' already exists.")
+                else:
+                    logger.error(f"Failed to create collection: {create_error}")
+                    raise
 
     def add_document(self, doc_text: str, metadata: dict = None):
+        # Ensure collection exists before adding documents
+        self._ensure_collection()
+        
         vector = self.embeddings.encode(doc_text)
         doc_id = str(uuid.uuid4())
         
@@ -77,6 +95,30 @@ class VectorStore:
                 del self.documents[point_id]
                 logger.info(f"Document deleted from memory: {point_id}")
 
+    def delete_documents_by_file_id(self, file_id: str):
+        """Delete all document chunks belonging to a specific file"""
+        if self.client:
+            # Delete all points with matching file_id in payload
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector={
+                    "filter": {
+                        "must": [{"key": "file_id", "match": {"value": file_id}}]
+                    }
+                }
+            )
+            logger.info(f"All chunks for file {file_id} deleted from Qdrant")
+        else:
+            # For fallback storage, delete all documents with matching file_id
+            to_delete = []
+            for doc_id, doc_data in self.documents.items():
+                if doc_data["payload"].get("file_id") == file_id:
+                    to_delete.append(doc_id)
+            for doc_id in to_delete:
+                del self.documents[doc_id]
+            logger.info(f"Deleted {len(to_delete)} chunks for file {file_id} from memory")
+            return len(to_delete)
+
     def search(self, query: str, top_k: int = 5):
         query_vector = self.embeddings.encode(query)
         
@@ -91,17 +133,50 @@ class VectorStore:
         else:
             # Use fallback: simple cosine similarity
             import numpy as np
+            logger.info(f"[SEARCH DEBUG] Total documents in memory: {len(self.documents)}")
+            
+            if not self.documents:
+                logger.warning("[SEARCH DEBUG] No documents found in memory storage")
+                return []
+            
             scores = []
             for doc_id, doc_data in self.documents.items():
-                # Cosine similarity
-                doc_vector = doc_data["vector"]
-                similarity = np.dot(query_vector, doc_vector) / (np.linalg.norm(query_vector) * np.linalg.norm(doc_vector))
-                scores.append({
-                    "payload": doc_data["payload"],
-                    "score": float(similarity),
-                    "id": doc_id
-                })
+                try:
+                    # Cosine similarity
+                    doc_vector = doc_data["vector"]
+                    
+                    # Ensure vectors are numpy arrays
+                    if not isinstance(query_vector, np.ndarray):
+                        query_vector = np.array(query_vector)
+                    if not isinstance(doc_vector, np.ndarray):
+                        doc_vector = np.array(doc_vector)
+                    
+                    # Calculate cosine similarity
+                    dot_product = np.dot(query_vector, doc_vector)
+                    query_norm = np.linalg.norm(query_vector)
+                    doc_norm = np.linalg.norm(doc_vector)
+                    
+                    if query_norm == 0 or doc_norm == 0:
+                        similarity = 0.0
+                    else:
+                        similarity = dot_product / (query_norm * doc_norm)
+                    
+                    scores.append({
+                        "payload": doc_data["payload"],
+                        "score": float(similarity),
+                        "id": doc_id
+                    })
+                except Exception as e:
+                    logger.error(f"[SEARCH DEBUG] Error processing document {doc_id}: {e}")
+                    continue
+            
+            logger.info(f"[SEARCH DEBUG] Calculated {len(scores)} similarity scores")
             
             # Sort by score and return top_k
             scores.sort(key=lambda x: x["score"], reverse=True)
+            
+            if scores:
+                logger.info(f"[SEARCH DEBUG] Top score: {scores[0]['score']:.4f}")
+                logger.info(f"[SEARCH DEBUG] Returning {min(len(scores), top_k)} results")
+            
             return scores[:top_k]
