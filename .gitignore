@@ -141,3 +141,7 @@ chatbot_backend/.cache/
 chatbot_backend/sentence_transformers/
 chatbot_backend/.transformers_cache/
 chatbot_backend/.env
+/chatbot_backend
+chatbot_backend/.env
+chatbot_backend/.env
+chatbot_backend/.env

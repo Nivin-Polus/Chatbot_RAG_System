@@ -1,11 +1,18 @@
 # app/main.py
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Form, Body, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from typing import Optional
 
 from app.config import settings
 from app.api import routes_auth, routes_files, routes_chat
+from app.core.auth import get_token_from_credentials
+
+class TokenRequest(BaseModel):
+    username: str
+    password: str
 
 # Initialize FastAPI
 app = FastAPI(
@@ -45,6 +52,35 @@ async def health_check():
 @app.get("/", tags=["Root"])
 async def root():
     return {"message": "Welcome to the Knowledge Base Chatbot API!"}
+
+@app.post("/auth/token")
+async def login_for_access_token(
+    username: Optional[str] = Form(None),
+    password: Optional[str] = Form(None),
+    json_body: Optional[TokenRequest] = Body(None)
+):
+    # Try to get credentials from either form data or JSON body
+    final_username = username or (json_body.username if json_body else None)
+    final_password = password or (json_body.password if json_body else None)
+
+    if not final_username or not final_password:
+        raise HTTPException(
+            status_code=422,
+            detail="Username and password are required"
+        )
+
+    token = get_token_from_credentials(final_username, final_password)
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    return JSONResponse(content={
+        "access_token": token,
+        "token_type": "bearer"
+    })
 
 # Development server runner
 if __name__ == "__main__":

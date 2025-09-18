@@ -28,3 +28,24 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
+
+def validate_credentials(username: str, password: str) -> bool:
+    """Validate user credentials against configured values"""
+    return (username == settings.API_USERNAME and 
+            verify_password(password, settings.API_PASSWORD_HASH))
+
+def get_token_from_credentials(username: str, password: str) -> Optional[str]:
+    """Generate token if credentials are valid"""
+    try:
+        if not username or not password:
+            return None
+            
+        if validate_credentials(username, password):
+            access_token = create_access_token(
+                data={"sub": username}
+            )
+            return access_token
+        return None
+    except Exception as e:
+        print(f"Authentication error: {str(e)}")
+        return None
