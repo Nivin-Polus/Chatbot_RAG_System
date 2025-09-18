@@ -83,168 +83,198 @@ export default function FileUploader() {
   };
 
   return (
-    <div className="file-uploader-fullwidth">
-      {/* Compact Upload Section */}
-      <div className="upload-section-compact">
-        <div className="upload-row">
-          <div className="upload-dropzone-inline">
-            <div className="upload-content">
-              <span className="upload-icon-small">📤</span>
-              <span className="upload-text">Drop files here or click to browse</span>
-              <input 
-                type="file" 
-                multiple
-                onChange={e => setSelectedFiles(Array.from(e.target.files))} 
-                accept=".pdf,.docx,.pptx,.xlsx,.txt"
-                className="file-input-hidden"
-              />
-            </div>
+    <div className="modern-file-manager">
+      <div className="file-manager-header">
+        <h2>📁 File Management</h2>
+        <p>Upload, organize, and manage your knowledge base documents</p>
+      </div>
+
+      {/* Modern Upload Card */}
+      <div className="upload-card">
+        <div className="upload-card-header">
+          <h3>📤 Upload Documents</h3>
+          <span className="upload-info">Supported: PDF, DOCX, PPTX, XLSX, TXT</span>
+        </div>
+        
+        <div className="upload-card-content">
+          <div className="upload-dropzone-modern">
+            <input 
+              type="file" 
+              multiple
+              onChange={e => setSelectedFiles(Array.from(e.target.files))} 
+              accept=".pdf,.docx,.pptx,.xlsx,.txt"
+              className="file-input-hidden"
+              id="file-upload"
+            />
+            <label htmlFor="file-upload" className="upload-label">
+              <div className="upload-visual">
+                <div className="upload-icon-large">📁</div>
+                <h4>Drop files here or click to browse</h4>
+                <p>Select multiple files to upload to your knowledge base</p>
+              </div>
+            </label>
           </div>
           
           {selectedFiles.length > 0 && (
-            <div className="upload-actions">
-              <span className="selected-count">{selectedFiles.length} files selected</span>
-              <button 
-                onClick={handleUpload} 
-                disabled={loading}
-                className="upload-btn-compact"
-              >
-                {loading ? (
-                  <>
-                    <span className="spinner-small"></span>
-                    Uploading...
-                  </>
-                ) : (
-                  <>
-                    ⬆️ Upload Files
-                  </>
-                )}
-              </button>
+            <div className="selected-files-preview">
+              <h4>📋 Selected Files ({selectedFiles.length})</h4>
+              <div className="selected-files-list">
+                {selectedFiles.map((file, index) => (
+                  <div key={index} className="selected-file-item">
+                    <span className="file-icon">📄</span>
+                    <span className="file-name">{file.name}</span>
+                    <span className="file-size">{(file.size / 1024).toFixed(1)} KB</span>
+                  </div>
+                ))}
+              </div>
+              
+              <div className="upload-actions">
+                <button 
+                  onClick={handleUpload} 
+                  disabled={loading}
+                  className="btn-upload-primary"
+                >
+                  {loading ? (
+                    <>
+                      <span className="btn-spinner"></span>
+                      Uploading Files...
+                    </>
+                  ) : (
+                    <>
+                      <span className="btn-icon">⬆️</span>
+                      Upload {selectedFiles.length} Files
+                    </>
+                  )}
+                </button>
+                
+                <button 
+                  onClick={() => setSelectedFiles([])}
+                  className="btn-clear"
+                >
+                  <span className="btn-icon">🗑️</span>
+                  Clear Selection
+                </button>
+              </div>
             </div>
           )}
           
-          <button onClick={loadFiles} className="refresh-btn-compact">
-            🔄 Refresh
-          </button>
+          {message && (
+            <div className={`upload-alert ${message.includes("failed") ? "alert-error" : "alert-success"}`}>
+              <span className="alert-icon">
+                {message.includes("failed") ? "❌" : "✅"}
+              </span>
+              <span className="alert-message">{message}</span>
+            </div>
+          )}
         </div>
-        
-        {message && (
-          <div className={`message-compact ${message.includes("failed") ? "error" : "success"}`}>
-            <span className="message-icon">
-              {message.includes("failed") ? "❌" : "✅"}
-            </span>
-            {message}
-          </div>
-        )}
       </div>
       
-      {/* Full Width Files Table */}
-      <div className="files-table-container">
-        <div className="files-table-header">
-          <h3>📚 Document Library ({files.length} files)</h3>
+      {/* Modern Files Library */}
+      <div className="files-library-card">
+        <div className="library-header">
+          <div className="library-title">
+            <h3>📚 Document Library</h3>
+            <span className="files-count">{files.length} documents</span>
+          </div>
+          
+          <div className="library-actions">
+            <button onClick={loadFiles} className="btn-refresh">
+              <span className="btn-icon">🔄</span>
+              Refresh
+            </button>
+          </div>
         </div>
         
         {files.length === 0 ? (
-          <div className="empty-state-table">
-            <div className="empty-icon">📭</div>
-            <h3>No documents uploaded yet</h3>
-            <p>Upload your first document to get started with the knowledge base</p>
+          <div className="empty-state-modern">
+            <div className="empty-illustration">📭</div>
+            <h3>No documents in your library</h3>
+            <p>Upload your first document to start building your knowledge base</p>
+            <button 
+              onClick={() => document.getElementById('file-upload').click()}
+              className="btn-get-started"
+            >
+              <span className="btn-icon">📤</span>
+              Upload Your First Document
+            </button>
           </div>
         ) : (
-          <div className="files-table-wrapper">
-            <table className="files-table">
-              <thead>
-                <tr>
-                  <th className="col-icon"></th>
-                  <th className="col-name">Document Name</th>
-                  <th className="col-uploader">Uploaded By</th>
-                  <th className="col-date">Upload Date</th>
-                  <th className="col-status">Status</th>
-                  <th className="col-actions">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {files.map(file => (
-                  <React.Fragment key={file.file_id}>
-                    <tr className="file-row">
-                      <td className="file-icon-cell">
-                        <div className="file-type-icon">📄</div>
-                      </td>
-                      <td className="file-name-cell">
-                        <div className="file-name-wrapper">
-                          <span className="file-name-primary">{file.file_name}</span>
-                          <span className="file-id-secondary">ID: {file.file_id}</span>
-                        </div>
-                      </td>
-                      <td className="file-uploader-cell">{file.uploaded_by}</td>
-                      <td className="file-date-cell">{new Date().toLocaleDateString()}</td>
-                      <td className="file-status-cell">
-                        <span className="status-badge-table">✅ Active</span>
-                      </td>
-                      <td className="file-actions-cell">
-                        <div className="action-buttons">
-                          <button 
-                            onClick={() => toggleExpanded(file.file_id)}
-                            className="btn-view"
-                            title="View details"
-                          >
-                            {expandedFiles.has(file.file_id) ? '👁️ Hide' : '👁️ View'}
-                          </button>
-                          <button 
-                            onClick={() => handleDelete(file.file_id)}
-                            className="btn-delete"
-                            title="Delete file"
-                          >
-                            🗑️ Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                    {expandedFiles.has(file.file_id) && (
-                      <tr className="file-details-row">
-                        <td colSpan="6">
-                          <div className="file-details-expanded">
-                            <div className="details-grid">
-                              <div className="detail-group">
-                                <label>File ID:</label>
-                                <span>{file.file_id}</span>
-                              </div>
-                              <div className="detail-group">
-                                <label>File Name:</label>
-                                <span>{file.file_name}</span>
-                              </div>
-                              <div className="detail-group">
-                                <label>Uploaded By:</label>
-                                <span>{file.uploaded_by}</span>
-                              </div>
-                              <div className="detail-group">
-                                <label>Upload Date:</label>
-                                <span>{new Date().toLocaleDateString()}</span>
-                              </div>
-                              <div className="detail-group">
-                                <label>Status:</label>
-                                <span className="status-active">✅ Active in Knowledge Base</span>
-                              </div>
-                              <div className="detail-group">
-                                <label>Actions:</label>
-                                <div className="detail-actions">
-                                  <button 
-                                    onClick={() => handleDelete(file.file_id)}
-                                    className="btn-delete-detail"
-                                  >
-                                    🗑️ Remove from Knowledge Base
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
+          <div className="files-grid">
+            {files.map(file => (
+              <div key={file.file_id} className="file-card">
+                <div className="file-card-header">
+                  <div className="file-type-badge">📄</div>
+                  <div className="file-actions-menu">
+                    <button 
+                      onClick={() => toggleExpanded(file.file_id)}
+                      className="action-btn-small"
+                      title="View details"
+                    >
+                      {expandedFiles.has(file.file_id) ? '👁️' : '👁️‍🗨️'}
+                    </button>
+                    <button 
+                      onClick={() => handleDelete(file.file_id)}
+                      className="action-btn-small delete"
+                      title="Delete file"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="file-card-content">
+                  <h4 className="file-title">{file.file_name}</h4>
+                  <div className="file-meta">
+                    <span className="meta-item">
+                      <span className="meta-icon">👤</span>
+                      {file.uploaded_by}
+                    </span>
+                    <span className="meta-item">
+                      <span className="meta-icon">📅</span>
+                      {new Date().toLocaleDateString()}
+                    </span>
+                  </div>
+                  
+                  <div className="file-status">
+                    <span className="status-indicator active"></span>
+                    <span className="status-text">Active in Knowledge Base</span>
+                  </div>
+                </div>
+                
+                {expandedFiles.has(file.file_id) && (
+                  <div className="file-card-expanded">
+                    <div className="expanded-content">
+                      <div className="detail-row">
+                        <span className="detail-label">File ID:</span>
+                        <span className="detail-value">{file.file_id}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Full Name:</span>
+                        <span className="detail-value">{file.file_name}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Uploaded By:</span>
+                        <span className="detail-value">{file.uploaded_by}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Upload Date:</span>
+                        <span className="detail-value">{new Date().toLocaleDateString()}</span>
+                      </div>
+                      
+                      <div className="expanded-actions">
+                        <button 
+                          onClick={() => handleDelete(file.file_id)}
+                          className="btn-danger-small"
+                        >
+                          <span className="btn-icon">🗑️</span>
+                          Remove from Knowledge Base
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>
