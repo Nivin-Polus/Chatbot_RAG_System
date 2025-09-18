@@ -18,4 +18,18 @@ api.interceptors.request.use(config => {
   return config;
 });
 
+// Add response interceptor to handle 401 errors
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Token expired or invalid, clear storage and redirect to login
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("user_role");
+      window.location.reload(); // This will trigger the login screen
+    }
+    return Promise.reject(error);
+  }
+);
+
 export default api;
