@@ -8,6 +8,7 @@ export default function AdminSettings() {
     confirmPassword: ""
   });
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [promptStats, setPromptStats] = useState(null);
 
@@ -48,6 +49,114 @@ export default function AdminSettings() {
       setPromptStats(response.data);
     } catch (err) {
       console.log("Prompt stats not available");
+    }
+  };
+
+  const testBackendConnection = async () => {
+    setLoading(true);
+    setMessage('');
+    setError('');
+    
+    try {
+      console.log('Testing backend connection...');
+      const response = await api.get('/health');
+      console.log('Health check response:', response.data);
+      setMessage(`✅ Backend connection successful! Status: ${response.data.status}`);
+    } catch (error) {
+      console.error('Backend connection test failed:', error);
+      const errorMessage = error.message || 'Connection failed';
+      
+      if (error.code === 'ECONNREFUSED') {
+        setError('❌ Backend server is not running on port 8000. Please start the backend server.');
+      } else if (error.response?.status === 404) {
+        setError('❌ Health endpoint not found. Backend may be running on different port.');
+      } else {
+        setError(`❌ Connection failed: ${errorMessage}`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetFiles = async () => {
+    if (!window.confirm('Are you sure you want to reset all files? This will permanently delete all uploaded documents and cannot be undone!')) {
+      return;
+    }
+
+    setLoading(true);
+    setMessage('');
+    setError('');
+
+    try {
+      console.log('Attempting to reset files...');
+      const response = await api.delete('/files/reset-all');
+      console.log('Reset files response:', response.data);
+      setMessage(`Successfully reset files. ${response.data.files_deleted} files deleted.`);
+      // Refresh stats
+      await loadPromptStats();
+    } catch (error) {
+      console.error('Reset files error:', error);
+      const errorMessage = error.response?.data?.detail || error.message || 'Failed to reset files';
+      const statusCode = error.response?.status || 'Unknown';
+      const fullUrl = error.config?.url || 'Unknown URL';
+      
+      setError(`Error ${statusCode}: ${errorMessage}`);
+      setMessage(`Failed to reset files. URL: ${fullUrl}, Status: ${statusCode}`);
+      
+      // Additional debugging info
+      if (error.code === 'ECONNREFUSED') {
+        setError('Connection refused - Backend server may not be running on port 8000');
+      } else if (error.response?.status === 404) {
+        setError('Endpoint not found - Check if backend server is running and endpoint exists');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetEverything = async () => {
+    if (!window.confirm('Are you absolutely sure you want to reset EVERYTHING? This will permanently delete:\n\n• All uploaded files\n• All vector embeddings\n• All activity logs\n• All cache data\n\nThis action CANNOT be undone!')) {
+      return;
+    }
+
+    setLoading(true);
+    setMessage('');
+    setError('');
+
+    try {
+      console.log('Attempting to reset everything...');
+      
+      // Reset files first
+      console.log('Step 1: Resetting files...');
+      const filesResponse = await api.delete('/files/reset-all');
+      console.log('Files reset response:', filesResponse.data);
+      
+      // Then reset everything else
+      console.log('Step 2: Resetting system...');
+      const systemResponse = await api.delete('/activity/reset-all');
+      console.log('System reset response:', systemResponse.data);
+      
+      setMessage(`System reset completed successfully!\n\nFiles deleted: ${filesResponse.data.files_deleted}\nSystem components cleared: ${systemResponse.data.cleared.join(', ')}`);
+      
+      // Refresh stats
+      await loadPromptStats();
+    } catch (error) {
+      console.error('Reset everything error:', error);
+      const errorMessage = error.response?.data?.detail || error.message || 'Failed to reset system';
+      const statusCode = error.response?.status || 'Unknown';
+      const fullUrl = error.config?.url || 'Unknown URL';
+      
+      setError(`Error ${statusCode}: ${errorMessage}`);
+      setMessage(`Failed to reset system. URL: ${fullUrl}, Status: ${statusCode}`);
+      
+      // Additional debugging info
+      if (error.code === 'ECONNREFUSED') {
+        setError('Connection refused - Backend server may not be running on port 8000');
+      } else if (error.response?.status === 404) {
+        setError('Endpoint not found - Check if backend server is running and endpoint exists');
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -160,6 +269,13 @@ export default function AdminSettings() {
                 <span className="alert-message">{message}</span>
               </div>
             )}
+            
+            {error && (
+              <div className="alert alert-error">
+                <span className="alert-icon">❌</span>
+                <span className="alert-message">{error}</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -212,6 +328,10 @@ export default function AdminSettings() {
               <button onClick={loadPromptStats} className="btn-secondary">
                 <span className="btn-icon">📈</span>
                 Load Usage Statistics
+              </button>
+              <button onClick={testBackendConnection} className="btn-secondary" disabled={loading}>
+                <span className="btn-icon">🔗</span>
+                {loading ? "Testing..." : "Test Backend Connection"}
               </button>
             </div>
           </div>
@@ -292,6 +412,56 @@ export default function AdminSettings() {
                 <div className="health-status online"></div>
                 <span className="health-label">Authentication</span>
                 <span className="health-value">Secure</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* System Reset Card */}
+        <div className="settings-card danger-card">
+          <div className="card-header">
+            <div className="card-title">
+              <span className="card-icon">⚠️</span>
+              <h3>System Reset</h3>
+            </div>
+            <span className="card-badge danger">Danger Zone</span>
+          </div>
+          
+          <div className="card-content">
+            <div className="reset-section">
+              <div className="reset-warning">
+                <div className="warning-icon">🚨</div>
+                <div className="warning-content">
+                  <h4>Warning: This will permanently delete data!</h4>
+                  <p>These actions cannot be undone. Use with extreme caution.</p>
+                </div>
+              </div>
+              
+              <div className="reset-actions">
+                <button 
+                  className="btn-danger"
+                  onClick={() => handleResetFiles()}
+                  disabled={loading}
+                >
+                  {loading ? "🔄 Resetting..." : "🗑️ Reset All Files"}
+                </button>
+                
+                <button 
+                  className="btn-danger"
+                  onClick={() => handleResetEverything()}
+                  disabled={loading}
+                >
+                  {loading ? "🔄 Resetting..." : "💥 Reset Everything"}
+                </button>
+              </div>
+              
+              <div className="reset-info">
+                <div className="info-item">
+                  <strong>Reset All Files:</strong> Deletes all uploaded documents and their vector embeddings
+                </div>
+                <div className="info-item">
+                  <strong>Reset Everything:</strong> Clears all data including activities, cache, and vector database
+                </div>
               </div>
             </div>
           </div>

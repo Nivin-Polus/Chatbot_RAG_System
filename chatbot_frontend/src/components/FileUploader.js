@@ -72,6 +72,29 @@ export default function FileUploader() {
     }
   };
 
+  const handleDownload = async (fileId, fileName) => {
+    try {
+      const response = await api.get(`/files/download/${fileId}`, {
+        responseType: 'blob'
+      });
+      
+      // Create blob link to download
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      setMessage("File downloaded successfully");
+    } catch (err) {
+      console.error("Download failed:", err);
+      setMessage("Download failed: " + (err.response?.data?.detail || err.message));
+    }
+  };
+
   const toggleExpanded = (fileId) => {
     const newExpanded = new Set(expandedFiles);
     if (newExpanded.has(fileId)) {
@@ -206,6 +229,13 @@ export default function FileUploader() {
                   <div className="file-type-badge">📄</div>
                   <div className="file-actions-menu">
                     <button 
+                      onClick={() => handleDownload(file.file_id, file.file_name)}
+                      className="action-btn-small download"
+                      title="Download file"
+                    >
+                      📥
+                    </button>
+                    <button 
                       onClick={() => toggleExpanded(file.file_id)}
                       className="action-btn-small"
                       title="View details"
@@ -262,6 +292,13 @@ export default function FileUploader() {
                       </div>
                       
                       <div className="expanded-actions">
+                        <button 
+                          onClick={() => handleDownload(file.file_id, file.file_name)}
+                          className="btn-download-small"
+                        >
+                          <span className="btn-icon">📥</span>
+                          Download Original File
+                        </button>
                         <button 
                           onClick={() => handleDelete(file.file_id)}
                           className="btn-danger-small"

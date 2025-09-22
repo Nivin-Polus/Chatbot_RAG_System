@@ -3,27 +3,21 @@ import requests
 from app.core.vectorstore import VectorStore
 from app.config import settings
 
-SYSTEM_PROMPT = """
-You are the company's HR assistant. Answer employee queries naturally, as if a real HR person is speaking directly to them. Do not mention any documents or sources.  
+# Default system prompt - can be overridden via environment variable or config
+DEFAULT_SYSTEM_PROMPT = """You are a helpful AI assistant for a knowledge base system. Your role is to respond naturally and conversationally based on the provided context from uploaded documents.
 
 Answering Rules:
-- Respond in a **friendly, approachable HR tone**, and politely handle greetings or small talk (e.g., "Hi", "How are you?") before addressing the question.  
-- Provide answers in a **clear, structured, bullet-point or numbered format**, similar to:  
+- **Tone:** Professional, clear, and approachable. Begin with a polite acknowledgment before answering the query.
+- **Clarity:** Keep responses short, precise, and easy to skim. Use bullet points or numbered lists where helpful. Avoid long paragraphs.
+- **Relevance:** Focus strictly on the question asked. Do not add unrelated or extra details.
+- **Out-of-Scope Queries:** If the question is not covered in the knowledge base, respond with:
+  "I don't have that information in the current knowledge base. Please contact the system administrator for further details."
+- **Information Boundaries:** Never guess or provide assumptions. Only use information explicitly available in the knowledge base.
+- **Missing/Unclear Questions:** If a query is unclear, say:
+  "I'm not sure what you mean. Could you clarify or provide more details?"
+- **Context Usage:** Use the provided context from uploaded documents to answer questions accurately.
+- **Goal:** Provide accurate, professional, and helpful responses based on the available knowledge base content."""
 
-  Example:  
-  **Maternity & Paternity Policy Summary**  
-  - **Maternity Leave (Female Employees):** Up to 26 weeks paid for first 2 children; 12 weeks paid for 3+ children. 1 extra month LOP for pregnancy-related sickness (with medical certificate). After miscarriage (12+ weeks): 6 weeks paid. Adoption/surrogacy (child under 3 months): 12 weeks paid.  
-  - **Paternity Leave (Male Employees):** 5 days paid.  
-  - **Notification:** Notify manager & HR 8 weeks before maternity leave or 2 weeks before paternity leave. Email hr@polussolutions.com.  
-  - **Benefits During Leave:** Full salary based on last 3 months’ average. Maternity-related medical insurance applies.  
-  - **Return to Work:** Reinstated in same/similar role with same pay and benefits. Flexible work arrangements may be considered.  
-
-- Include **all relevant details** (leave counts, scope, process, benefits, consequences) without leaving out anything important.  
-- Keep sentences **short, skimmable, and easy to read**. Avoid long paragraphs or repetition.  
-- Highlight that this is a **summarized overview**, so the employee can quickly grasp key points.  
-- Focus strictly on the employee’s question; do not add unrelated info.  
-- If information is missing or unclear, say: "I’m not sure about that, could you clarify or provide more details?"
-"""
 
 
 class RAG:
@@ -32,10 +26,11 @@ class RAG:
 
         # Claude/LLM settings
         self.api_key = settings.CLAUDE_API_KEY
-        self.endpoint = "https://api.anthropic.com/v1/messages"
+        self.endpoint = getattr(settings, "CLAUDE_API_URL", "https://api.anthropic.com/v1/messages")
         self.model = getattr(settings, "CLAUDE_MODEL", "claude-3-haiku-20240307")
         self.max_tokens = getattr(settings, "CLAUDE_MAX_TOKENS", 1000)
         self.temperature = getattr(settings, "CLAUDE_TEMPERATURE", 0.0)
+        self.system_prompt = getattr(settings, "SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
 
     def retrieve_chunks(self, query: str, top_k: int = 5) -> List[str]:
         """Search vector DB and return top matching chunks."""
@@ -73,11 +68,42 @@ class RAG:
         """Main pipeline: retrieve → medium-detailed answer."""
         chunks = self.retrieve_chunks(query, top_k=top_k)
         if not chunks:
-            return "I wasn’t able to retrieve a confident answer, please refine your question."
+            return "I wasn't able to retrieve a confident answer, please refine your question."
 
         # Build medium-length answer
         context = "\n---\n".join(chunks)
-        prompt = f"{SYSTEM_PROMPT}\n\nContext:\n{context}\n\nQuestion: {query}\nAnswer:"
+        prompt = f"{self.system_prompt}\n\nContext:\n{context}\n\nQuestion: {query}\nAnswer:"
+        answer = self.call_ai(prompt)
+
+        return answer
+
+    def answer_with_context(self, query: str, conversation_history: List, top_k: int = 5) -> str:
+        """Main pipeline with conversation context: retrieve → contextual answer."""
+        chunks = self.retrieve_chunks(query, top_k=top_k)
+        if not chunks:
+            return "I wasn't able to retrieve a confident answer, please refine your question."
+
+        # Build conversation context
+        conversation_context = ""
+        if conversation_history:
+            conversation_context = "\n\nPrevious Conversation:\n"
+            for msg in conversation_history[-6:]:  # Last 6 messages for context
+                # Handle both Pydantic objects and dictionaries
+                if hasattr(msg, 'role') and hasattr(msg, 'content'):
+                    # Pydantic object
+                    role = "Human" if msg.role == "user" else "Assistant"
+                    content = msg.content
+                else:
+                    # Dictionary
+                    role = "Human" if msg.get("role") == "user" else "Assistant"
+                    content = msg.get("content", "")
+                
+                conversation_context += f"{role}: {content}\n"
+            conversation_context += "\n"
+
+        # Build contextual answer
+        context = "\n---\n".join(chunks)
+        prompt = f"{self.system_prompt}\n\nContext:\n{context}{conversation_context}\nCurrent Question: {query}\nAnswer:"
         answer = self.call_ai(prompt)
 
         return answer

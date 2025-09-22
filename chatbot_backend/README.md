@@ -9,6 +9,8 @@ A **RAG-based chatbot backend** built with FastAPI that processes documents, sto
 - 📁 **File Management** - Upload, list, and delete documents (PDF, DOCX, PPTX, XLSX, TXT)
 - 🔍 **Vector Search** - Semantic search using Qdrant vector database
 - 🤖 **RAG Pipeline** - Retrieval-Augmented Generation with Claude AI
+- 💬 **Context Management** - Maintains conversation context within sessions
+- 🧠 **Session Tracking** - Unique session IDs for conversation continuity
 - ⚡ **Redis Caching** - Optional caching for frequently asked questions
 - 🛡️ **Security** - Prompt guardrails and input validation
 - 🔧 **Configurable** - Environment-based configuration
@@ -164,23 +166,93 @@ curl -X POST "http://localhost:8000/files/upload" \
 ### 💬 Chat/RAG
 | Method | Endpoint | Description | Headers | Request Body |
 |--------|----------|-------------|---------|--------------|
-| `POST` | `/chat/ask` | Ask question about documents | `Authorization: Bearer <token>` | `{"question": "your question", "top_k": 5}` |
+| `POST` | `/chat/ask` | Ask question about documents | `Authorization: Bearer <token>` | See examples below |
 
-**Example Chat:**
+**Basic Chat Example:**
 ```bash
 curl -X POST "http://localhost:8000/chat/ask" \
   -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"question": "What is the main topic of the uploaded documents?"}'
+  -d '{"question": "What is the main topic of the uploaded documents?", "top_k": 5}'
 ```
+
+**Chat with Context Example:**
+```bash
+curl -X POST "http://localhost:8000/chat/ask" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "Can you explain more about that?",
+    "session_id": "session_123456",
+    "maintain_context": true,
+    "conversation_history": [
+      {"role": "user", "content": "What is the leave policy?", "timestamp": "2025-01-19T10:00:00Z"},
+      {"role": "assistant", "content": "The leave policy includes...", "timestamp": "2025-01-19T10:00:05Z"}
+    ],
+    "top_k": 5
+  }'
+```
+
+**Request Parameters:**
+- `question` (required): The user's question
+- `top_k` (optional): Number of document chunks to retrieve (default: 5)
+- `session_id` (optional): Unique session identifier for context tracking
+- `maintain_context` (optional): Boolean flag to enable context maintenance
+- `conversation_history` (optional): Array of previous messages for context
 
 **Response Format:**
 ```json
 {
-  "summary": "Brief 2-3 bullet point answer",
-  "detailed": "Comprehensive detailed answer with context"
+  "answer": "Contextual answer based on documents and conversation history",
+  "session_id": "session_123456"
 }
 ```
+
+---
+
+## 💬 Context Management
+
+### Session-Based Conversations
+The chatbot now supports maintaining conversation context within sessions:
+
+- **Session IDs**: Each conversation gets a unique session identifier
+- **Context Tracking**: Previous messages are included in AI prompts
+- **Memory Limit**: Last 6 messages are used for context (configurable)
+- **No Persistence**: Context is maintained only during active sessions
+
+### How Context Works
+1. **Frontend** generates unique session ID on chat start
+2. **Each message** includes conversation history in request
+3. **Backend** processes question with previous context
+4. **AI model** receives both current question and conversation history
+5. **Response** maintains conversational flow and references
+
+### Context Request Structure
+```json
+{
+  "question": "Current user question",
+  "session_id": "unique_session_identifier",
+  "maintain_context": true,
+  "conversation_history": [
+    {
+      "role": "user",
+      "content": "Previous user message",
+      "timestamp": "2025-01-19T10:00:00Z"
+    },
+    {
+      "role": "assistant", 
+      "content": "Previous AI response",
+      "timestamp": "2025-01-19T10:00:05Z"
+    }
+  ]
+}
+```
+
+### Benefits
+- **Natural Conversations**: Follow-up questions work properly
+- **Reference Previous**: AI can refer to earlier parts of conversation
+- **Better UX**: Users don't need to repeat context
+- **Session Isolation**: Different sessions don't interfere
 
 ---
 

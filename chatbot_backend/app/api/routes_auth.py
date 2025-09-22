@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import timedelta
+from pydantic import BaseModel
 
 from app.config import settings
 from app.models.user import User
@@ -57,3 +58,44 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         return {"username": username, "role": role}
     except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+# Password change request model
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+# Change password endpoint
+@router.post("/change-password")
+async def change_password(
+    request: PasswordChangeRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Change user password"""
+    # Get current user data
+    user_dict = fake_users_db.get(current_user["username"])
+    if not user_dict:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Verify current password
+    if not verify_password(request.current_password, user_dict["password_hash"]):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    
+    # Validate new password
+    if len(request.new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters long")
+    
+    # Update password
+    new_password_hash = get_password_hash(request.new_password)
+    fake_users_db[current_user["username"]]["password_hash"] = new_password_hash
+    
+    return {"message": "Password changed successfully"}
+
+# Verify token endpoint
+@router.get("/verify")
+async def verify_token(current_user: dict = Depends(get_current_user)):
+    """Verify if the current JWT token is valid"""
+    return {
+        "valid": True,
+        "user": current_user["username"],
+        "role": current_user["role"]
+    }

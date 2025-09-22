@@ -1,13 +1,15 @@
-fastapi==0.68.2
-uvicorn==0.15.0
-pydantic==1.10.13
+fastapi==0.109.0
+uvicorn==0.25.0
+pydantic==2.5.2
 python-dotenv>=1.0.0
 python-multipart>=0.0.6
-qdrant-client==1.1.7
+aiofiles>=24.1.0
+qdrant-client>=1.7.1
 anthropic==0.7.8
 redis==5.0.1
 PyJWT==2.8.0
-passlib[argon2]==1.7.4
+passlib==1.7.4
+argon2-cffi==23.1.0
 python-docx==1.1.0
 pypdf==3.17.4
 openpyxl==3.1.2
@@ -16,3 +18,5 @@ python-pptx>=0.6.21
 requests>=2.31.0
 sentence-transformers>=2.2.2
 numpy>=1.24.0
+sqlalchemy>=2.0.0
+alembic>=1.12.0

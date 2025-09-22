@@ -1,21 +1,39 @@
 # app/api/routes_files.py
 
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response
+from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
 from typing import List
-from uuid import uuid4
 from app.core.vector_singleton import get_vector_store
-from app.core.cache import Cache
-from app.utils.file_parser import parse_file
-from app.models.file import FileMeta
+from app.core.database import get_db
 from app.api.routes_auth import get_current_user
+from app.utils.file_parser import parse_file
+from app.services.file_storage import FileStorageService
+from app.models.file_metadata import FileMetadata
 from app.config import settings
+from app.core.cache import get_cache
+from app.services.activity_tracker import activity_tracker
+from pydantic import BaseModel
 import logging
+from uuid import uuid4
+import os
 
 logger = logging.getLogger("files_logger")
 logging.basicConfig(level=logging.INFO)
 
 router = APIRouter()
-cache = Cache()  # Redis cache utility
+
+# Initialize services
+file_storage_service = FileStorageService()
+
+# Response models
+class FileMeta(BaseModel):
+    file_id: str
+    file_name: str
+    uploaded_by: str
+    upload_timestamp: str = None
+    file_size: int = None
+    processing_status: str = "completed"
 
 # In-memory metadata store for MVP (replace with DB in production)
 file_metadata_db = {}
@@ -26,7 +44,8 @@ file_metadata_db = {}
 @router.post("/upload", response_model=FileMeta)
 async def upload_file(
     uploaded_file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     # Check if user has admin role
     if current_user.get("role") != "admin":
@@ -41,8 +60,11 @@ async def upload_file(
     content = await uploaded_file.read()
     text_chunks = parse_file(uploaded_file.filename, content)
 
-    # Generate unique file ID
-    file_id = str(uuid4())
+    # Save file to disk using FileStorageService
+    # Reset file position for reading again
+    uploaded_file.file.seek(0)
+    file_metadata = file_storage_service.save_file(uploaded_file, current_user["username"], db)
+    file_id = file_metadata.file_id
 
     # Get singleton vector store and store embeddings
     vector_store = get_vector_store()
@@ -59,21 +81,44 @@ async def upload_file(
         vector_store.add_document(chunk, chunk_metadata)
         logger.info(f"[UPLOAD DEBUG] Added chunk {i+1}/{len(text_chunks)} to vector store")
     
+    # Update processing status
+    file_storage_service.update_processing_status(file_id, "completed", len(text_chunks), db)
+    
     # Debug: Check if documents were actually stored
     if vector_store.client is None:
         logger.info(f"[UPLOAD DEBUG] Total documents in fallback storage: {len(vector_store.documents)}")
     else:
         logger.info(f"[UPLOAD DEBUG] Documents stored in Qdrant collection: {vector_store.collection_name}")
 
-    # Store metadata
+    # Store metadata in in-memory store for backward compatibility
     metadata = FileMeta(
         file_id=file_id,
         file_name=uploaded_file.filename,
-        uploaded_by=current_user["username"]
+        uploaded_by=current_user["username"],
+        upload_timestamp=file_metadata.upload_timestamp.isoformat() if file_metadata.upload_timestamp else None,
+        file_size=file_metadata.file_size,
+        processing_status="completed"
     )
     file_metadata_db[file_id] = metadata
 
     logger.info(f"File uploaded: {uploaded_file.filename} by {current_user['username']}")
+
+    # Log activity
+    activity_tracker.log_activity(
+        activity_type="file_upload",
+        user=current_user["username"],
+        details={
+            "file_name": uploaded_file.filename,
+            "file_id": file_id,
+            "file_size": file_metadata.file_size,
+            "file_type": ext,
+            "chunk_count": len(text_chunks)
+        },
+        metadata={
+            "processing_time": "completed",
+            "vector_store_type": "qdrant" if vector_store.client else "in_memory"
+        }
+    )
 
     return metadata
 
@@ -84,30 +129,56 @@ async def upload_file(
 @router.delete("/{file_id}")
 async def delete_file(
     file_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     # Check if user has admin role
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Only admin users can delete files")
+    
+    # Check if file exists in both in-memory store and database
     if file_id not in file_metadata_db:
         raise HTTPException(status_code=404, detail="File not found")
 
-    # Remove all chunks for this file from vector store
-    vector_store = get_vector_store()
-    vector_store.delete_documents_by_file_id(file_id)
+    try:
+        # Remove all chunks for this file from vector store
+        vector_store = get_vector_store()
+        vector_store.delete_documents_by_file_id(file_id)
 
-    # Remove metadata
-    del file_metadata_db[file_id]
+        # Delete file from disk and database using FileStorageService
+        file_deleted = file_storage_service.delete_file(file_id, db)
+        if not file_deleted:
+            logger.warning(f"File {file_id} not found in database but exists in metadata store")
 
-    # Invalidate cache (all cached answers containing this file)
-    # For MVP, we can flush all FAQ cache or implement smarter invalidation later
-    if cache.client:
-        cache.client.flushdb()
-        logger.info(f"Cache invalidated due to deletion of file {file_id}")
+        # Remove metadata from in-memory store
+        del file_metadata_db[file_id]
 
-    logger.info(f"File deleted: {file_id} by {current_user['username']}")
+        # Invalidate cache (all cached answers containing this file)
+        try:
+            cache = get_cache()
+            if cache and hasattr(cache, 'client') and cache.client:
+                cache.client.flushdb()
+                logger.info(f"Cache invalidated due to deletion of file {file_id}")
+        except Exception as cache_error:
+            logger.warning(f"Failed to invalidate cache: {cache_error}")
 
-    return {"detail": f"File {file_id} deleted successfully"}
+        logger.info(f"File deleted: {file_id} by {current_user['username']}")
+        
+        # Log activity
+        activity_tracker.log_activity(
+            activity_type="file_delete",
+            user=current_user["username"],
+            details={
+                "file_id": file_id,
+                "file_name": file_metadata_db.get(file_id, {}).get("file_name", "Unknown")
+            }
+        )
+        
+        return {"detail": f"File {file_id} deleted successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error deleting file {file_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete file: {str(e)}")
 
 
 # ------------------------
@@ -116,6 +187,66 @@ async def delete_file(
 @router.get("/list", response_model=List[FileMeta])
 async def list_files(current_user: dict = Depends(get_current_user)):
     return list(file_metadata_db.values())
+
+
+# ------------------------
+# Download file endpoint
+# ------------------------
+@router.get("/download/{file_id}")
+async def download_file(
+    file_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Download original file by file_id"""
+    # Check permissions - admin can download any file, users can download their own
+    file_path = file_storage_service.get_file_path(file_id, db)
+    
+    if not file_path:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Get file metadata to check permissions
+    file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
+    
+    if not file_metadata:
+        raise HTTPException(status_code=404, detail="File metadata not found")
+    
+    # Check if user has permission to download
+    if current_user.get("role") != "admin" and file_metadata.uploader_id != current_user["username"]:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    # Check if file exists on disk
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    
+    # Return file using FileResponse (now that aiofiles is installed)
+    return FileResponse(
+        path=file_path,
+        filename=file_metadata.file_name,
+        media_type='application/octet-stream'
+    )
+
+
+# ------------------------
+# Get file metadata endpoint
+# ------------------------
+@router.get("/metadata/{file_id}")
+async def get_file_metadata(
+    file_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get file metadata by file_id"""
+    file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
+    
+    if not file_metadata:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Check permissions
+    if current_user.get("role") != "admin" and file_metadata.uploader_id != current_user["username"]:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    return file_metadata.to_dict()
 
 
 # ------------------------
@@ -152,3 +283,76 @@ async def get_vector_stats(current_user: dict = Depends(get_current_user)):
             }
     except Exception as e:
         return {"error": str(e), "vector_db_type": "unknown"}
+
+
+# ------------------------
+# Reset all files (admin only)
+# ------------------------
+@router.delete("/reset-all")
+async def reset_all_files(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Reset all files - delete all uploaded files and their data (admin only)"""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only admin users can reset files")
+    
+    try:
+        import shutil
+        import os
+        from pathlib import Path
+        
+        # Get all files from database
+        all_files = db.query(FileMetadata).all()
+        deleted_count = 0
+        
+        # Delete each file from disk and database
+        for file_metadata in all_files:
+            try:
+                # Delete file from disk
+                if os.path.exists(file_metadata.file_path):
+                    os.remove(file_metadata.file_path)
+                    logger.info(f"Deleted file from disk: {file_metadata.file_path}")
+                
+                # Delete from database
+                db.delete(file_metadata)
+                deleted_count += 1
+                
+            except Exception as e:
+                logger.warning(f"Failed to delete file {file_metadata.file_id}: {e}")
+        
+        # Clear in-memory metadata store
+        file_metadata_db.clear()
+        
+        # Remove empty user directories
+        upload_dir = Path("uploads")
+        if upload_dir.exists():
+            for user_dir in upload_dir.iterdir():
+                if user_dir.is_dir() and not any(user_dir.iterdir()):
+                    user_dir.rmdir()
+                    logger.info(f"Removed empty directory: {user_dir}")
+        
+        db.commit()
+        
+        # Log the reset activity
+        activity_tracker.log_activity(
+            activity_type="system_reset",
+            user=current_user["username"],
+            details={
+                "files_deleted": deleted_count,
+                "reset_type": "files_only"
+            }
+        )
+        
+        logger.info(f"Reset completed: {deleted_count} files deleted by {current_user['username']}")
+        
+        return {
+            "message": f"Successfully reset all files",
+            "files_deleted": deleted_count,
+            "reset_by": current_user["username"]
+        }
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to reset files: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to reset files: {str(e)}")

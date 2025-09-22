@@ -30,3 +30,10 @@ class Cache:
     def set(self, key: str, value: str, ttl: int = 60*60*24):
         if self.client:
             self.client.set(key, value, ex=ttl)
+
+# Global cache instance
+cache = Cache()
+
+def get_cache():
+    """Get the global cache instance"""
+    return cache

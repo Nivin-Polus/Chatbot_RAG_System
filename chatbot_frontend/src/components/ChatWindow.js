@@ -7,6 +7,7 @@ export default function ChatWindow() {
   const [loading, setLoading] = useState(false);
   const [typingText, setTypingText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [sessionId] = useState(() => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
   const messagesEndRef = useRef(null);
   const typingIntervalRef = useRef(null);
 
@@ -41,28 +42,75 @@ export default function ChatWindow() {
   const sendQuestion = async () => {
     if (!question.trim() || loading) return;
     
-    const userMessage = { user: true, text: question };
+    const userMessage = { user: true, text: question, timestamp: new Date().toISOString() };
+    const currentQuestion = question;
+    
+    // Prepare conversation context BEFORE updating state (last 10 messages for context)
+    const rawHistory = messages.slice(-10).map(msg => ({
+      role: msg.user ? "user" : "assistant",
+      content: msg.text,
+      timestamp: msg.timestamp
+    }));
+    
+    // Add current question to history
+    rawHistory.push({
+      role: "user",
+      content: currentQuestion,
+      timestamp: userMessage.timestamp
+    });
+    
+    // Clean and validate the conversation history
+    const conversationHistory = validateAndCleanContext(rawHistory);
+    
+    // Now update the UI
     setMessages(prev => [...prev, userMessage]);
+    setQuestion("");
     setLoading(true);
     
     try {
-      const res = await api.post("/chat/ask", { question });
-      const responseText = res.data.answer; // Backend now returns {answer: "text"}
+      // Debug: Log the context being sent
+      console.log("=== CONTEXT DEBUG ===");
+      console.log("Session ID:", sessionId);
+      console.log("Current Question:", currentQuestion);
+      console.log("Conversation History Length:", conversationHistory.length);
+      console.log("Full Conversation History:", conversationHistory);
+      console.log("===================");
+      
+      const payload = {
+        question: currentQuestion,
+        session_id: sessionId,
+        conversation_history: conversationHistory,
+        maintain_context: true,
+        context_length: conversationHistory.length
+      };
+      
+      console.log("Full payload being sent:", payload);
+      
+      const res = await api.post("/chat/ask", payload);
+      
+      console.log("Backend response:", res.data);
+      
+      const responseText = res.data.answer || res.data.response || res.data;
       
       // Start typing animation
       typeMessage(responseText, () => {
         setMessages(prev => [...prev, { 
           user: false, 
           text: responseText,
-          formatted: true
+          formatted: true,
+          timestamp: new Date().toISOString()
         }]);
       });
     } catch (err) {
       const errorMsg = err.response?.data?.detail || "Failed to get response";
-      setMessages(prev => [...prev, { user: false, text: errorMsg, error: true }]);
+      setMessages(prev => [...prev, { 
+        user: false, 
+        text: errorMsg, 
+        error: true,
+        timestamp: new Date().toISOString()
+      }]);
     }
     
-    setQuestion("");
     setLoading(false);
   };
 
@@ -73,9 +121,69 @@ export default function ChatWindow() {
     }
   };
 
+  const startNewChat = () => {
+    setMessages([]);
+    setQuestion("");
+    setTypingText("");
+    setIsTyping(false);
+    if (typingIntervalRef.current) {
+      clearInterval(typingIntervalRef.current);
+    }
+  };
+
+  const deleteMessage = (indexToDelete) => {
+    setMessages(prev => prev.filter((_, index) => index !== indexToDelete));
+  };
+
+  const deleteFromIndex = (indexToDelete) => {
+    setMessages(prev => prev.slice(0, indexToDelete));
+  };
+
+  const validateAndCleanContext = (history) => {
+    return history
+      .filter(msg => msg.content && msg.content.trim() && msg.role)
+      .map(msg => ({
+        role: msg.role === "user" ? "user" : "assistant",
+        content: msg.content.trim(),
+        timestamp: msg.timestamp || new Date().toISOString()
+      }));
+  };
+
   return (
     <div className="chat-window">
-      <h3>Chat with your Knowledge Base</h3>
+      <div className="chat-header">
+        <div className="chat-title">
+          <h3>💬 Chat with your Knowledge Base</h3>
+          {messages.length > 0 && (
+            <span className="context-indicator">
+              {messages.length} messages in context
+            </span>
+          )}
+        </div>
+        <div className="chat-actions">
+          {messages.length > 0 && (
+            <>
+              <button 
+                onClick={() => {
+                  console.log("Current messages state:", messages);
+                  console.log("Session ID:", sessionId);
+                }}
+                className="debug-btn"
+                title="Debug current state"
+              >
+                🐛 Debug
+              </button>
+              <button 
+                onClick={startNewChat} 
+                className="new-chat-btn"
+                title="Start a new conversation"
+              >
+                🔄 New Chat
+              </button>
+            </>
+          )}
+        </div>
+      </div>
       <div className="messages">
         {messages.length === 0 && (
           <div className="welcome-message">
@@ -96,6 +204,22 @@ export default function ChatWindow() {
               ) : (
                 m.text
               )}
+            </div>
+            <div className="message-actions">
+              <button 
+                onClick={() => deleteMessage(i)}
+                className="delete-message-btn"
+                title="Delete this message"
+              >
+                🗑️
+              </button>
+              <button 
+                onClick={() => deleteFromIndex(i)}
+                className="delete-from-btn"
+                title="Delete from here onwards"
+              >
+                ✂️
+              </button>
             </div>
           </div>
         ))}

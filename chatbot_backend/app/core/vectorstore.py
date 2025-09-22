@@ -98,14 +98,18 @@ class VectorStore:
     def delete_documents_by_file_id(self, file_id: str):
         """Delete all document chunks belonging to a specific file"""
         if self.client:
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
             # Delete all points with matching file_id in payload
             self.client.delete(
                 collection_name=self.collection_name,
-                points_selector={
-                    "filter": {
-                        "must": [{"key": "file_id", "match": {"value": file_id}}]
-                    }
-                }
+                points_selector=Filter(
+                    must=[
+                        FieldCondition(
+                            key="file_id",
+                            match=MatchValue(value=file_id)
+                        )
+                    ]
+                )
             )
             logger.info(f"All chunks for file {file_id} deleted from Qdrant")
         else:

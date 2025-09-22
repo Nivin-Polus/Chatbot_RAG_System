@@ -5,10 +5,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
-
+from app.api import routes_auth, routes_files, routes_chat, routes_health, routes_activity
+from app.core.database import init_database
 from app.config import settings
-from app.api import routes_auth, routes_files, routes_chat
 from app.core.auth import get_token_from_credentials
+import logging
 
 class TokenRequest(BaseModel):
     username: str
@@ -21,19 +22,35 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# CORS (allow frontend integration)
+# CORS (configurable for production)
+origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",")]
+methods = [method.strip() for method in settings.CORS_METHODS.split(",")]
+headers = [header.strip() for header in settings.CORS_HEADERS.split(",")]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # change to specific frontend URL in production
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=methods,
+    allow_headers=headers,
 )
 
 # Include routers
 app.include_router(routes_auth.router, prefix="/auth", tags=["Authentication"])
 app.include_router(routes_files.router, prefix="/files", tags=["Files"])
 app.include_router(routes_chat.router, prefix="/chat", tags=["Chat"])
+app.include_router(routes_health.router, prefix="/system", tags=["Health & Monitoring"])
+app.include_router(routes_activity.router, prefix="/activity", tags=["Activity Tracking"])
+
+# Initialize database on startup
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database and other startup tasks"""
+    try:
+        init_database()
+        logging.info("Database initialized successfully")
+    except Exception as e:
+        logging.error(f"Failed to initialize database: {str(e)}")
 
 # Global exception handler
 @app.exception_handler(Exception)
