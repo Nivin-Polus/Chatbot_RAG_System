@@ -2,7 +2,12 @@
 
 import os
 from dotenv import load_dotenv
-from pydantic import BaseSettings, Field
+try:
+    from pydantic_settings import BaseSettings
+    from pydantic import Field
+except ImportError:
+    # Fallback for older pydantic versions
+    from pydantic import BaseSettings, Field
 
 # Load .env file
 load_dotenv()
@@ -10,12 +15,25 @@ load_dotenv()
 
 class Settings(BaseSettings):
     # Claude API
-    CLAUDE_API_KEY: str = Field(..., env="CLAUDE_API_KEY")
+    CLAUDE_API_KEY: str = Field(default="", env="CLAUDE_API_KEY")
     CLAUDE_API_URL: str = Field("https://api.anthropic.com/v1/messages", env="CLAUDE_API_URL")
     CLAUDE_MODEL: str = Field("claude-3-haiku-20240307", env="CLAUDE_MODEL")
     CLAUDE_MAX_TOKENS: int = Field(1000, env="CLAUDE_MAX_TOKENS")
     CLAUDE_TEMPERATURE: float = Field(0.0, env="CLAUDE_TEMPERATURE")
     SYSTEM_PROMPT: str = Field("", env="SYSTEM_PROMPT")  # Empty means use default
+    
+    # Server Configuration (from your .env)
+    SERVER_HOST: str = Field("0.0.0.0", env="SERVER_HOST")
+    SERVER_PORT: int = Field(8000, env="SERVER_PORT")
+    
+    # Frontend Configuration (from your .env)
+    FRONTEND_HOST: str = Field("localhost", env="FRONTEND_HOST")
+    FRONTEND_PORT: int = Field(3000, env="FRONTEND_PORT")
+    
+    # Database Configuration (from your .env)
+    DATABASE_URL: str = Field("sqlite:///./chatbot.db", env="DATABASE_URL")
+    DATABASE_HOST: str = Field("localhost", env="DATABASE_HOST")
+    DATABASE_PORT: int = Field(5432, env="DATABASE_PORT")
     
     # Vector DB (Qdrant) - with fallback support
     VECTOR_DB_URL: str = Field("http://localhost:6333", env="VECTOR_DB_URL")
@@ -29,7 +47,7 @@ class Settings(BaseSettings):
     REDIS_TIMEOUT: int = Field(5, env="REDIS_TIMEOUT")  # Connection timeout in seconds
     
     # JWT Auth
-    SECRET_KEY: str = Field(..., env="SECRET_KEY")
+    SECRET_KEY: str = Field(default="", env="SECRET_KEY")
     ALGORITHM: str = Field("HS256", env="ALGORITHM")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(30, env="ACCESS_TOKEN_EXPIRE_MINUTES")
     
@@ -41,9 +59,9 @@ class Settings(BaseSettings):
     ALLOWED_FILE_TYPES: str = Field("pdf,docx,pptx,xlsx,txt", env="ALLOWED_FILE_TYPES")
     UPLOAD_DIR: str = Field("uploads", env="UPLOAD_DIR")
     
-    # Server Settings
-    HOST: str = Field("0.0.0.0", env="HOST")  # Bind to all interfaces
-    PORT: int = Field(8000, env="PORT")
+    # Server Settings (using SERVER_HOST and SERVER_PORT from .env)
+    HOST: str = Field("0.0.0.0", env="HOST")  # Fallback if HOST is used
+    PORT: int = Field(8000, env="PORT")  # Fallback if PORT is used
     DEBUG: bool = Field(False, env="DEBUG")
     RELOAD: bool = Field(False, env="RELOAD")  # Auto-reload in production
     
@@ -62,6 +80,17 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        extra = "ignore"  # Ignore extra fields in .env file
+        
+    @property
+    def effective_host(self) -> str:
+        """Get the effective host (prefer SERVER_HOST over HOST)"""
+        return self.SERVER_HOST or self.HOST
+        
+    @property
+    def effective_port(self) -> int:
+        """Get the effective port (prefer SERVER_PORT over PORT)"""
+        return self.SERVER_PORT or self.PORT
 
 
 # Instantiate settings

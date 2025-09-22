@@ -89,9 +89,10 @@ export default function AdminSettings() {
 
     try {
       console.log('Attempting to reset files...');
-      const response = await api.delete('/files/reset-all');
+      // Use the working activity endpoint as workaround
+      const response = await api.delete('/activity/reset-files');
       console.log('Reset files response:', response.data);
-      setMessage(`Successfully reset files. ${response.data.files_deleted} files deleted.`);
+      setMessage(`Successfully reset files. ${response.data.files_deleted} files deleted, ${response.data.vectors_cleaned} vectors cleaned.`);
       // Refresh stats
       await loadPromptStats();
     } catch (error) {
@@ -126,9 +127,9 @@ export default function AdminSettings() {
     try {
       console.log('Attempting to reset everything...');
       
-      // Reset files first
+      // Reset files first using working endpoint
       console.log('Step 1: Resetting files...');
-      const filesResponse = await api.delete('/files/reset-all');
+      const filesResponse = await api.delete('/activity/reset-files');
       console.log('Files reset response:', filesResponse.data);
       
       // Then reset everything else
@@ -136,7 +137,7 @@ export default function AdminSettings() {
       const systemResponse = await api.delete('/activity/reset-all');
       console.log('System reset response:', systemResponse.data);
       
-      setMessage(`System reset completed successfully!\n\nFiles deleted: ${filesResponse.data.files_deleted}\nSystem components cleared: ${systemResponse.data.cleared.join(', ')}`);
+      setMessage(`System reset completed successfully!\n\nFiles deleted: ${filesResponse.data.files_deleted}\nVectors cleaned: ${filesResponse.data.vectors_cleaned}\nSystem components cleared: ${systemResponse.data.cleared.join(', ')}`);
       
       // Refresh stats
       await loadPromptStats();

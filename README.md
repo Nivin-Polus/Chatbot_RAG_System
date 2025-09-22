@@ -6,47 +6,62 @@ A **production-ready Retrieval-Augmented Generation (RAG) chatbot system** with 
 
 This enterprise-grade chatbot system enables organizations to create intelligent knowledge bases from their documents. Users can upload various document types and engage in natural, contextual conversations about the content. The system maintains conversation history, supports role-based access, and provides a beautiful, modern interface.
 
-## ✨ **Complete Feature Set**
+## 🎯 Features
 
-### 🧠 **Advanced AI & Context Management**
-- **Contextual Conversations** - Maintains full conversation history within sessions
-- **Session Management** - Unique session IDs for conversation continuity  
-- **Follow-up Questions** - Natural conversation flow with reference to previous messages
-- **Message Management** - Delete individual messages or conversation segments
-- **Context Indicators** - Visual feedback showing conversation state
-- **Smart Context Limits** - Uses last 6-10 messages for optimal performance
+### 🔐 **Authentication & Authorization**
+- JWT-based authentication with role-based access control
+- Admin users: Full access (file management + chat)
+- Regular users: Chat-only access
+- Secure password hashing with Argon2
+- **Test Credentials**: `admin/admin123` (admin), `user/user123` (user)
 
-### 📁 **Document Management System**
-- **Multi-format Support** - PDF, DOCX, PPTX, XLSX, TXT files
-- **Drag & Drop Upload** - Modern file upload interface
-- **File Cards Display** - Beautiful grid layout with file metadata
-- **Bulk Operations** - Upload multiple files simultaneously
-- **File Download** - Download original files from the knowledge base
-- **File Deletion** - Remove files and associated vector embeddings
-- **Storage Analytics** - Track file sizes and document counts
+### 📁 **Document Management**
+- Multi-format support: PDF, DOCX, PPTX, XLSX, TXT
+- Drag-and-drop file upload interface with modern file cards
+- Automatic text extraction and chunking
+- File metadata tracking with organized storage structure
+- Admin-only file upload/delete permissions
+- **Database-Optional**: Works with JSON file storage or SQLite
 
-### 📋 **Activity Tracking System**
-- **Real-time Activity Feed** - Track all user interactions and system events
-- **Local Storage** - All activities stored locally (no external database required)
-- **Activity Types** - File uploads, chat queries, session starts, file deletions
-- **Statistics Dashboard** - Total files uploaded, chat sessions, queries count
-- **Filter & Search** - Filter activities by type, user, or time period
-- **Automatic Refresh** - Real-time updates every 30 seconds
-- **Historical Data** - Keep activity history with automatic cleanup
+### 🧠 **Advanced RAG Pipeline**
+- Vector embeddings using Sentence Transformers (all-MiniLM-L6-v2)
+- Qdrant vector database with in-memory fallback
+- Claude AI integration (Haiku model) for natural language responses
+- Context-aware conversations with last 6-10 message history
+- Intelligent document retrieval and ranking
+- **Vector Store Singleton**: Ensures consistent document visibility
 
-### 🔐 **Role-Based Security**
-- **Admin Role** - Full system access (upload, delete, chat, settings)
-- **User Role** - Chat-only access with document queries
-- **JWT Authentication** - Secure token-based access control
-- **Session Management** - Automatic token refresh and expiration
-- **Input Validation** - Prompt guardrails and security filters
+### 💬 **Chat Interface**
+- Real-time typing animations (30ms character intervals)
+- Conversation context maintenance with session tracking
+- Session-based chat history with unique session IDs
+- Message management (delete individual messages or segments)
+- Auto-scrolling and responsive design
+- **Modern Tabbed Interface**: File Management, Chat, Settings
+
+### 📊 **Activity Monitoring & Analytics**
+- Real-time activity feed with 30-second auto-refresh
+- Activity filtering by type (uploads, chats, deletions, system events)
+- Usage statistics and comprehensive analytics
+- System health monitoring with service status checks
+- Admin dashboard with stats cards and quick actions
+- **JSON-Based Storage**: Persistent activity logs in `/activity_logs`
 
 ### 🎨 **Modern UI/UX Design**
-- **Responsive Design** - Works perfectly on desktop and mobile
-- **Real-time Typing Effects** - Animated response display
-- **Glassmorphism Effects** - Modern visual design with backdrop blur
-- **Gradient Themes** - Professional color schemes
-- **Hover Animations** - Interactive elements with smooth transitions
+- **Glassmorphism Effects**: Backdrop blur, gradient themes, modern shadows
+- **Purple-Blue Gradient Scheme**: Professional color palette with white text
+- **Responsive Design**: Works on desktop, tablet, and mobile devices
+- **Smooth Animations**: Hover effects, transitions, and loading states
+- **CoreUI-Inspired**: Modern admin dashboard with sidebar navigation
+- **File Cards Grid**: Beautiful file management interface
+
+### 🔧 **System Architecture & Flexibility**
+- **Database-Optional Architecture**: Runs without SQLAlchemy installation
+- **Automatic Fallbacks**: In-memory vector storage, JSON file persistence
+- **Flexible Configuration**: Supports multiple environment variable formats
+- **Health Monitoring**: Built-in diagnostics for all system components
+- **Progressive Enhancement**: Start minimal, add features as needed
+- **Production-Ready**: Comprehensive error handling and logging
 - **Loading States** - Clear feedback during operations
 
 ---
@@ -275,11 +290,19 @@ chatbot_rag_system/
 
 ## 🛠️ Setup Instructions
 
-### Prerequisites
-- **Node.js 16+** (for frontend)
-- **Python 3.10** (for backend)
+### 📋 Prerequisites
+
+### **Minimal Setup (Recommended)**
+- **Python 3.8+**
+- **Node.js 16+** and **npm**
+- **Claude API Key** (from Anthropic)
+
+### **Full Setup (Optional)**
+- **Python 3.8+**
+- **Node.js 16+** and **npm**
 - **Docker** (for Qdrant vector database)
 - **Claude API Key** (from Anthropic)
+- **SQLAlchemy** (for database features)
 
 ### 1. Clone Repository
 ```bash
@@ -288,6 +311,8 @@ cd chatbot_rag_system
 ```
 
 ### 2. Backend Setup
+
+#### **Option A: Full Setup (with Database)**
 ```bash
 cd chatbot_backend
 
@@ -297,13 +322,76 @@ source venv/bin/activate  # Linux/macOS
 # or
 venv\Scripts\activate     # Windows
 
-# Install dependencies
+# Install all dependencies (includes SQLAlchemy, Qdrant, Redis)
 pip install -r requirements.txt
 
 # Create .env file
 cp .env.example .env
 # Edit .env with your Claude API key and other settings
 ```
+
+#### **Option B: Minimal Setup (No Database Required) - RECOMMENDED**
+```bash
+cd chatbot_backend
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # Linux/macOS
+# or
+venv\Scripts\activate     # Windows
+
+# Install minimal dependencies (core packages only)
+pip install -r requirements-minimal.txt
+
+# Create .env file
+cp .env.example .env
+# Edit .env with your Claude API key and other settings
+```
+
+**🚀 Quick Start:** Use Option B for immediate setup - no database installation required!
+
+#### **📊 Storage Modes Explained**
+
+| Feature | With Database (Option A) | Without Database (Option B) |
+|---------|-------------------------|------------------------------|
+| **File Metadata** | SQLite database | JSON files in `/storage` |
+| **Chat History** | SQLite database | JSON files in `/storage` |
+| **Vector Storage** | Qdrant (if available) | In-memory fallback |
+| **Persistence** | Full persistence | Files persist, vectors in-memory |
+| **Performance** | Better for production | Good for development/testing |
+| **Setup Complexity** | More dependencies | Minimal dependencies |
+| **Data Recovery** | Full database backup | JSON file backup |
+
+**Recommendation:**
+- **Development/Testing**: Use Option B (minimal setup)
+- **Production**: Use Option A (full database)
+
+#### **🔐 Critical Security Setup**
+
+**Generate a Secure SECRET_KEY:**
+```bash
+# Method 1: Using Python
+python -c "import secrets; print('SECRET_KEY=' + secrets.token_urlsafe(32))"
+
+# Method 2: Use provided script (in backend folder)
+cd chatbot_backend
+python generate_secret.py
+```
+
+**Update your .env file with:**
+```env
+# Replace this with your generated key
+SECRET_KEY=your_generated_secure_key_here
+
+# Add your Claude API key
+CLAUDE_API_KEY=your_claude_api_key_here
+```
+
+**⚠️ Important Security Notes:**
+- Never use the default SECRET_KEY in production
+- Keep your .env file secret (it's already in .gitignore)
+- Generate a new key for each environment (dev/staging/prod)
+- Use at least 32 characters for the secret key
 
 ### 3. Frontend Setup
 ```bash
@@ -327,6 +415,77 @@ docker run -p 6333:6333 -v $(pwd)/qdrant_storage:/qdrant/storage qdrant/qdrant
 cd chatbot_backend
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+---
+
+## 🔧 **Post-Setup Steps & Troubleshooting**
+
+### **After Setting Up .env File:**
+
+1. **Start Backend Server** (New Improved Startup!)
+   ```bash
+   cd chatbot_backend
+   python start_server.py
+   ```
+   
+   **Expected Output:**
+   ```
+   INFO:__main__:🤖 RAG Chatbot Backend Startup
+   INFO:__main__:✅ All required packages are installed
+   INFO:__main__:✅ All environment variables are set
+   INFO:app.core.database:✅ Database initialized successfully (in-memory mode)
+   INFO:__main__:🚀 Starting RAG Chatbot Backend...
+   INFO:__main__:📍 Server will be available at: http://0.0.0.0:8000
+   ```
+
+2. **Start Frontend Server**
+   ```bash
+   cd chatbot_frontend
+   npm start
+   ```
+
+3. **Test Authentication**
+   - Login with: `admin/admin123` (full access) or `user/user123` (chat only)
+   - System automatically detects missing dependencies and uses fallback storage
+
+### **Common Issues & Solutions:**
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| `Missing dependency: SQLAlchemy` | Database packages not installed | Use `pip install -r requirements-minimal.txt` |
+| `401 Unauthorized` | Invalid/missing SECRET_KEY | Generate new SECRET_KEY, restart server |
+| `404 Not Found` | Server not running | Start backend server first |
+| `CORS errors` | Frontend/backend mismatch | Check both servers are running |
+| `Reset functionality fails` | Outdated server | Restart backend to load latest routes |
+| `Environment variables not found` | .env file not loaded | Ensure .env file is in chatbot_backend folder |
+
+### **🆕 New Features & Improvements:**
+
+#### **Database-Optional Architecture**
+- **Automatic Fallback**: System detects missing SQLAlchemy and uses JSON file storage
+- **In-Memory Vector Storage**: Works without Qdrant installation
+- **Persistent File Metadata**: Stored in `/storage` directory as JSON files
+- **Zero Database Setup**: Run immediately with minimal dependencies
+
+#### **Enhanced Startup Process**
+- **Smart Environment Detection**: Automatically loads .env file and validates settings
+- **Improved Error Messages**: Clear feedback on missing dependencies or configuration
+- **Flexible Host/Port Configuration**: Supports both SERVER_HOST/SERVER_PORT and HOST/PORT
+- **Health Monitoring**: Built-in system health checks and diagnostics
+
+#### **Production-Ready Features**
+- **Role-Based Access Control**: Admin (full access) vs User (chat only) interfaces
+- **Modern UI Design**: Glassmorphism effects, gradient themes, responsive design
+- **Conversation Context**: Maintains chat history across sessions
+- **File Management**: Drag-drop upload, metadata tracking, organized storage
+- **Activity Tracking**: Real-time monitoring with filtering and statistics
+- **Reset Functionality**: Complete system reset with vector database cleanup
+
+#### **Flexible Dependency Management**
+- **`requirements.txt`**: Full setup with all optional dependencies (SQLAlchemy, Qdrant, Redis)
+- **`requirements-minimal.txt`**: Minimal setup with only core dependencies (FastAPI, Claude AI, etc.)
+- **Automatic Detection**: System automatically detects missing packages and provides fallbacks
+- **Progressive Enhancement**: Start minimal, add features as needed
 
 ---
 

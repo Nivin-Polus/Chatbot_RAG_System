@@ -5,11 +5,10 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
 from app.core.vector_singleton import get_vector_store
-from app.core.database import get_db
+from app.core.database import get_db, DATABASE_AVAILABLE, InMemoryFileMetadata
 from app.api.routes_auth import get_current_user
 from app.utils.file_parser import parse_file
 from app.services.file_storage import FileStorageService
-from app.models.file_metadata import FileMetadata
 from app.config import settings
 from app.core.cache import get_cache
 from app.services.activity_tracker import activity_tracker
@@ -185,8 +184,37 @@ async def delete_file(
 # List files endpoint
 # ------------------------
 @router.get("/list", response_model=List[FileMeta])
-async def list_files(current_user: dict = Depends(get_current_user)):
-    return list(file_metadata_db.values())
+async def list_files(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        if DATABASE_AVAILABLE and db:
+            # Get files from database
+            from app.models.file_metadata import FileMetadata
+            files = db.query(FileMetadata).all()
+            
+            # Convert to response format and update in-memory store
+            file_list = []
+            for file_metadata in files:
+                file_dict = file_metadata.to_dict()
+                metadata = FileMeta(
+                    file_id=file_dict["file_id"],
+                    file_name=file_dict["file_name"],
+                    uploaded_by=file_dict["uploader_id"],
+                    upload_timestamp=file_dict["upload_timestamp"],
+                    file_size=file_dict["file_size"],
+                    processing_status=file_dict["processing_status"]
+                )
+                file_list.append(metadata)
+                # Keep in-memory store in sync
+                file_metadata_db[file_dict["file_id"]] = metadata
+            
+            return file_list
+        else:
+            # Use in-memory storage only
+            return list(file_metadata_db.values())
+    except Exception as e:
+        logger.error(f"Failed to list files: {e}")
+        # Fallback to in-memory storage
+        return list(file_metadata_db.values())
 
 
 # ------------------------
@@ -199,32 +227,71 @@ async def download_file(
     db: Session = Depends(get_db)
 ):
     """Download original file by file_id"""
-    # Check permissions - admin can download any file, users can download their own
-    file_path = file_storage_service.get_file_path(file_id, db)
-    
-    if not file_path:
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    # Get file metadata to check permissions
-    file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
-    
-    if not file_metadata:
-        raise HTTPException(status_code=404, detail="File metadata not found")
-    
-    # Check if user has permission to download
-    if current_user.get("role") != "admin" and file_metadata.uploader_id != current_user["username"]:
-        raise HTTPException(status_code=403, detail="Permission denied")
-    
-    # Check if file exists on disk
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found on disk")
-    
-    # Return file using FileResponse (now that aiofiles is installed)
-    return FileResponse(
-        path=file_path,
-        filename=file_metadata.file_name,
-        media_type='application/octet-stream'
-    )
+    try:
+        # Check permissions - admin can download any file, users can download their own
+        file_path = file_storage_service.get_file_path(file_id, db)
+        
+        if not file_path:
+            # Try in-memory metadata store as fallback
+            if file_id in file_metadata_db:
+                metadata = file_metadata_db[file_id]
+                # Check permissions
+                if current_user.get("role") != "admin" and metadata.uploaded_by != current_user["username"]:
+                    raise HTTPException(status_code=403, detail="Permission denied")
+                
+                # Try to find file in uploads directory
+                import glob
+                possible_files = glob.glob(f"uploads/*/{file_id}.*")
+                if possible_files:
+                    file_path = possible_files[0]
+                else:
+                    raise HTTPException(status_code=404, detail="File not found on disk")
+                    
+                return FileResponse(
+                    path=file_path,
+                    filename=metadata.file_name,
+                    media_type='application/octet-stream'
+                )
+            else:
+                raise HTTPException(status_code=404, detail="File not found")
+        
+        # Database mode - get file metadata
+        if DATABASE_AVAILABLE and db:
+            from app.models.file_metadata import FileMetadata
+            file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
+            
+            if not file_metadata:
+                raise HTTPException(status_code=404, detail="File metadata not found")
+            
+            # Check if user has permission to download
+            if current_user.get("role") != "admin" and file_metadata.uploader_id != current_user["username"]:
+                raise HTTPException(status_code=403, detail="Permission denied")
+            
+            filename = file_metadata.file_name
+        else:
+            # Fallback mode - use in-memory metadata
+            if file_id in file_metadata_db:
+                metadata = file_metadata_db[file_id]
+                if current_user.get("role") != "admin" and metadata.uploaded_by != current_user["username"]:
+                    raise HTTPException(status_code=403, detail="Permission denied")
+                filename = metadata.file_name
+            else:
+                raise HTTPException(status_code=404, detail="File metadata not found")
+        
+        # Check if file exists on disk
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found on disk")
+        
+        # Return file using FileResponse
+        return FileResponse(
+            path=file_path,
+            filename=filename,
+            media_type='application/octet-stream'
+        )
+        
+    except Exception as e:
+        logger.error(f"Download failed for file {file_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
 
 
 # ------------------------
@@ -286,6 +353,30 @@ async def get_vector_stats(current_user: dict = Depends(get_current_user)):
 
 
 # ------------------------
+# Test endpoint for debugging
+# ------------------------
+@router.get("/test-reset")
+async def test_reset_endpoint():
+    """Test endpoint to verify routes are working"""
+    return {"message": "Reset endpoint is accessible", "status": "working"}
+
+@router.get("/debug-routes")
+async def debug_routes():
+    """Debug endpoint to list all available routes"""
+    return {
+        "available_routes": [
+            "GET /files/list",
+            "POST /files/upload", 
+            "DELETE /files/{file_id}",
+            "GET /files/download/{file_id}",
+            "DELETE /files/reset-all",
+            "GET /files/test-reset",
+            "GET /files/debug-routes"
+        ],
+        "message": "Files routes are loaded"
+    }
+
+# ------------------------
 # Reset all files (admin only)
 # ------------------------
 @router.delete("/reset-all")
@@ -302,13 +393,25 @@ async def reset_all_files(
         import os
         from pathlib import Path
         
+        # Get vector store instance
+        vector_store = get_vector_store()
+        
         # Get all files from database
         all_files = db.query(FileMetadata).all()
         deleted_count = 0
+        vector_cleanup_count = 0
         
-        # Delete each file from disk and database
+        # Delete each file from disk, database, and vector store
         for file_metadata in all_files:
             try:
+                # Delete from vector database first
+                try:
+                    vector_store.delete_documents_by_file_id(file_metadata.file_id)
+                    vector_cleanup_count += 1
+                    logger.info(f"Deleted vectors for file: {file_metadata.file_id}")
+                except Exception as ve:
+                    logger.warning(f"Failed to delete vectors for file {file_metadata.file_id}: {ve}")
+                
                 # Delete file from disk
                 if os.path.exists(file_metadata.file_path):
                     os.remove(file_metadata.file_path)
@@ -332,6 +435,20 @@ async def reset_all_files(
                     user_dir.rmdir()
                     logger.info(f"Removed empty directory: {user_dir}")
         
+        # Clear entire vector collection if possible
+        try:
+            if hasattr(vector_store, 'client') and vector_store.client:
+                # Try to delete entire collection and recreate it
+                vector_store.client.delete_collection(vector_store.collection_name)
+                vector_store._ensure_collection()
+                logger.info("Recreated vector collection")
+            elif hasattr(vector_store, 'documents'):
+                # Fallback: clear in-memory storage
+                vector_store.documents.clear()
+                logger.info("Cleared in-memory vector storage")
+        except Exception as ve:
+            logger.warning(f"Failed to clear vector collection: {ve}")
+        
         db.commit()
         
         # Log the reset activity
@@ -340,15 +457,17 @@ async def reset_all_files(
             user=current_user["username"],
             details={
                 "files_deleted": deleted_count,
-                "reset_type": "files_only"
+                "vectors_cleaned": vector_cleanup_count,
+                "reset_type": "complete_reset"
             }
         )
         
-        logger.info(f"Reset completed: {deleted_count} files deleted by {current_user['username']}")
+        logger.info(f"Reset completed: {deleted_count} files deleted, {vector_cleanup_count} vector entries cleaned by {current_user['username']}")
         
         return {
-            "message": f"Successfully reset all files",
+            "message": f"Successfully reset all files and vector data",
             "files_deleted": deleted_count,
+            "vectors_cleaned": vector_cleanup_count,
             "reset_by": current_user["username"]
         }
         
