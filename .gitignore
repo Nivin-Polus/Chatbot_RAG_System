@@ -2,56 +2,56 @@
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
 
 # Virtual environments
-.env
-.venv
-env/
 venv/
+env/
 ENV/
-env.bak/
-venv.bak/
 
-# Node.js
-chatbot_frontend/node_modules/
-chatbot_frontend/npm-debug.log*
-chatbot_frontend/yarn-debug.log*
-chatbot_frontend/yarn-error.log*
-chatbot_frontend/package-lock.json
+# Dependencies and builds
+/chatbot_frontend/node_modules/
 chatbot_frontend/build/
 chatbot_frontend/dist/
-
-# Python Backend
-chatbot_backend/__pycache__/
-chatbot_backend/**/__pycache__/
-chatbot_backend/*.pyc
-chatbot_backend/venv/
-chatbot_backend/.pytest_cache/
-chatbot_backend/htmlcov/
-chatbot_backend/.coverage
-
-# Build outputs
 dist/
 build/
-.next/
+
+# Environment files (but keep examples)
+.env
+!.env.example
+/chatbot_backend/.env
+/chatbot_frontend/.env
+/chatbot_frontend/.env.*.local
+
+# Logs and cache
+*.log
+logs/
+.cache/
+__pycache__/
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Database files
+*.sqlite3
+*.db
+
+# Model files and caches
+/chatbot_backend/sentence_transformers/
+chatbot_backend/.transformers_cache/
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Temporary and backup
+tmp/
+temp/
+*.bak
+*.backup
 .nuxt/
 out/
 
@@ -97,11 +97,7 @@ ehthumbs.db
 Thumbs.db
 
 # Project specific paths
-qdrant_storage/
-chatbot_backend/uploads/
-chatbot_backend/files/
-chatbot_backend/models/
-chatbot_backend/qdrant_storage/
+
 
 # Environment files
 .env*
@@ -145,3 +141,21 @@ chatbot_backend/.env
 chatbot_backend/.env
 chatbot_backend/.env
 chatbot_backend/.env
+
+# Ignore Python cache and environment files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+*.env
+
+# Do NOT ignore the backend folder
+# If you previously had:
+# /chatbot_backend/
+# Remove or comment it out
+
+# You can ignore specific files inside backend if needed:
+chatbot_backend/__pycache__/
+chatbot_backend/app/__pycache__/
+chatbot_backend/app/*.pyc

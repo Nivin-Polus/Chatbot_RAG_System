@@ -1,0 +1,111 @@
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.env
+venv/
+env/
+ENV/
+
+# Node.js (frontend only)
+chatbot_frontend/node_modules/
+chatbot_frontend/build/
+chatbot_frontend/dist/
+chatbot_frontend/package-lock.json
+
+# Logs
+*.log
+logs/
+
+# Local development
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Environment files (but keep examples)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Database files
+*.db
+*.sqlite3
+
+# Cache and temporary
+.cache/
+tmp/
+temp/
+
+# Model caches (optional - uncomment if you want to ignore)
+# /chatbot_backend/sentence_transformers/
+# /chatbot_backend/.transformers_cache/
+# Cache directories
+.cache/
+.parcel-cache/
+.eslintcache
+**/.cache/
+
+# Editor directories and files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment files
+.env*
+!.env.example
+**/.env
+**/.env.local
+**/.env.development.local
+**/.env.production.local
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Temporary files
+tmp/
+temp/
+**/tmp/
+
+# Compressed files
+*.zip
+*.tar.gz
+*.rar
+
+# Model related
+chatbot_backend/sentence_transformers/
+chatbot_backend/.transformers_cache/
