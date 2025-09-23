@@ -44,7 +44,7 @@ class ConversationMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str
-    top_k: int = 5  # optional, number of chunks to retrieve
+    top_k: int = 8  # optional, number of chunks to retrieve
     session_id: Optional[str] = None  # optional, for session tracking
     conversation_history: List[ConversationMessage] = []  # optional, for context
     maintain_context: bool = False  # optional, flag to maintain context

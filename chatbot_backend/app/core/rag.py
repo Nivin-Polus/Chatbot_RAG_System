@@ -10,13 +10,14 @@ Answering Rules:
 - **Tone:** Professional, clear, and approachable. Begin with a polite acknowledgment before answering the query.
 - **Clarity:** Keep responses short, precise, and easy to skim. Use bullet points or numbered lists where helpful. Avoid long paragraphs.
 - **Relevance:** Focus strictly on the question asked. Do not add unrelated or extra details.
+- **Source Attribution:** ALWAYS include a "Sources:" section at the end listing the specific files you referenced.
 - **Out-of-Scope Queries:** If the question is not covered in the knowledge base, respond with:
   "I don't have that information in the current knowledge base. Please contact the system administrator for further details."
 - **Information Boundaries:** Never guess or provide assumptions. Only use information explicitly available in the knowledge base.
 - **Missing/Unclear Questions:** If a query is unclear, say:
   "I'm not sure what you mean. Could you clarify or provide more details?"
 - **Context Usage:** Use the provided context from uploaded documents to answer questions accurately.
-- **Goal:** Provide accurate, professional, and helpful responses based on the available knowledge base content."""
+- **Goal:** Provide accurate, professional, and helpful responses with clear source attribution so users can verify information."""
 
 
 
@@ -32,10 +33,19 @@ class RAG:
         self.temperature = getattr(settings, "CLAUDE_TEMPERATURE", 0.0)
         self.system_prompt = getattr(settings, "SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
 
-    def retrieve_chunks(self, query: str, top_k: int = 5) -> List[str]:
-        """Search vector DB and return top matching chunks."""
+    def retrieve_chunks(self, query: str, top_k: int = 5) -> List[Dict]:
+        """Search vector DB and return top matching chunks with metadata."""
         results = self.vector_store.search(query, top_k=top_k)
-        return [r["payload"].get("text", "") for r in results]
+        chunks_with_sources = []
+        for r in results:
+            payload = r.get("payload", {})
+            chunks_with_sources.append({
+                "text": payload.get("text", ""),
+                "file_name": payload.get("file_name", "Unknown File"),
+                "file_id": payload.get("file_id", ""),
+                "chunk_index": payload.get("chunk_index", 0)
+            })
+        return chunks_with_sources
 
     def call_ai(self, prompt: str) -> str:
         """Call Claude (or configured LLM)."""
@@ -65,22 +75,45 @@ class RAG:
             return "I wasn’t able to retrieve a confident answer, please refine your question."
 
     def answer(self, query: str, top_k: int = 5) -> str:
-        """Main pipeline: retrieve → medium-detailed answer."""
-        chunks = self.retrieve_chunks(query, top_k=top_k)
-        if not chunks:
+        """Main pipeline: retrieve → medium-detailed answer with source references."""
+        chunks_with_sources = self.retrieve_chunks(query, top_k=top_k)
+        if not chunks_with_sources:
             return "I wasn't able to retrieve a confident answer, please refine your question."
 
-        # Build medium-length answer
-        context = "\n---\n".join(chunks)
-        prompt = f"{self.system_prompt}\n\nContext:\n{context}\n\nQuestion: {query}\nAnswer:"
-        answer = self.call_ai(prompt)
+        # Build context with source information
+        context_parts = []
+        source_files = set()
+        
+        for i, chunk in enumerate(chunks_with_sources):
+            context_parts.append(f"Source {i+1} (from {chunk['file_name']}):\n{chunk['text']}")
+            source_files.add(chunk['file_name'])
+        
+        context = "\n\n---\n\n".join(context_parts)
+        
+        # Enhanced prompt with source instruction
+        enhanced_prompt = f"""{self.system_prompt}
+
+IMPORTANT: At the end of your response, always include a "Sources:" section listing the specific files you referenced.
+
+Context from uploaded documents:
+{context}
+
+Question: {query}
+Answer:"""
+        
+        answer = self.call_ai(enhanced_prompt)
+        
+        # Ensure sources are included if not already present
+        if "Sources:" not in answer and "sources:" not in answer.lower():
+            source_list = "\n".join([f"- {file}" for file in sorted(source_files)])
+            answer += f"\n\n**Sources:**\n{source_list}"
 
         return answer
 
     def answer_with_context(self, query: str, conversation_history: List, top_k: int = 5) -> str:
-        """Main pipeline with conversation context: retrieve → contextual answer."""
-        chunks = self.retrieve_chunks(query, top_k=top_k)
-        if not chunks:
+        """Main pipeline with conversation context: retrieve → contextual answer with source references."""
+        chunks_with_sources = self.retrieve_chunks(query, top_k=top_k)
+        if not chunks_with_sources:
             return "I wasn't able to retrieve a confident answer, please refine your question."
 
         # Build conversation context
@@ -99,11 +132,33 @@ class RAG:
                     content = msg.get("content", "")
                 
                 conversation_context += f"{role}: {content}\n"
-            conversation_context += "\n"
 
-        # Build contextual answer
-        context = "\n---\n".join(chunks)
-        prompt = f"{self.system_prompt}\n\nContext:\n{context}{conversation_context}\nCurrent Question: {query}\nAnswer:"
-        answer = self.call_ai(prompt)
+        # Build context with source information
+        context_parts = []
+        source_files = set()
+        
+        for i, chunk in enumerate(chunks_with_sources):
+            context_parts.append(f"Source {i+1} (from {chunk['file_name']}):\n{chunk['text']}")
+            source_files.add(chunk['file_name'])
+        
+        context = "\n\n---\n\n".join(context_parts)
+        
+        # Enhanced prompt with source instruction
+        enhanced_prompt = f"""{self.system_prompt}{conversation_context}
+
+IMPORTANT: At the end of your response, always include a "Sources:" section listing the specific files you referenced.
+
+Context from uploaded documents:
+{context}
+
+Question: {query}
+Answer:"""
+        
+        answer = self.call_ai(enhanced_prompt)
+        
+        # Ensure sources are included if not already present
+        if "Sources:" not in answer and "sources:" not in answer.lower():
+            source_list = "\n".join([f"- {file}" for file in sorted(source_files)])
+            answer += f"\n\n**Sources:**\n{source_list}"
 
         return answer
