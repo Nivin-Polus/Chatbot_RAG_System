@@ -20,9 +20,9 @@ class Cache:
         else:
             logger.info("Redis cache disabled")
 
-    def get(self, key: str):
+    async def get(self, key: str):
         if self.client:
-            value = self.client.get(key)
+            value = await self.client.get(key)
             if value:
                 return value.decode("utf-8")
         return None

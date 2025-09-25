@@ -1,7 +1,11 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 import requests
+from sqlalchemy.orm import Session
 from app.core.vectorstore import VectorStore
 from app.config import settings
+from app.models.system_prompt import SystemPrompt
+from app.models.collection import Collection
+from app.core.database import get_db
 
 # Default system prompt - can be overridden via environment variable or config
 DEFAULT_SYSTEM_PROMPT = """You are a helpful AI assistant for a knowledge base system. Your role is to respond naturally and conversationally based on the provided context from uploaded documents.
@@ -22,23 +26,59 @@ Answering Rules:
 
 
 class RAG:
-    def __init__(self, vector_store: VectorStore):
+    def __init__(self, vector_store: VectorStore, db_session: Session = None):
         self.vector_store = vector_store
+        self.db_session = db_session
 
         # Claude/LLM settings
         self.api_key = settings.CLAUDE_API_KEY
         self.endpoint = getattr(settings, "CLAUDE_API_URL", "https://api.anthropic.com/v1/messages")
-        self.model = getattr(settings, "CLAUDE_MODEL", "claude-3-haiku-20240307")
-        self.max_tokens = getattr(settings, "CLAUDE_MAX_TOKENS", 1000)
-        self.temperature = getattr(settings, "CLAUDE_TEMPERATURE", 0.0)
-        self.system_prompt = getattr(settings, "SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
+        
+        # Default settings (can be overridden by database prompts)
+        self.default_model = getattr(settings, "CLAUDE_MODEL", "claude-3-haiku-20240307")
+        self.default_max_tokens = getattr(settings, "CLAUDE_MAX_TOKENS", 4000)
+        self.default_temperature = getattr(settings, "CLAUDE_TEMPERATURE", 0.7)
+        self.default_system_prompt = getattr(settings, "SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
 
-    def retrieve_chunks(self, query: str, top_k: int = 5) -> List[Dict]:
+    def get_prompt_for_collection(self, collection_id: str) -> Optional[SystemPrompt]:
+        """Get the active prompt for a specific collection from database"""
+        if not self.db_session or not collection_id:
+            return None
+        
+        try:
+            # First try to get the default prompt for this collection
+            prompt = self.db_session.query(SystemPrompt).filter(
+                SystemPrompt.collection_id == collection_id,
+                SystemPrompt.is_active == True,
+                SystemPrompt.is_default == True
+            ).first()
+            
+            # If no default prompt, get any active prompt for this collection
+            if not prompt:
+                prompt = self.db_session.query(SystemPrompt).filter(
+                    SystemPrompt.collection_id == collection_id,
+                    SystemPrompt.is_active == True
+                ).first()
+            
+            return prompt
+        except Exception as e:
+            print(f"Error getting prompt for collection {collection_id}: {e}")
+            return None
+
+    def retrieve_chunks(self, query: str, top_k: int = 5, collection_id: str = None) -> List[Dict]:
         """Search vector DB and return top matching chunks with metadata."""
-        results = self.vector_store.search(query, top_k=top_k)
+        results = self.vector_store.search(query, top_k=top_k, collection_id=collection_id)
         chunks_with_sources = []
         for r in results:
             payload = r.get("payload", {})
+
+            if collection_id is not None:
+                payload_collection_id = payload.get("collection_id")
+                if payload_collection_id is None:
+                    # Skip chunks that are not explicitly tagged to avoid cross-collection bleed
+                    continue
+                if str(payload_collection_id) != str(collection_id):
+                    continue
             chunks_with_sources.append({
                 "text": payload.get("text", ""),
                 "file_name": payload.get("file_name", "Unknown File"),
@@ -47,7 +87,32 @@ class RAG:
             })
         return chunks_with_sources
 
-    def call_ai(self, prompt: str) -> str:
+    def _resolve_prompt_settings(self, collection_id: Optional[str] = None):
+        """Determine system prompt and model configuration for the given collection."""
+        db_prompt = None
+        if collection_id:
+            db_prompt = self.get_prompt_for_collection(collection_id)
+
+        if db_prompt:
+            system_prompt = db_prompt.system_prompt
+            model = db_prompt.model_name
+            max_tokens = db_prompt.max_tokens
+            temperature = db_prompt.temperature
+        else:
+            system_prompt = self.default_system_prompt
+            model = self.default_model
+            max_tokens = self.default_max_tokens
+            temperature = self.default_temperature
+
+        if db_prompt and self.db_session:
+            try:
+                db_prompt.increment_usage(self.db_session)
+            except Exception as e:
+                print(f"Error updating prompt usage: {e}")
+
+        return system_prompt, model, max_tokens, temperature
+
+    def call_ai(self, prompt: str, model: str = None, max_tokens: int = None, temperature: float = None) -> str:
         """Call Claude (or configured LLM)."""
         try:
             response = requests.post(
@@ -58,12 +123,10 @@ class RAG:
                     "content-type": "application/json"
                 },
                 json={
-                    "model": self.model,
-                    "max_tokens": self.max_tokens,
-                    "temperature": self.temperature,
-                    "messages": [
-                        {"role": "user", "content": prompt}
-                    ]
+                    "model": model or self.default_model,
+                    "max_tokens": max_tokens or self.default_max_tokens,
+                    "temperature": temperature or self.default_temperature,
+                    "messages": [{"role": "user", "content": prompt}]
                 },
                 timeout=20
             )
@@ -72,13 +135,18 @@ class RAG:
             return data.get("content", [{}])[0].get("text", "").strip()
         except Exception as e:
             print(f"Claude API Error: {e}")
-            return "I wasn’t able to retrieve a confident answer, please refine your question."
+            return "I wasn't able to retrieve a confident answer, please refine your question."
 
-    def answer(self, query: str, top_k: int = 5) -> str:
-        """Main pipeline: retrieve → medium-detailed answer with source references."""
-        chunks_with_sources = self.retrieve_chunks(query, top_k=top_k)
+    def answer(self, query: str, top_k: int = 5, collection_id: str = None) -> str:
+        """Main pipeline: retrieve → medium-detailed answer with source references using collection-specific prompt."""
+        if self._is_small_talk(query):
+            return self._handle_small_talk(query)
+
+        chunks_with_sources = self.retrieve_chunks(query, top_k=top_k, collection_id=collection_id)
         if not chunks_with_sources:
             return "I wasn't able to retrieve a confident answer, please refine your question."
+
+        system_prompt, model, max_tokens, temperature = self._resolve_prompt_settings(collection_id)
 
         # Build context with source information
         context_parts = []
@@ -91,7 +159,7 @@ class RAG:
         context = "\n\n---\n\n".join(context_parts)
         
         # Enhanced prompt with source instruction
-        enhanced_prompt = f"""{self.system_prompt}
+        enhanced_prompt = f"""{system_prompt}
 
 IMPORTANT: At the end of your response, always include a "Sources:" section listing the specific files you referenced.
 
@@ -101,7 +169,7 @@ Context from uploaded documents:
 Question: {query}
 Answer:"""
         
-        answer = self.call_ai(enhanced_prompt)
+        answer = self.call_ai(enhanced_prompt, model=model, max_tokens=max_tokens, temperature=temperature)
         
         # Ensure sources are included if not already present
         if "Sources:" not in answer and "sources:" not in answer.lower():
@@ -110,11 +178,22 @@ Answer:"""
 
         return answer
 
-    def answer_with_context(self, query: str, conversation_history: List, top_k: int = 5) -> str:
+    def answer_with_context(
+        self,
+        query: str,
+        conversation_history: List,
+        top_k: int = 5,
+        collection_id: Optional[str] = None
+    ) -> str:
         """Main pipeline with conversation context: retrieve → contextual answer with source references."""
-        chunks_with_sources = self.retrieve_chunks(query, top_k=top_k)
+        if self._is_small_talk(query):
+            return self._handle_small_talk(query)
+
+        chunks_with_sources = self.retrieve_chunks(query, top_k=top_k, collection_id=collection_id)
         if not chunks_with_sources:
             return "I wasn't able to retrieve a confident answer, please refine your question."
+
+        system_prompt, model, max_tokens, temperature = self._resolve_prompt_settings(collection_id)
 
         # Build conversation context
         conversation_context = ""
@@ -143,8 +222,11 @@ Answer:"""
         
         context = "\n\n---\n\n".join(context_parts)
         
-        # Enhanced prompt with source instruction
-        enhanced_prompt = f"""{self.system_prompt}{conversation_context}
+        prompt_header = system_prompt
+        if conversation_context:
+            prompt_header = f"{system_prompt}{conversation_context}"
+
+        enhanced_prompt = f"""{prompt_header}
 
 IMPORTANT: At the end of your response, always include a "Sources:" section listing the specific files you referenced.
 
@@ -154,7 +236,7 @@ Context from uploaded documents:
 Question: {query}
 Answer:"""
         
-        answer = self.call_ai(enhanced_prompt)
+        answer = self.call_ai(enhanced_prompt, model=model, max_tokens=max_tokens, temperature=temperature)
         
         # Ensure sources are included if not already present
         if "Sources:" not in answer and "sources:" not in answer.lower():

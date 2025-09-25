@@ -24,10 +24,6 @@ router = APIRouter()
 logger = logging.getLogger("chat_logger")
 logging.basicConfig(level=logging.INFO)
 
-# Initialize RAG with singleton vector store
-vector_store = get_vector_store()
-rag = RAG(vector_store)
-
 # Initialize services
 chat_service = ChatTrackingService()
 
@@ -48,6 +44,7 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None  # optional, for session tracking
     conversation_history: List[ConversationMessage] = []  # optional, for context
     maintain_context: bool = False  # optional, flag to maintain context
+    collection_id: Optional[str] = None
 
 class ChatResponse(BaseModel):
     answer: str
@@ -60,6 +57,7 @@ async def ask_question(request: ChatRequest, current_user: dict = Depends(get_cu
     question = request.question.strip()
     top_k = request.top_k
     session_id = request.session_id
+    collection_id = request.collection_id
     conversation_history = request.conversation_history
     maintain_context = request.maintain_context
 
@@ -79,14 +77,18 @@ async def ask_question(request: ChatRequest, current_user: dict = Depends(get_cu
     logger.info(f"[CONTEXT] Session: {session_id}, Maintain: {maintain_context}, History: {len(conversation_history)} messages")
     
     # Create or get chat session for tracking
-    if session_id:
-        chat_service.create_or_get_session(session_id, current_user["username"], db)
+    user_id = current_user.get("user_id") or current_user.get("username")
+    if session_id and user_id:
+        chat_service.create_or_get_session(session_id, user_id, collection_id, db)
     
     # Start timing for performance tracking
     start_time = time.time()
 
     # Check Redis cache first
-    cache_key = f"faq:{question.lower()}"
+    cache_key_parts = ["faq", question.lower()]
+    if collection_id:
+        cache_key_parts.append(f"collection:{collection_id}")
+    cache_key = ":".join(cache_key_parts)
     if r:
         cached_answer = r.get(cache_key)
         if cached_answer:
@@ -99,7 +101,8 @@ async def ask_question(request: ChatRequest, current_user: dict = Depends(get_cu
 
     # Get chunks from vector store with debug info
     vector_store = get_vector_store()
-    chunks = rag.retrieve_chunks(question, top_k=top_k)
+    rag_instance = RAG(vector_store, db_session=db)
+    chunks = rag_instance.retrieve_chunks(question, top_k=top_k, collection_id=collection_id)
     logger.info(f"[CHAT DEBUG] Retrieved {len(chunks)} chunks for query: {question}")
     logger.info(f"[CHAT DEBUG] Vector store type: {'Qdrant' if vector_store.client else 'In-memory fallback'}")
 
@@ -114,10 +117,19 @@ async def ask_question(request: ChatRequest, current_user: dict = Depends(get_cu
     try:
         if maintain_context and conversation_history:
             logger.info(f"[CONTEXT] Using context with {len(conversation_history)} messages")
-            answer_text = rag.answer_with_context(question, conversation_history, top_k=top_k)
+            answer_text = rag_instance.answer_with_context(
+                question,
+                conversation_history,
+                top_k=top_k,
+                collection_id=collection_id
+            )
         else:
             logger.info(f"[CONTEXT] Using basic RAG without context")
-            answer_text = rag.answer(question, top_k=top_k)
+            answer_text = rag_instance.answer(
+                question,
+                top_k=top_k,
+                collection_id=collection_id
+            )
     except Exception as e:
         logger.error(f"[RAG ERROR] Failed to generate answer: {str(e)}")
         return ChatResponse(answer="I encountered an error while processing your question. Please try again.", session_id=session_id)
@@ -144,6 +156,7 @@ async def ask_question(request: ChatRequest, current_user: dict = Depends(get_cu
             }
             chat_service.log_query(
                 session_id=session_id,
+                collection_id=collection_id,
                 user_query=question,
                 ai_response=answer_text,
                 context_used=context_info,

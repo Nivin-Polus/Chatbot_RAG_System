@@ -1,15 +1,29 @@
 import { useState, useEffect, useRef } from "react";
 import api from "../api/api";
 
-export default function ChatWindow() {
+export default function ChatWindow({ collectionId = null, collections = [] }) {
   const [messages, setMessages] = useState([]);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [typingText, setTypingText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId] = useState(() => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+  const [activeCollectionId, setActiveCollectionId] = useState(collectionId || collections[0]?.collection_id || null);
   const messagesEndRef = useRef(null);
   const typingIntervalRef = useRef(null);
+
+  useEffect(() => {
+    if (collectionId && collectionId !== activeCollectionId) {
+      setActiveCollectionId(collectionId);
+      startNewChat();
+    }
+  }, [collectionId]);
+
+  useEffect(() => {
+    if (!collectionId && collections.length > 0 && !activeCollectionId) {
+      setActiveCollectionId(collections[0].collection_id);
+    }
+  }, [collections, collectionId, activeCollectionId]);
 
   // Auto-scroll to bottom
   const scrollToBottom = () => {
@@ -83,6 +97,10 @@ export default function ChatWindow() {
         maintain_context: true,
         context_length: conversationHistory.length
       };
+
+      if (collectionId || activeCollectionId) {
+        payload.collection_id = collectionId || activeCollectionId;
+      }
       
       console.log("Full payload being sent:", payload);
       
@@ -151,6 +169,22 @@ export default function ChatWindow() {
 
   return (
     <div className="chat-window">
+      {collections.length > 0 && !collectionId && (
+        <div className="collection-selector">
+          <label htmlFor="chat-collection-select">Collection:</label>
+          <select
+            id="chat-collection-select"
+            value={activeCollectionId || ""}
+            onChange={(e) => setActiveCollectionId(e.target.value || null)}
+          >
+            {collections.map((col) => (
+              <option key={col.collection_id} value={col.collection_id}>
+                {col.name || col.collection_id}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="chat-header">
         <div className="chat-title">
           <h3>💬 Chat with your Knowledge Base</h3>

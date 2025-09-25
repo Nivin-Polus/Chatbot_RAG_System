@@ -18,6 +18,9 @@ export default function AdminDashboard() {
   const [chatAnalytics, setChatAnalytics] = useState(null);
   const [storageStats, setStorageStats] = useState(null);
   const [healthLoading, setHealthLoading] = useState(false);
+  const [collections, setCollections] = useState([]);
+  const [selectedCollectionId, setSelectedCollectionId] = useState(null);
+  const [collectionFiles, setCollectionFiles] = useState([]);
 
   const menuItems = [
     { 
@@ -67,6 +70,27 @@ export default function AdminDashboard() {
   useEffect(() => {
     loadDashboardStats();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === "files") {
+      loadCollections();
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!selectedCollectionId && collections.length > 0) {
+      setSelectedCollectionId(collections[0].collection_id);
+    }
+  }, [collections, selectedCollectionId]);
+
+  const loadCollections = async () => {
+    try {
+      const res = await api.get("/collections/");
+      setCollections(res.data || []);
+    } catch (err) {
+      console.error("Failed to load collections:", err);
+    }
+  };
 
   const loadDashboardStats = async () => {
     try {
@@ -488,7 +512,21 @@ export default function AdminDashboard() {
       case "dashboard":
         return renderDashboardOverview();
       case "files":
-        return <FileUploader />;
+        return (
+          <FileUploader
+            collections={collections}
+            defaultCollectionId={selectedCollectionId}
+            onCollectionChange={(value) => setSelectedCollectionId(value)}
+            onFilesLoaded={(files) => setCollectionFiles(files)}
+            onStatsChange={(data) =>
+              setStats((prev) => ({
+                ...prev,
+                totalFiles: data?.total ?? prev.totalFiles
+              }))
+            }
+            compact
+          />
+        );
       case "chat":
         return <ChatWindow />;
       case "analytics":

@@ -1,35 +1,69 @@
-# 🤖 Advanced RAG Chatbot System
+# 🤖 Collection-Based RAG Chatbot System
 
-A **production-ready Retrieval-Augmented Generation (RAG) chatbot system** with advanced conversation context management, role-based access control, and modern UI design. Built with React frontend and FastAPI backend.
+A **production-ready Collection-Based Retrieval-Augmented Generation (RAG) chatbot system** with light theme design, horizontal layout, and comprehensive collection management. The system uses a single vector database divided into collections, each with dedicated admins, users, custom prompts, and unique identifiers. Built with React frontend and FastAPI backend for scalable AI-powered conversations.
 
-## 🚀 System Overview
+## 🚀 System Architecture
 
-This enterprise-grade chatbot system enables organizations to create intelligent knowledge bases from their documents. Users can upload various document types and engage in natural, contextual conversations about the content. The system maintains conversation history, supports role-based access, and provides a beautiful, modern interface.
+This **collection-based** RAG chatbot system uses a single vector database intelligently divided into collections. Each collection operates as an independent unit with:
 
-## 🎯 Features
+- **Unique Collection ID**: Every collection has a distinct identifier
+- **Dedicated Admin**: Each collection has one admin with full management rights
+- **Collection Users**: Multiple users can be assigned to each collection
+- **Custom Prompts**: Each collection has its own AI prompt configuration
+- **Website Integration**: Optional website URL assignment per collection
+- **Isolated Data**: Complete separation between collections
 
-### 🔐 **Authentication & Authorization**
-- JWT-based authentication with role-based access control
-- Admin users: Full access (file management + chat)
-- Regular users: Chat-only access
-- Secure password hashing with Argon2
-- **Test Credentials**: `admin/admin123` (admin), `user/user123` (user)
+## 🎯 Key Features
 
-### 📁 **Document Management**
-- Multi-format support: PDF, DOCX, PPTX, XLSX, TXT
-- Drag-and-drop file upload interface with modern file cards
-- Automatic text extraction and chunking
-- File metadata tracking with organized storage structure
-- Admin-only file upload/delete permissions
-- **Database-Optional**: Works with JSON file storage or SQLite
+### 📚 **Collection-Based Architecture**
+- **Single Vector Database**: One shared database divided into logical collections
+- **Collection Management**: Super admin can create and manage all collections
+- **Unique Identifiers**: Each collection has a unique ID for precise management
+- **Website URLs**: Collections can be linked to specific websites
+- **Admin Assignment**: Each collection has a dedicated admin user
 
-### 🧠 **Advanced RAG Pipeline**
-- Vector embeddings using Sentence Transformers (all-MiniLM-L6-v2)
-- Qdrant vector database with in-memory fallback
-- Claude AI integration (Haiku model) for natural language responses
-- Context-aware conversations with last 6-10 message history
-- Intelligent document retrieval and ranking
-- **Vector Store Singleton**: Ensures consistent document visibility
+### 🤖 **Custom Prompt Management**
+- **Collection-Specific Prompts**: Each collection has its own AI prompt configuration
+- **Database-Driven Prompts**: All prompts stored and managed in database
+- **Prompt Templates**: System prompt, user prompt, and context templates
+- **AI Model Configuration**: Per-prompt model settings (Claude variants, tokens, temperature)
+- **Default Prompt System**: Each collection can have a default prompt
+- **Prompt Testing**: Built-in functionality to test prompts before deployment
+
+### 🔐 **Role-Based Access Control**
+- **Super Admin**: Global system management and collection oversight
+  - Create and manage all collections
+  - View and edit all prompts across collections
+  - Assign admins and users to collections
+  - System-wide analytics and monitoring
+- **Collection Admin**: Collection-scoped administration
+  - View and edit their collection's default prompt
+  - Manage users within their collection
+  - Upload and manage files for their collection
+  - Collection-specific analytics
+- **Collection User**: Limited access within assigned collection
+  - Access chat interface with collection-specific data
+  - Use collection's configured prompts
+  - View only files they have permission for
+
+### 📁 **Multi-Tenant Document Management**
+- **Department-Scoped Files**: Each department has isolated file storage
+- **Granular Access Control**: File-level permissions with read/download/delete rights
+- **File Access Management**: Grant, revoke, and manage user file permissions
+- **Quota Enforcement**: Per-department limits on file count and storage size
+- **Multi-format Support**: PDF, DOCX, PPTX, XLSX, TXT with metadata extraction
+- **Public/Private Files**: Department-wide or user-specific file visibility
+- **Expiration Support**: Time-limited file access with automatic revocation
+- **MySQL Database**: Production-ready storage with connection pooling
+
+### 🧠 **Multi-Tenant RAG Pipeline**
+- **Tenant-Isolated Vector Search**: Single Qdrant collection with metadata filtering
+- **Automatic Embedding Generation**: Sentence Transformers (all-MiniLM-L6-v2)
+- **Access-Controlled Retrieval**: Only searches user's accessible files
+- **Department Boundaries**: Strict isolation prevents cross-tenant data access
+- **Claude AI Integration**: Haiku model for natural language responses
+- **Context-Aware Conversations**: Maintains chat history within tenant boundaries
+- **Efficient Metadata Filtering**: website_id, file_id, and user permissions
 
 ### 💬 **Chat Interface**
 - Real-time typing animations (30ms character intervals)
@@ -39,21 +73,24 @@ This enterprise-grade chatbot system enables organizations to create intelligent
 - Auto-scrolling and responsive design
 - **Modern Tabbed Interface**: File Management, Chat, Settings
 
-### 📊 **Activity Monitoring & Analytics**
-- Real-time activity feed with 30-second auto-refresh
-- Activity filtering by type (uploads, chats, deletions, system events)
-- Usage statistics and comprehensive analytics
-- System health monitoring with service status checks
-- Admin dashboard with stats cards and quick actions
-- **JSON-Based Storage**: Persistent activity logs in `/activity_logs`
+### 📊 **Multi-Tenant Analytics & Monitoring**
+- **Department-Level Analytics**: Usage statistics per website/department
+- **Query Logging**: Comprehensive tracking of all user interactions
+- **Usage Monitoring**: File access patterns, user activity, and performance metrics
+- **Quota Tracking**: Real-time monitoring of department resource usage
+- **Admin Dashboards**: Super admin (global) and user admin (department) views
+- **Audit Trails**: Complete logging of administrative actions and file access
+- **Performance Analytics**: Response times, token usage, and system health
 
-### 🎨 **Modern UI/UX Design**
-- **Glassmorphism Effects**: Backdrop blur, gradient themes, modern shadows
-- **Purple-Blue Gradient Scheme**: Professional color palette with white text
+### 🎨 **Light Bootstrap Dashboard Design**
+- **Light Bootstrap Inspired**: Modern orange gradient theme with professional styling
+- **Collapsible Sidebar**: Responsive navigation with icons and labels
+- **Card-Based Layout**: Clean card design for data presentation
+- **Gradient Themes**: Orange-to-amber gradient scheme with modern shadows
 - **Responsive Design**: Works on desktop, tablet, and mobile devices
 - **Smooth Animations**: Hover effects, transitions, and loading states
-- **CoreUI-Inspired**: Modern admin dashboard with sidebar navigation
-- **File Cards Grid**: Beautiful file management interface
+- **Statistics Cards**: Beautiful overview cards with icons and metrics
+- **Modern Navigation**: Sidebar with role-based menu items
 
 ### 🔧 **System Architecture & Flexibility**
 - **Database-Optional Architecture**: Runs without SQLAlchemy installation
@@ -63,6 +100,160 @@ This enterprise-grade chatbot system enables organizations to create intelligent
 - **Progressive Enhancement**: Start minimal, add features as needed
 - **Production-Ready**: Comprehensive error handling and logging
 - **Loading States** - Clear feedback during operations
+
+---
+
+## 🎨 **Light Theme Design**
+
+### 🌟 **Modern Light Theme Interface**
+- **Light Color Palette**: Soft blues, gentle gradients, and clean whites
+- **Horizontal Layout**: Statistics cards arranged horizontally for better space utilization
+- **Inter Font**: Modern, clean typography for enhanced readability
+- **Subtle Shadows**: Gentle depth effects for professional appearance
+- **Responsive Design**: Adapts beautifully to all screen sizes
+
+### 📊 **Dashboard Features**
+- **Collapsible Sidebar**: Clean navigation with role-based menu items
+- **Statistics Overview**: Horizontal stat cards showing key metrics
+- **Card-Based Layout**: Clean card design for all data presentation
+- **Smooth Animations**: Subtle hover effects and transitions
+- **Professional Styling**: Light Bootstrap inspired design elements
+
+## 🔧 **System Workflow**
+
+### 👑 **Super Admin Capabilities**
+1. **Collection Management**: Create new collections with unique IDs
+2. **Admin Assignment**: Assign dedicated admins to each collection
+3. **User Management**: Add users to specific collections
+4. **Prompt Oversight**: View and edit all prompts across all collections
+5. **Website Integration**: Assign website URLs to collections
+6. **Global Analytics**: Monitor system-wide statistics and performance
+
+### 🛠️ **Collection Admin Capabilities**
+1. **Prompt Management**: View and edit their collection's default prompt
+2. **User Management**: Manage users within their assigned collection
+3. **File Management**: Upload and organize collection-specific documents
+4. **Website Configuration**: Manage their collection's website URL
+5. **Collection Analytics**: Monitor collection-specific metrics and usage
+
+---
+
+## 🏗️ **Collection-Based System Architecture**
+
+### 🎯 **Architecture Overview**
+
+The system implements a **collection-based approach** using:
+- **Single Qdrant Vector Database**: One shared database logically divided into collections
+- **Collection-Based Filtering**: Metadata filtering ensures complete collection isolation
+- **MySQL Database**: Stores collection metadata, user assignments, and prompt configurations
+- **Role-Based Access Control**: Super Admin, Collection Admin, and Collection User roles
+- **Unique Collection IDs**: Each collection has a distinct identifier for precise management
+
+### 👥 **User Roles & Permissions**
+
+| Role | Scope | Permissions | Default Account |
+|------|-------|-------------|-----------------|
+| **Super Admin** | Global | Create collections, manage all prompts, assign admins | `superadmin/superadmin123` |
+| **Collection Admin** | Collection | Manage collection prompt, users, and files | `admin/admin123` |
+| **Collection User** | Collection | Access collection chat, use assigned prompt | `user/user123` |
+
+### 🗄️ **Database Schema**
+
+#### Core Collection Tables
+- **`collections`** - Collection definitions with unique IDs and website URLs
+- **`users`** - Enhanced with collection_id and role-based permissions
+- **`prompts`** - AI prompts scoped to collections with model configurations
+- **`file_metadata`** - Files scoped to collections with access control
+- **`collection_users`** - User assignments to collections with role management
+- **`query_logs`** - Usage tracking and analytics per collection
+
+### 🔍 **Vector Database Strategy**
+
+```python
+# Single Qdrant database with collection-based filtering
+search_filter = Filter(
+    must=[
+        FieldCondition(key="collection_id", match=MatchValue(value=user_collection_id)),
+        FieldCondition(key="file_id", match=MatchValue(value=accessible_file_ids))
+    ]
+)
+```
+
+**Benefits:**
+- **Single Infrastructure** - One Qdrant instance for all collections
+- **Strict Isolation** - Metadata filters prevent cross-collection access
+- **Scalable** - Efficient indexing and querying
+- **Cost-Effective** - Shared resources with logical separation
+
+---
+
+## 🚀 **Quick Start Guide**
+
+### 📋 **Prerequisites**
+- Python 3.8+
+- Node.js 16+
+- MySQL 8.0+
+- Qdrant vector database
+- Claude API key (Anthropic)
+
+### 🔧 **Installation Steps**
+
+1. **Clone Repository**
+```bash
+git clone <repository-url>
+cd Chatbot_RAG_System_UI_1
+```
+
+2. **Backend Setup**
+```bash
+cd chatbot_backend
+pip install -r requirements.txt
+cp .env.example .env
+# Edit .env with your database credentials and API keys
+python setup_mysql.py
+python -m uvicorn app.main:app --reload
+```
+
+3. **Frontend Setup**
+```bash
+cd chatbot_frontend
+npm install
+npm start
+```
+
+4. **Access the System**
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+- API Documentation: http://localhost:8000/docs
+
+### 🔑 **Default Login Credentials**
+- **Super Admin**: `superadmin` / `superadmin123`
+- **Collection Admin**: `admin` / `admin123`
+- **Collection User**: `user` / `user123`
+
+---
+
+## 📁 **File Structure**
+
+```
+Chatbot_RAG_System_UI_1/
+├── chatbot_backend/           # FastAPI backend
+│   ├── app/
+│   │   ├── api/              # API routes
+│   │   ├── core/             # Core functionality
+│   │   ├── models/           # Database models
+│   │   └── main.py           # Application entry point
+│   ├── requirements.txt      # Python dependencies
+│   └── .env.example         # Environment variables template
+├── chatbot_frontend/         # React frontend
+│   ├── src/
+│   │   ├── components/       # React components
+│   │   ├── api/             # API client
+│   │   └── App.js           # Main application
+│   ├── package.json         # Node dependencies
+│   └── public/              # Static assets
+└── README.md                # This file
+```
 
 ---
 
@@ -285,6 +476,44 @@ chatbot_rag_system/
 ├── .env                      # Environment variables (gitignored)
 └── README.md                # This file
 ```
+
+---
+
+## 🚀 **Quick Multi-Tenant Setup**
+
+### 🎯 **Instant Setup (5 Minutes)**
+
+1. **Clone and Setup Backend**
+   ```bash
+   git clone <repository-url>
+   cd chatbot_backend
+   pip install -r requirements.txt
+   cp .env.example .env
+   # Add your Claude API key to .env
+   ```
+
+2. **Start Multi-Tenant System**
+   ```bash
+   python -m uvicorn app.main:app --reload
+   ```
+
+3. **Access Default Accounts**
+   - **Super Admin**: `superadmin/superadmin123` (manage all departments)
+   - **User Admin**: `admin/admin123` (manage Default Organization)
+   - **Regular User**: `user/user123` (limited file access)
+
+4. **Create Your First Department**
+   - Login as Super Admin
+   - Create new website/department
+   - Add User Admin for the department
+   - Start uploading department-specific files
+
+### 🏢 **Multi-Tenant Workflow**
+
+1. **Super Admin** creates departments and assigns User Admins
+2. **User Admins** manage their department users and files
+3. **Users** access only their granted files within their department
+4. **Complete Isolation** - departments cannot see each other's data
 
 ---
 
@@ -539,6 +768,23 @@ REDIS_TIMEOUT=5
 # Activity Tracking
 ACTIVITY_LOG_DIR=activity_logs
 ACTIVITY_RETENTION_DAYS=30
+
+# Multi-Tenant Configuration
+DEFAULT_WEBSITE_NAME="Your Organization"
+DEFAULT_WEBSITE_DOMAIN="yourdomain.com"
+DEFAULT_MAX_USERS_PER_WEBSITE=100
+DEFAULT_MAX_FILES_PER_WEBSITE=1000
+DEFAULT_MAX_STORAGE_MB_PER_WEBSITE=10240
+
+# MySQL Database (Required for Multi-Tenant)
+DATABASE_TYPE=mysql
+DATABASE_HOST=localhost
+DATABASE_PORT=3306
+DATABASE_NAME=chatbot_rag
+DATABASE_USER=your_mysql_user
+DATABASE_PASSWORD=your_mysql_password
+DATABASE_POOL_SIZE=10
+DATABASE_MAX_OVERFLOW=20
 ```
 
 ### **Production Configuration Notes**
@@ -652,28 +898,46 @@ cd chatbot_backend
 ## 🔍 API Endpoints
 
 ### Authentication
-- `POST /auth/token` - Login and get JWT token
+- `POST /auth/token` - Login and get JWT token with role and tenant information
 
-### File Management
-- `POST /files/upload` - Upload document
-- `GET /files/list` - List all files
-- `GET /files/download/{file_id}` - Download original file
+### Multi-Tenant Website Management
+- `GET /websites/` - List websites (filtered by permissions)
+- `GET /websites/{website_id}` - Get website details with usage statistics
+- `POST /websites/` - Create new website/department (super admin only)
+- `PUT /websites/{website_id}` - Update website settings
+- `DELETE /websites/{website_id}` - Delete website (super admin only)
+- `GET /websites/{website_id}/analytics` - Get department analytics
+
+### Multi-Tenant User Management
+- `GET /users/me` - Get current user info with permissions
+- `GET /users/` - List users (filtered by permissions)
+- `GET /users/{user_id}` - Get user details
+- `POST /users/` - Create user with role and website assignment
+- `PUT /users/{user_id}` - Update user information
+- `DELETE /users/{user_id}` - Deactivate user
+- `POST /users/{user_id}/activate` - Activate user
+- `GET /users/{user_id}/accessible-files` - Get user's accessible files
+
+### Multi-Tenant File Management
+- `POST /files/upload` - Upload document with website and access control
+- `GET /files/list` - List accessible files (filtered by permissions)
+- `GET /files/download/{file_id}` - Download file (permission-checked)
 - `GET /files/metadata/{file_id}` - Get file metadata
-- `DELETE /files/{file_id}` - Delete file
-- `DELETE /files/reset-all` - Reset all files (admin only)
+- `DELETE /files/{file_id}` - Delete file (permission-checked)
+- `POST /files/{file_id}/access` - Grant file access to user
+- `PUT /files/{file_id}/access/{access_id}` - Update file access permissions
+- `DELETE /files/{file_id}/access/{access_id}` - Revoke file access
+- `GET /files/{file_id}/access` - List file access permissions
 
 ### Activity Tracking
-- `GET /activity/recent` - Get recent activities
+- `GET /activity/recent` - Get recent activities (tenant-filtered)
 - `GET /activity/by-type/{activity_type}` - Get activities by type
 - `GET /activity/by-user/{username}` - Get activities by user (admin only)
 - `GET /activity/my-activities` - Get current user's activities
-- `GET /activity/stats` - Get activity statistics
-- `GET /activity/summary` - Get comprehensive activity summary
-- `DELETE /activity/cleanup` - Cleanup old activities (admin only)
-- `DELETE /activity/reset-all` - Reset everything (admin only)
+- `GET /activity/stats` - Get activity statistics (tenant-scoped)
 
-### Chat with Context
-- `POST /chat/ask` - Ask question with optional context
+### Multi-Tenant Chat
+- `POST /chat/ask` - Ask question with tenant and access control
   ```json
   {
     "question": "Your question here",
@@ -685,16 +949,35 @@ cd chatbot_backend
     ]
   }
   ```
+  *Note: Only searches files accessible to the user within their department*
 
 ---
 
-## 🛡️ Security Features
+## 🛡️ Multi-Tenant Security Features
 
-- **JWT Authentication** - Secure token-based access
-- **Role-Based Access** - Admin vs user permissions
-- **Input Validation** - Prompt guardrails and sanitization
-- **File Type Validation** - Only allowed file types accepted
-- **Size Limits** - Configurable file size restrictions
+### 🔐 **Authentication & Authorization**
+- **JWT Tokens** - Include user role, website_id, and permissions
+- **Three-Tier Role System** - Super Admin, User Admin, Regular User
+- **Department Isolation** - Complete data separation between tenants
+- **Granular Permissions** - File-level access control with expiration
+
+### 🛡️ **Data Protection**
+- **Row-Level Security** - All database queries filtered by website_id
+- **Vector Store Isolation** - Metadata filtering prevents cross-tenant access
+- **File Access Control** - Explicit permission grants required
+- **Audit Logging** - Complete trail of all administrative actions
+
+### 🔒 **Access Control**
+- **Quota Management** - Per-department limits on users, files, storage
+- **Permission Validation** - Every API call validates tenant access
+- **Secure File Storage** - Department-scoped file organization
+- **Input Validation** - Comprehensive sanitization and validation
+
+### 🚨 **Monitoring & Compliance**
+- **Usage Analytics** - Per-tenant monitoring and reporting
+- **Query Logging** - Track all user interactions and file access
+- **Performance Monitoring** - Response times and system health per tenant
+- **Compliance Ready** - Audit trails and data isolation for regulatory requirements
 
 ---
 
@@ -841,13 +1124,33 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ---
 
-## 🆘 Support
+## 📚 **Additional Documentation**
 
-For issues and questions:
-1. Check the troubleshooting sections in backend/frontend READMEs
-2. Review API documentation at `http://localhost:8000/docs`
-3. Open an issue on GitHub
+### 🏢 **Multi-Tenant System Guide**
+- **Complete Setup Guide**: `MULTITENANT_SYSTEM_GUIDE.md`
+- **Database Schema**: Detailed table structures and relationships
+- **API Reference**: All multi-tenant endpoints with examples
+- **Security Guide**: Access control and permission management
+- **Troubleshooting**: Common issues and solutions
+
+### 🔧 **Technical Documentation**
+- **MySQL Migration Guide**: `MYSQL_MIGRATION_GUIDE.md`
+- **Vector Store Architecture**: Metadata filtering strategies
+- **Role-Based Access Control**: Implementation details
+- **Performance Optimization**: Scaling and monitoring
 
 ---
 
-**Built with ❤️ using React, FastAPI, Qdrant, and Claude AI**
+## 🆘 Support
+
+For issues and questions:
+1. Check the **Multi-Tenant System Guide** (`MULTITENANT_SYSTEM_GUIDE.md`)
+2. Review **MySQL Migration Guide** for database setup
+3. Check API documentation at `http://localhost:8000/docs`
+4. Review troubleshooting sections in documentation
+5. Open an issue on GitHub
+
+---
+
+**Built with ❤️ using React, FastAPI, Qdrant, Claude AI, and MySQL**  
+**🏢 Now with Enterprise Multi-Tenant Architecture!**

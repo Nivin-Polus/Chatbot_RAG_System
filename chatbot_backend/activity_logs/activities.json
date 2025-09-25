@@ -1,0 +1,3435 @@
+[
+  {
+    "id": "1758547465.620597_files_reset",
+    "type": "files_reset",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:24:25.620597+00:00",
+    "details": {
+      "files_deleted": 17,
+      "vectors_cleaned": 0,
+      "reset_type": "files_only"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "1758547527.384345_file_upload",
+    "type": "file_upload",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:25:27.384345+00:00",
+    "details": {
+      "file_name": "Technology Acquisition Questionnaire (RFP).pdf",
+      "file_id": "d1153f68-c4fc-46b8-b0f3-08d6f7119cf6",
+      "file_size": 367852,
+      "file_type": "pdf",
+      "chunk_count": 18
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547529.788365_file_upload",
+    "type": "file_upload",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:25:29.788365+00:00",
+    "details": {
+      "file_name": "Technology Acquisition Questionnaire (RFP).docx (1).pdf",
+      "file_id": "f150a56d-b706-43c8-ad1e-964413bc4358",
+      "file_size": 367852,
+      "file_type": "pdf",
+      "chunk_count": 18
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547530.734772_file_upload",
+    "type": "file_upload",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:25:30.734772+00:00",
+    "details": {
+      "file_name": "NCBS - Fibi Implementation.pdf",
+      "file_id": "d28be559-6ae2-45d2-9261-62e2bbca377e",
+      "file_size": 488521,
+      "file_type": "pdf",
+      "chunk_count": 5
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547532.284844_file_upload",
+    "type": "file_upload",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:25:32.284844+00:00",
+    "details": {
+      "file_name": "Data_Privacy - PolusSolutions.pdf",
+      "file_id": "c7801c32-afeb-46c5-9e27-f56bf36c0138",
+      "file_size": 194010,
+      "file_type": "pdf",
+      "chunk_count": 10
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547552.953054_file_upload",
+    "type": "file_upload",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:25:52.953054+00:00",
+    "details": {
+      "file_name": "Information_Security_Policy - Polus Solutions.pdf",
+      "file_id": "16eef238-dca9-497f-acc0-ea8fe6ad3805",
+      "file_size": 928121,
+      "file_type": "pdf",
+      "chunk_count": 224
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547563.86642_file_upload",
+    "type": "file_upload",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:26:03.866420+00:00",
+    "details": {
+      "file_name": "Fibi Proposal - Salve Regina Universiy.pdf",
+      "file_id": "a5663bca-5eca-4371-add0-bacbb72a1837",
+      "file_size": 6755550,
+      "file_type": "pdf",
+      "chunk_count": 96
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547564.044833_file_upload",
+    "type": "file_upload",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:26:04.044833+00:00",
+    "details": {
+      "file_name": "Organisation Chart - Polus Solutions.pdf",
+      "file_id": "3d8e8001-2b03-45ca-9627-d06810296949",
+      "file_size": 139679,
+      "file_type": "pdf",
+      "chunk_count": 1
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547564.891015_file_upload",
+    "type": "file_upload",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:26:04.891015+00:00",
+    "details": {
+      "file_name": "SEO Analysis - FIBI Research.pdf",
+      "file_id": "bc778edb-2ca0-494b-97b5-2e06651bf327",
+      "file_size": 173662,
+      "file_type": "pdf",
+      "chunk_count": 4
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547566.059257_file_upload",
+    "type": "file_upload",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:26:06.059257+00:00",
+    "details": {
+      "file_name": "Hecvat supporting document - Data_Privacy - PolusSolutions.pdf",
+      "file_id": "3be3a7d9-6ec9-4efc-a6d9-7a5316ce7991",
+      "file_size": 194010,
+      "file_type": "pdf",
+      "chunk_count": 10
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547568.355899_file_upload",
+    "type": "file_upload",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:26:08.355899+00:00",
+    "details": {
+      "file_name": "Fibi - eRA functional information - Polus Solutions.pdf",
+      "file_id": "8652e3d2-971f-49c2-9d50-9bdee2b0d787",
+      "file_size": 9118123,
+      "file_type": "pdf",
+      "chunk_count": 15
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547571.147635_file_upload",
+    "type": "file_upload",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:26:11.147635+00:00",
+    "details": {
+      "file_name": "Project Management Methodology and Scope of Work - Polus Solutions.pdf",
+      "file_id": "48eb12bc-5228-44e9-81a7-c33e0da3093a",
+      "file_size": 365113,
+      "file_type": "pdf",
+      "chunk_count": 20
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547575.649357_file_upload",
+    "type": "file_upload",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:26:15.649357+00:00",
+    "details": {
+      "file_name": "Licensing Agreement - Fibi_Polus.pdf",
+      "file_id": "96a28797-d8eb-4e4e-87f8-acb2d92738b1",
+      "file_size": 278238,
+      "file_type": "pdf",
+      "chunk_count": 33
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547576.044546_file_upload",
+    "type": "file_upload",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:26:16.044546+00:00",
+    "details": {
+      "file_name": "Terms of Service - IACUC.pdf",
+      "file_id": "ef25a88a-63cf-49bd-964b-05f5e240a6f4",
+      "file_size": 168777,
+      "file_type": "pdf",
+      "chunk_count": 2
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547577.773254_file_upload",
+    "type": "file_upload",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:26:17.773254+00:00",
+    "details": {
+      "file_name": "System Specifications And Implementation Plan.pdf",
+      "file_id": "784ea7ba-246f-4067-9753-caf23d7a8557",
+      "file_size": 2156482,
+      "file_type": "pdf",
+      "chunk_count": 15
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547583.386784_file_upload",
+    "type": "file_upload",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:26:23.386784+00:00",
+    "details": {
+      "file_name": "Appendix A- Non-Technical Requirements.pdf",
+      "file_id": "390c374f-60dd-40f6-965f-1deb85c12035",
+      "file_size": 1240845,
+      "file_type": "pdf",
+      "chunk_count": 54
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547584.132468_file_upload",
+    "type": "file_upload",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:26:24.132468+00:00",
+    "details": {
+      "file_name": "APPENDIX B - SUBMISSION FORM.pdf",
+      "file_id": "23b7f572-e903-4622-a9b9-cefb74057177",
+      "file_size": 135626,
+      "file_type": "pdf",
+      "chunk_count": 7
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547584.724487_file_upload",
+    "type": "file_upload",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:26:24.724487+00:00",
+    "details": {
+      "file_name": "Fibi IACUC.pdf",
+      "file_id": "409ad862-88e9-40e8-bb05-130df9f4765a",
+      "file_size": 131531,
+      "file_type": "pdf",
+      "chunk_count": 4
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547596.597127_chat_session_start",
+    "type": "chat_session_start",
+    "user": "user",
+    "timestamp": "2025-09-22T13:26:36.597127+00:00",
+    "details": {
+      "session_id": "session_1758547592825_8p8tnz",
+      "first_question": "Describe how the proposed solution supports encryption of data at rest or an equivalent alternative "
+    },
+    "metadata": {}
+  },
+  {
+    "id": "1758547596.600007_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-22T13:26:36.600007+00:00",
+    "details": {
+      "question": "Describe how the proposed solution supports encryption of data at rest or an equivalent alternative ",
+      "session_id": "session_1758547592825_8p8tnz",
+      "chunks_retrieved": 5,
+      "processing_time_ms": 1754,
+      "has_context": false
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547615.528623_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-22T13:26:55.528623+00:00",
+    "details": {
+      "question": "Cloud Hosting Specs",
+      "session_id": "session_1758547592825_8p8tnz",
+      "chunks_retrieved": 5,
+      "processing_time_ms": 1874,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547626.569119_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-22T13:27:06.569119+00:00",
+    "details": {
+      "question": "Cloud Hosting Specs",
+      "session_id": "session_1758547592825_8p8tnz",
+      "chunks_retrieved": 5,
+      "processing_time_ms": 2123,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547639.593579_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-22T13:27:19.593579+00:00",
+    "details": {
+      "question": "Document Management plan",
+      "session_id": "session_1758547592825_8p8tnz",
+      "chunks_retrieved": 5,
+      "processing_time_ms": 2270,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547651.32165_chat_query",
+    "type": "chat_query",
+    "user": "admin",
+    "timestamp": "2025-09-22T13:27:31.321650+00:00",
+    "details": {
+      "question": "Document Management plan",
+      "session_id": "session_1758547648156_kbwr96v96",
+      "chunks_retrieved": 5,
+      "processing_time_ms": 1726,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547784.52095_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-22T13:29:44.520950+00:00",
+    "details": {
+      "question": "Cloud Hosting Specs",
+      "session_id": "session_1758547592825_8p8tnz",
+      "chunks_retrieved": 5,
+      "processing_time_ms": 2327,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758547930.919014_chat_session_start",
+    "type": "chat_session_start",
+    "user": "user",
+    "timestamp": "2025-09-22T13:32:10.919014+00:00",
+    "details": {
+      "session_id": "session_1758547918173_om7klx",
+      "first_question": "Cloud Hosting Specs"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "1758547930.921465_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-22T13:32:10.921465+00:00",
+    "details": {
+      "question": "Cloud Hosting Specs",
+      "session_id": "session_1758547918173_om7klx",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3649,
+      "has_context": false
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758548099.601521_chat_session_start",
+    "type": "chat_session_start",
+    "user": "user",
+    "timestamp": "2025-09-22T13:34:59.601521+00:00",
+    "details": {
+      "session_id": "session_1758548094200_ah0n2e",
+      "first_question": "Cloud Hosting Specs"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "1758548099.605107_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-22T13:34:59.605107+00:00",
+    "details": {
+      "question": "Cloud Hosting Specs",
+      "session_id": "session_1758548094200_ah0n2e",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3983,
+      "has_context": false
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758548162.800349_chat_session_start",
+    "type": "chat_session_start",
+    "user": "user",
+    "timestamp": "2025-09-22T13:36:02.800349+00:00",
+    "details": {
+      "session_id": "session_1758548157990_rs4jc6",
+      "first_question": "hi"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "1758548162.803231_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-22T13:36:02.803231+00:00",
+    "details": {
+      "question": "hi",
+      "session_id": "session_1758548157990_rs4jc6",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 1595,
+      "has_context": false
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758548172.328174_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-22T13:36:12.328174+00:00",
+    "details": {
+      "question": "Cloud Hosting Specs",
+      "session_id": "session_1758548157990_rs4jc6",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 4035,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758548446.89746_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-22T13:40:46.897460+00:00",
+    "details": {
+      "question": "Describe how the proposed solution supports the use of multi-factor authentication.",
+      "session_id": "session_1758548157990_rs4jc6",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3855,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758605622.285023_chat_session_start",
+    "type": "chat_session_start",
+    "user": "user",
+    "timestamp": "2025-09-23T05:33:42.285023+00:00",
+    "details": {
+      "session_id": "session_1758605583538_e9xv7m",
+      "first_question": "What is the required server specification for on prem implementation"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "1758605622.298213_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-23T05:33:42.298213+00:00",
+    "details": {
+      "question": "What is the required server specification for on prem implementation",
+      "session_id": "session_1758605583538_e9xv7m",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 2541,
+      "has_context": false
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758605660.374713_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-23T05:34:20.374713+00:00",
+    "details": {
+      "question": "Is it possible to provide cloud hosting",
+      "session_id": "session_1758605583538_e9xv7m",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3024,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758606884.539132_chat_session_start",
+    "type": "chat_session_start",
+    "user": "user",
+    "timestamp": "2025-09-23T05:54:44.539132+00:00",
+    "details": {
+      "session_id": "session_1758602818211_bhlekx",
+      "first_question": "leave policy"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "1758606884.543297_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-23T05:54:44.543297+00:00",
+    "details": {
+      "question": "leave policy",
+      "session_id": "session_1758602818211_bhlekx",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 1757,
+      "has_context": false
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758611192.847177_chat_query",
+    "type": "chat_query",
+    "user": "admin",
+    "timestamp": "2025-09-23T07:06:32.847177+00:00",
+    "details": {
+      "question": "hi",
+      "session_id": "session_1758611187742_qk4msbyt1",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 2249,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758611212.239969_chat_query",
+    "type": "chat_query",
+    "user": "admin",
+    "timestamp": "2025-09-23T07:06:52.239969+00:00",
+    "details": {
+      "question": "cloud hosting specs",
+      "session_id": "session_1758611187742_qk4msbyt1",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3963,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758611239.5583_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-23T07:07:19.558300+00:00",
+    "details": {
+      "question": "cloud hosting",
+      "session_id": "session_1758602818211_bhlekx",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 2934,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758620163.344949_chat_session_start",
+    "type": "chat_session_start",
+    "user": "user",
+    "timestamp": "2025-09-23T09:36:03.344949+00:00",
+    "details": {
+      "session_id": "session_1758620174189_ugdj2s",
+      "first_question": "what is th on prem resources required for IRB?"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "1758620163.351138_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-23T09:36:03.351138+00:00",
+    "details": {
+      "question": "what is th on prem resources required for IRB?",
+      "session_id": "session_1758620174189_ugdj2s",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 2894,
+      "has_context": false
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758620195.352056_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-23T09:36:35.352056+00:00",
+    "details": {
+      "question": "lets shoot for Fibi then?",
+      "session_id": "session_1758620174189_ugdj2s",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3409,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758620233.712707_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-23T09:37:13.712707+00:00",
+    "details": {
+      "question": "okaay find data for Fibi",
+      "session_id": "session_1758620174189_ugdj2s",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 4383,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758620273.242589_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-23T09:37:53.242589+00:00",
+    "details": {
+      "question": "any cloud hosting cost?",
+      "session_id": "session_1758620174189_ugdj2s",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3949,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758620300.305826_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-23T09:38:20.305826+00:00",
+    "details": {
+      "question": "please pull the dollar values",
+      "session_id": "session_1758620174189_ugdj2s",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3843,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758620341.198494_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-23T09:39:01.198494+00:00",
+    "details": {
+      "question": "what is the reporting cpacity of Fibi?",
+      "session_id": "session_1758620174189_ugdj2s",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 4385,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758625842.371189_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-23T11:10:42.371189+00:00",
+    "details": {
+      "question": "maternity leave",
+      "session_id": "session_1758625787292_99015ki31",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 1941,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758625872.714287_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-23T11:11:12.714287+00:00",
+    "details": {
+      "question": "write a python code to print hello",
+      "session_id": "session_1758625787292_99015ki31",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 1856,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758625889.550248_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-23T11:11:29.550248+00:00",
+    "details": {
+      "question": "what is python",
+      "session_id": "session_1758625787292_99015ki31",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3247,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758783582.819223_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T06:59:42.819223+00:00",
+    "details": {
+      "file_name": "Technology Acquisition Questionnaire (RFP).pdf",
+      "file_id": "52eb1882-d648-45d8-a04d-786ef9b0ea66",
+      "file_size": 367852,
+      "file_type": "pdf",
+      "chunk_count": 18
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758783585.893231_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T06:59:45.893231+00:00",
+    "details": {
+      "file_name": "Technology Acquisition Questionnaire (RFP).docx (1).pdf",
+      "file_id": "fa0c05f0-ca17-430a-974f-5e2f6ec1707a",
+      "file_size": 367852,
+      "file_type": "pdf",
+      "chunk_count": 18
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758783586.693013_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T06:59:46.693013+00:00",
+    "details": {
+      "file_name": "NCBS - Fibi Implementation.pdf",
+      "file_id": "cbc19215-89af-4fd8-b780-7976936d8bbf",
+      "file_size": 488521,
+      "file_type": "pdf",
+      "chunk_count": 5
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758783587.926132_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T06:59:47.926132+00:00",
+    "details": {
+      "file_name": "Data_Privacy - PolusSolutions.pdf",
+      "file_id": "c30c2089-a011-4906-959b-eccd3b2e4c49",
+      "file_size": 194010,
+      "file_type": "pdf",
+      "chunk_count": 10
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758783612.403523_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T07:00:12.403523+00:00",
+    "details": {
+      "file_name": "Information_Security_Policy - Polus Solutions.pdf",
+      "file_id": "8a831541-b3bb-47af-a723-52a07fe5a2de",
+      "file_size": 928121,
+      "file_type": "pdf",
+      "chunk_count": 224
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758783622.275444_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T07:00:22.275444+00:00",
+    "details": {
+      "file_name": "Fibi Proposal - Salve Regina Universiy.pdf",
+      "file_id": "09cf23c6-1591-4f5e-ba71-2fa8f853a19b",
+      "file_size": 6755550,
+      "file_type": "pdf",
+      "chunk_count": 96
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758783622.476132_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T07:00:22.476132+00:00",
+    "details": {
+      "file_name": "Organisation Chart - Polus Solutions.pdf",
+      "file_id": "ddf8f640-4804-4b18-a367-509bcb118ad6",
+      "file_size": 139679,
+      "file_type": "pdf",
+      "chunk_count": 1
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758783623.247239_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T07:00:23.247239+00:00",
+    "details": {
+      "file_name": "SEO Analysis - FIBI Research.pdf",
+      "file_id": "16546a12-c24b-4737-b36a-5871b04ea0d6",
+      "file_size": 173662,
+      "file_type": "pdf",
+      "chunk_count": 4
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758783624.411047_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T07:00:24.411047+00:00",
+    "details": {
+      "file_name": "Hecvat supporting document - Data_Privacy - PolusSolutions.pdf",
+      "file_id": "8bf93ebc-3972-451d-8d97-1709433c3041",
+      "file_size": 194010,
+      "file_type": "pdf",
+      "chunk_count": 10
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758783626.382043_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T07:00:26.382043+00:00",
+    "details": {
+      "file_name": "Fibi - eRA functional information - Polus Solutions.pdf",
+      "file_id": "34da9ae3-ed86-4ae2-90a3-8c011fca9d6d",
+      "file_size": 9118123,
+      "file_type": "pdf",
+      "chunk_count": 15
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758783628.385151_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T07:00:28.385151+00:00",
+    "details": {
+      "file_name": "Project Management Methodology and Scope of Work - Polus Solutions.pdf",
+      "file_id": "562a0503-ce96-4f07-987f-a248399e2a87",
+      "file_size": 365113,
+      "file_type": "pdf",
+      "chunk_count": 20
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758783632.245982_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T07:00:32.245982+00:00",
+    "details": {
+      "file_name": "Licensing Agreement - Fibi_Polus.pdf",
+      "file_id": "e5c42526-bc0d-4f2c-9079-1a73d7a9b670",
+      "file_size": 278238,
+      "file_type": "pdf",
+      "chunk_count": 33
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758783632.573385_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T07:00:32.573385+00:00",
+    "details": {
+      "file_name": "Terms of Service - IACUC.pdf",
+      "file_id": "727b9f04-ede3-4d35-ab44-4c764b12e9c3",
+      "file_size": 168777,
+      "file_type": "pdf",
+      "chunk_count": 2
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758783634.241713_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T07:00:34.241713+00:00",
+    "details": {
+      "file_name": "System Specifications And Implementation Plan.pdf",
+      "file_id": "40de5857-49ae-4b10-84b9-81508e7ea369",
+      "file_size": 2156482,
+      "file_type": "pdf",
+      "chunk_count": 15
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758783639.845088_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T07:00:39.845088+00:00",
+    "details": {
+      "file_name": "Appendix A- Non-Technical Requirements.pdf",
+      "file_id": "0034fe57-a32d-426f-a89c-1340502cc2fa",
+      "file_size": 1240845,
+      "file_type": "pdf",
+      "chunk_count": 54
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758783640.591762_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T07:00:40.591762+00:00",
+    "details": {
+      "file_name": "APPENDIX B - SUBMISSION FORM.pdf",
+      "file_id": "72ddf8d2-b8f2-40cc-aaaf-6b3953d4e647",
+      "file_size": 135626,
+      "file_type": "pdf",
+      "chunk_count": 7
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758783641.195481_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T07:00:41.195481+00:00",
+    "details": {
+      "file_name": "Fibi IACUC.pdf",
+      "file_id": "bbdd76f4-6bd2-4f98-9534-f6a5ff99224f",
+      "file_size": 131531,
+      "file_type": "pdf",
+      "chunk_count": 4
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758789851.492837_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T08:44:11.492837+00:00",
+    "details": {
+      "file_name": "Technology Acquisition Questionnaire (RFP).pdf",
+      "file_id": "973d6f5b-d4b3-47c9-a603-42c53bfccd31",
+      "file_size": 367852,
+      "file_type": "pdf",
+      "chunk_count": 18
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758789856.051055_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T08:44:16.051055+00:00",
+    "details": {
+      "file_name": "Technology Acquisition Questionnaire (RFP).docx (1).pdf",
+      "file_id": "08d66dd0-f467-4667-8291-72de4f5cff36",
+      "file_size": 367852,
+      "file_type": "pdf",
+      "chunk_count": 18
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758789857.330734_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T08:44:17.330734+00:00",
+    "details": {
+      "file_name": "NCBS - Fibi Implementation.pdf",
+      "file_id": "ef6e11e1-76bc-41b0-adb6-2c204197b2d4",
+      "file_size": 488521,
+      "file_type": "pdf",
+      "chunk_count": 5
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758789860.143972_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T08:44:20.143972+00:00",
+    "details": {
+      "file_name": "Data_Privacy - PolusSolutions.pdf",
+      "file_id": "8c408963-ff7a-4686-8b89-dc753182fee9",
+      "file_size": 194010,
+      "file_type": "pdf",
+      "chunk_count": 10
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758789897.96823_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T08:44:57.968230+00:00",
+    "details": {
+      "file_name": "Information_Security_Policy - Polus Solutions.pdf",
+      "file_id": "910d1668-1ae6-4827-97d4-ac87f9c0aab9",
+      "file_size": 928121,
+      "file_type": "pdf",
+      "chunk_count": 224
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758789908.488982_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T08:45:08.488982+00:00",
+    "details": {
+      "file_name": "Fibi Proposal - Salve Regina Universiy.pdf",
+      "file_id": "a7d85b01-fe51-4e74-8d72-bd753caac118",
+      "file_size": 6755550,
+      "file_type": "pdf",
+      "chunk_count": 96
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758789908.651477_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T08:45:08.651477+00:00",
+    "details": {
+      "file_name": "Organisation Chart - Polus Solutions.pdf",
+      "file_id": "672f25e9-ac50-42b3-8113-e7d4ddcc02a9",
+      "file_size": 139679,
+      "file_type": "pdf",
+      "chunk_count": 1
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758789909.965498_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T08:45:09.965498+00:00",
+    "details": {
+      "file_name": "SEO Analysis - FIBI Research.pdf",
+      "file_id": "453347be-1ba0-4ecb-9b8c-9a27d49edd52",
+      "file_size": 173662,
+      "file_type": "pdf",
+      "chunk_count": 4
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758789911.262762_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T08:45:11.262762+00:00",
+    "details": {
+      "file_name": "Hecvat supporting document - Data_Privacy - PolusSolutions.pdf",
+      "file_id": "c215eb0f-0c1e-4258-9551-999b25e3f27c",
+      "file_size": 194010,
+      "file_type": "pdf",
+      "chunk_count": 10
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758789913.439821_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T08:45:13.439821+00:00",
+    "details": {
+      "file_name": "Fibi - eRA functional information - Polus Solutions.pdf",
+      "file_id": "ede10037-200a-4901-a57a-e4ff4c7b5fda",
+      "file_size": 9118123,
+      "file_type": "pdf",
+      "chunk_count": 15
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758789915.960448_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T08:45:15.960448+00:00",
+    "details": {
+      "file_name": "Project Management Methodology and Scope of Work - Polus Solutions.pdf",
+      "file_id": "0b3c78bb-a539-40f4-ab69-f7d587bc1c26",
+      "file_size": 365113,
+      "file_type": "pdf",
+      "chunk_count": 20
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758789920.140499_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T08:45:20.140499+00:00",
+    "details": {
+      "file_name": "Licensing Agreement - Fibi_Polus.pdf",
+      "file_id": "2163064e-d53d-45c0-ad26-138e24235463",
+      "file_size": 278238,
+      "file_type": "pdf",
+      "chunk_count": 33
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758789920.625024_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T08:45:20.625024+00:00",
+    "details": {
+      "file_name": "Terms of Service - IACUC.pdf",
+      "file_id": "4e7f407b-192a-420c-9879-a77fa6dc37c5",
+      "file_size": 168777,
+      "file_type": "pdf",
+      "chunk_count": 2
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758789922.482606_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T08:45:22.482606+00:00",
+    "details": {
+      "file_name": "System Specifications And Implementation Plan.pdf",
+      "file_id": "cc30ab91-32b2-4725-a4fb-0ac32441f671",
+      "file_size": 2156482,
+      "file_type": "pdf",
+      "chunk_count": 15
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758789928.938219_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T08:45:28.938219+00:00",
+    "details": {
+      "file_name": "Appendix A- Non-Technical Requirements.pdf",
+      "file_id": "86f5d337-6f8a-403e-a4fa-2aef78c3e05e",
+      "file_size": 1240845,
+      "file_type": "pdf",
+      "chunk_count": 54
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758789929.818443_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T08:45:29.818443+00:00",
+    "details": {
+      "file_name": "APPENDIX B - SUBMISSION FORM.pdf",
+      "file_id": "0589ae07-bc17-4509-9ba5-d3192e32e4f5",
+      "file_size": 135626,
+      "file_type": "pdf",
+      "chunk_count": 7
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758789930.543498_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T08:45:30.543498+00:00",
+    "details": {
+      "file_name": "Fibi IACUC.pdf",
+      "file_id": "7dcefe99-b5ce-4581-ab23-9986e3ea8eae",
+      "file_size": 131531,
+      "file_type": "pdf",
+      "chunk_count": 4
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758790646.305724_file_upload",
+    "type": "file_upload",
+    "user": "asd",
+    "timestamp": "2025-09-25T08:57:26.305724+00:00",
+    "details": {
+      "file_name": "Technology Acquisition Questionnaire (RFP).pdf",
+      "file_id": "bd1aec4b-c581-4e44-bd91-1fbd34f0d56a",
+      "file_size": 367852,
+      "file_type": "pdf",
+      "chunk_count": 18
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758790649.566009_file_upload",
+    "type": "file_upload",
+    "user": "asd",
+    "timestamp": "2025-09-25T08:57:29.566009+00:00",
+    "details": {
+      "file_name": "Technology Acquisition Questionnaire (RFP).docx (1).pdf",
+      "file_id": "940b6587-37e4-4a90-a292-e2b91f199d1e",
+      "file_size": 367852,
+      "file_type": "pdf",
+      "chunk_count": 18
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758790650.740371_file_upload",
+    "type": "file_upload",
+    "user": "asd",
+    "timestamp": "2025-09-25T08:57:30.740371+00:00",
+    "details": {
+      "file_name": "NCBS - Fibi Implementation.pdf",
+      "file_id": "bdc33919-40ff-405d-8103-b3ed7238ced0",
+      "file_size": 488521,
+      "file_type": "pdf",
+      "chunk_count": 5
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758790652.641503_file_upload",
+    "type": "file_upload",
+    "user": "asd",
+    "timestamp": "2025-09-25T08:57:32.641503+00:00",
+    "details": {
+      "file_name": "Data_Privacy - PolusSolutions.pdf",
+      "file_id": "186c2c4c-8a6f-448e-8a4b-05bc074584dd",
+      "file_size": 194010,
+      "file_type": "pdf",
+      "chunk_count": 10
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758790677.487337_file_upload",
+    "type": "file_upload",
+    "user": "asd",
+    "timestamp": "2025-09-25T08:57:57.487337+00:00",
+    "details": {
+      "file_name": "Information_Security_Policy - Polus Solutions.pdf",
+      "file_id": "d306a1b5-6825-4939-a718-6909cd10879b",
+      "file_size": 928121,
+      "file_type": "pdf",
+      "chunk_count": 224
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758790684.89256_file_upload",
+    "type": "file_upload",
+    "user": "asd",
+    "timestamp": "2025-09-25T08:58:04.892560+00:00",
+    "details": {
+      "file_name": "Fibi Proposal - Salve Regina Universiy.pdf",
+      "file_id": "1d909534-dc61-4fb6-aa04-3cc6709f067b",
+      "file_size": 6755550,
+      "file_type": "pdf",
+      "chunk_count": 96
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758790685.009811_file_upload",
+    "type": "file_upload",
+    "user": "asd",
+    "timestamp": "2025-09-25T08:58:05.009811+00:00",
+    "details": {
+      "file_name": "Organisation Chart - Polus Solutions.pdf",
+      "file_id": "9e29efc3-4026-4b77-ae86-ef1e52cc08fd",
+      "file_size": 139679,
+      "file_type": "pdf",
+      "chunk_count": 1
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758790685.462499_file_upload",
+    "type": "file_upload",
+    "user": "asd",
+    "timestamp": "2025-09-25T08:58:05.462499+00:00",
+    "details": {
+      "file_name": "SEO Analysis - FIBI Research.pdf",
+      "file_id": "8403f2ff-81c5-4200-92ce-2b3a156b2af5",
+      "file_size": 173662,
+      "file_type": "pdf",
+      "chunk_count": 4
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758790686.348757_file_upload",
+    "type": "file_upload",
+    "user": "asd",
+    "timestamp": "2025-09-25T08:58:06.348757+00:00",
+    "details": {
+      "file_name": "Hecvat supporting document - Data_Privacy - PolusSolutions.pdf",
+      "file_id": "b191e9e7-d2cd-49c2-8ce1-2befd987dab6",
+      "file_size": 194010,
+      "file_type": "pdf",
+      "chunk_count": 10
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758790687.916835_file_upload",
+    "type": "file_upload",
+    "user": "asd",
+    "timestamp": "2025-09-25T08:58:07.916835+00:00",
+    "details": {
+      "file_name": "Fibi - eRA functional information - Polus Solutions.pdf",
+      "file_id": "653ab193-dd0b-401d-aa8a-8ea51931e89b",
+      "file_size": 9118123,
+      "file_type": "pdf",
+      "chunk_count": 15
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758790689.471263_file_upload",
+    "type": "file_upload",
+    "user": "asd",
+    "timestamp": "2025-09-25T08:58:09.471263+00:00",
+    "details": {
+      "file_name": "Project Management Methodology and Scope of Work - Polus Solutions.pdf",
+      "file_id": "79988ed7-3dcb-4219-a55f-971168f713fd",
+      "file_size": 365113,
+      "file_type": "pdf",
+      "chunk_count": 20
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758790692.099324_file_upload",
+    "type": "file_upload",
+    "user": "asd",
+    "timestamp": "2025-09-25T08:58:12.099324+00:00",
+    "details": {
+      "file_name": "Licensing Agreement - Fibi_Polus.pdf",
+      "file_id": "c8b15c12-7fea-4b7f-aec6-1b856e98fb3b",
+      "file_size": 278238,
+      "file_type": "pdf",
+      "chunk_count": 33
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758790692.369947_file_upload",
+    "type": "file_upload",
+    "user": "asd",
+    "timestamp": "2025-09-25T08:58:12.369947+00:00",
+    "details": {
+      "file_name": "Terms of Service - IACUC.pdf",
+      "file_id": "8390d1ce-5382-42aa-bb6d-076b0bdc1176",
+      "file_size": 168777,
+      "file_type": "pdf",
+      "chunk_count": 2
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758790693.94343_file_upload",
+    "type": "file_upload",
+    "user": "asd",
+    "timestamp": "2025-09-25T08:58:13.943430+00:00",
+    "details": {
+      "file_name": "System Specifications And Implementation Plan.pdf",
+      "file_id": "f9a1dd9e-aed5-4624-bf63-77282eb73af9",
+      "file_size": 2156482,
+      "file_type": "pdf",
+      "chunk_count": 15
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758790698.376595_file_upload",
+    "type": "file_upload",
+    "user": "asd",
+    "timestamp": "2025-09-25T08:58:18.376595+00:00",
+    "details": {
+      "file_name": "Appendix A- Non-Technical Requirements.pdf",
+      "file_id": "7268b987-dd55-42b5-981f-ac6c24c02378",
+      "file_size": 1240845,
+      "file_type": "pdf",
+      "chunk_count": 54
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758790698.979314_file_upload",
+    "type": "file_upload",
+    "user": "asd",
+    "timestamp": "2025-09-25T08:58:18.979314+00:00",
+    "details": {
+      "file_name": "APPENDIX B - SUBMISSION FORM.pdf",
+      "file_id": "0f27353b-9bfc-4fb7-92cd-6778e3be0038",
+      "file_size": 135626,
+      "file_type": "pdf",
+      "chunk_count": 7
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758790699.360605_file_upload",
+    "type": "file_upload",
+    "user": "asd",
+    "timestamp": "2025-09-25T08:58:19.360605+00:00",
+    "details": {
+      "file_name": "Fibi IACUC.pdf",
+      "file_id": "deaefce3-3887-455d-8179-45428a1a9475",
+      "file_size": 131531,
+      "file_type": "pdf",
+      "chunk_count": 4
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792343.321956_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T09:25:43.321956+00:00",
+    "details": {
+      "file_name": "Technology Acquisition Questionnaire (RFP).pdf",
+      "file_id": "0c0d9361-ff3b-4deb-add2-4c1fc41de254",
+      "file_size": 367852,
+      "file_type": "pdf",
+      "chunk_count": 18,
+      "collection_id": "col_1c8d6eb0"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792347.947529_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T09:25:47.947529+00:00",
+    "details": {
+      "file_name": "Technology Acquisition Questionnaire (RFP).docx (1).pdf",
+      "file_id": "4696ce31-8f70-4b6b-8246-bc11b5ecd0b1",
+      "file_size": 367852,
+      "file_type": "pdf",
+      "chunk_count": 18,
+      "collection_id": "col_1c8d6eb0"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792349.184639_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T09:25:49.184639+00:00",
+    "details": {
+      "file_name": "NCBS - Fibi Implementation.pdf",
+      "file_id": "b1e0394f-fe9b-44a9-baf6-9cf267fd103e",
+      "file_size": 488521,
+      "file_type": "pdf",
+      "chunk_count": 5,
+      "collection_id": "col_1c8d6eb0"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792350.73517_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T09:25:50.735170+00:00",
+    "details": {
+      "file_name": "Data_Privacy - PolusSolutions.pdf",
+      "file_id": "9f81c4b4-a207-4aee-a97b-b55ec800f259",
+      "file_size": 194010,
+      "file_type": "pdf",
+      "chunk_count": 10,
+      "collection_id": "col_1c8d6eb0"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792379.764575_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T09:26:19.764575+00:00",
+    "details": {
+      "file_name": "Information_Security_Policy - Polus Solutions.pdf",
+      "file_id": "179a0c4c-8bc6-44f3-bc9b-b3a08f0696a1",
+      "file_size": 928121,
+      "file_type": "pdf",
+      "chunk_count": 224,
+      "collection_id": "col_1c8d6eb0"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792390.696585_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T09:26:30.696585+00:00",
+    "details": {
+      "file_name": "Fibi Proposal - Salve Regina Universiy.pdf",
+      "file_id": "2afc1960-d590-421d-b138-ac2345b525b9",
+      "file_size": 6755550,
+      "file_type": "pdf",
+      "chunk_count": 96,
+      "collection_id": "col_1c8d6eb0"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792390.840765_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T09:26:30.840765+00:00",
+    "details": {
+      "file_name": "Organisation Chart - Polus Solutions.pdf",
+      "file_id": "87896cb8-903a-48c9-af0b-d33403af95c1",
+      "file_size": 139679,
+      "file_type": "pdf",
+      "chunk_count": 1,
+      "collection_id": "col_1c8d6eb0"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792391.476692_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T09:26:31.476692+00:00",
+    "details": {
+      "file_name": "SEO Analysis - FIBI Research.pdf",
+      "file_id": "1eae1f39-2bd6-41c6-ae58-4630d6cc929f",
+      "file_size": 173662,
+      "file_type": "pdf",
+      "chunk_count": 4,
+      "collection_id": "col_1c8d6eb0"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792392.590201_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T09:26:32.590201+00:00",
+    "details": {
+      "file_name": "Hecvat supporting document - Data_Privacy - PolusSolutions.pdf",
+      "file_id": "cb6c9ac5-8b13-4da8-8c9a-f95e3d684cec",
+      "file_size": 194010,
+      "file_type": "pdf",
+      "chunk_count": 10,
+      "collection_id": "col_1c8d6eb0"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792394.533433_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T09:26:34.533433+00:00",
+    "details": {
+      "file_name": "Fibi - eRA functional information - Polus Solutions.pdf",
+      "file_id": "d4f2a3e1-a0d0-4bd9-afe2-bba346093e5f",
+      "file_size": 9118123,
+      "file_type": "pdf",
+      "chunk_count": 15,
+      "collection_id": "col_1c8d6eb0"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792396.661109_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T09:26:36.661109+00:00",
+    "details": {
+      "file_name": "Project Management Methodology and Scope of Work - Polus Solutions.pdf",
+      "file_id": "10b92442-5e0c-4f5d-ab89-a1a983e923ac",
+      "file_size": 365113,
+      "file_type": "pdf",
+      "chunk_count": 20,
+      "collection_id": "col_1c8d6eb0"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792400.36513_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T09:26:40.365130+00:00",
+    "details": {
+      "file_name": "Licensing Agreement - Fibi_Polus.pdf",
+      "file_id": "17211d35-b86b-4bfc-b806-03f412f96518",
+      "file_size": 278238,
+      "file_type": "pdf",
+      "chunk_count": 33,
+      "collection_id": "col_1c8d6eb0"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792400.68601_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T09:26:40.686010+00:00",
+    "details": {
+      "file_name": "Terms of Service - IACUC.pdf",
+      "file_id": "7615b972-ea73-4eb6-852e-ca3462fc400a",
+      "file_size": 168777,
+      "file_type": "pdf",
+      "chunk_count": 2,
+      "collection_id": "col_1c8d6eb0"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792402.937912_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T09:26:42.937912+00:00",
+    "details": {
+      "file_name": "System Specifications And Implementation Plan.pdf",
+      "file_id": "9fcfb68c-7524-4eed-a2ad-8931b576c3d9",
+      "file_size": 2156482,
+      "file_type": "pdf",
+      "chunk_count": 15,
+      "collection_id": "col_1c8d6eb0"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792409.00176_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T09:26:49.001760+00:00",
+    "details": {
+      "file_name": "Appendix A- Non-Technical Requirements.pdf",
+      "file_id": "1bbc11bf-0a73-448f-a9d5-831474eec0a0",
+      "file_size": 1240845,
+      "file_type": "pdf",
+      "chunk_count": 54,
+      "collection_id": "col_1c8d6eb0"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792409.787702_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T09:26:49.787702+00:00",
+    "details": {
+      "file_name": "APPENDIX B - SUBMISSION FORM.pdf",
+      "file_id": "5e13ef2c-d5f5-4b45-8cab-9fd2ff1bd738",
+      "file_size": 135626,
+      "file_type": "pdf",
+      "chunk_count": 7,
+      "collection_id": "col_1c8d6eb0"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792410.214448_file_upload",
+    "type": "file_upload",
+    "user": "asdf",
+    "timestamp": "2025-09-25T09:26:50.214448+00:00",
+    "details": {
+      "file_name": "Fibi IACUC.pdf",
+      "file_id": "75a820d7-110d-4deb-8d3a-a01142be24ec",
+      "file_size": 131531,
+      "file_type": "pdf",
+      "chunk_count": 4,
+      "collection_id": "col_1c8d6eb0"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792500.648427_file_upload",
+    "type": "file_upload",
+    "user": "zxc",
+    "timestamp": "2025-09-25T09:28:20.648427+00:00",
+    "details": {
+      "file_name": "Employee Benefits Policy.pdf",
+      "file_id": "62fdcc2c-7529-4d69-83fa-f33965b9421c",
+      "file_size": 451549,
+      "file_type": "pdf",
+      "chunk_count": 12,
+      "collection_id": "col_98534fa3"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792501.145059_file_upload",
+    "type": "file_upload",
+    "user": "zxc",
+    "timestamp": "2025-09-25T09:28:21.145059+00:00",
+    "details": {
+      "file_name": "Employee Referal Policy.pdf",
+      "file_id": "76f217d3-545d-4b70-aa5b-643b384c1445",
+      "file_size": 313511,
+      "file_type": "pdf",
+      "chunk_count": 3,
+      "collection_id": "col_98534fa3"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792501.771009_file_upload",
+    "type": "file_upload",
+    "user": "zxc",
+    "timestamp": "2025-09-25T09:28:21.771009+00:00",
+    "details": {
+      "file_name": "Employee Relation & Grievances.pdf",
+      "file_id": "3a023a25-af79-4141-ba43-d467d65ae261",
+      "file_size": 312758,
+      "file_type": "pdf",
+      "chunk_count": 5,
+      "collection_id": "col_98534fa3"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792503.111645_file_upload",
+    "type": "file_upload",
+    "user": "zxc",
+    "timestamp": "2025-09-25T09:28:23.111645+00:00",
+    "details": {
+      "file_name": "HSE Policy.pdf",
+      "file_id": "0d3e8725-4536-4b32-a5dc-7f25d599ba45",
+      "file_size": 339406,
+      "file_type": "pdf",
+      "chunk_count": 11,
+      "collection_id": "col_98534fa3"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792527.167752_file_upload",
+    "type": "file_upload",
+    "user": "zxc",
+    "timestamp": "2025-09-25T09:28:47.167752+00:00",
+    "details": {
+      "file_name": "Information_Security_Policy.pdf",
+      "file_id": "43f15eac-7d42-4add-b539-24f5321c1a42",
+      "file_size": 928121,
+      "file_type": "pdf",
+      "chunk_count": 224,
+      "collection_id": "col_98534fa3"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792527.646614_file_upload",
+    "type": "file_upload",
+    "user": "zxc",
+    "timestamp": "2025-09-25T09:28:47.646614+00:00",
+    "details": {
+      "file_name": "L&D Policy.pdf",
+      "file_id": "b5fcc3ca-df8c-4830-ae72-84b4b04648b1",
+      "file_size": 149903,
+      "file_type": "pdf",
+      "chunk_count": 1,
+      "collection_id": "col_98534fa3"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792528.775637_file_upload",
+    "type": "file_upload",
+    "user": "zxc",
+    "timestamp": "2025-09-25T09:28:48.775637+00:00",
+    "details": {
+      "file_name": "Leave Policy.pdf",
+      "file_id": "c5dc4bac-fcca-45ef-a8e0-33a24962e0bc",
+      "file_size": 464863,
+      "file_type": "pdf",
+      "chunk_count": 7,
+      "collection_id": "col_98534fa3"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792529.537741_file_upload",
+    "type": "file_upload",
+    "user": "zxc",
+    "timestamp": "2025-09-25T09:28:49.537741+00:00",
+    "details": {
+      "file_name": "Maternity Policy.pdf",
+      "file_id": "a3c5739d-5997-406e-b84a-fa3af0c1d7a4",
+      "file_size": 143653,
+      "file_type": "pdf",
+      "chunk_count": 1,
+      "collection_id": "col_98534fa3"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792530.179284_file_upload",
+    "type": "file_upload",
+    "user": "zxc",
+    "timestamp": "2025-09-25T09:28:50.179284+00:00",
+    "details": {
+      "file_name": "Office etiquettes Guidelines.pdf",
+      "file_id": "adf51503-424a-40f5-98aa-aa7d881bd0a9",
+      "file_size": 293644,
+      "file_type": "pdf",
+      "chunk_count": 4,
+      "collection_id": "col_98534fa3"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792530.98213_file_upload",
+    "type": "file_upload",
+    "user": "zxc",
+    "timestamp": "2025-09-25T09:28:50.982130+00:00",
+    "details": {
+      "file_name": "PIP Policy.pdf",
+      "file_id": "9ef0ce3f-6ce4-4b9f-b08d-b6cd6c7bb3ed",
+      "file_size": 404692,
+      "file_type": "pdf",
+      "chunk_count": 7,
+      "collection_id": "col_98534fa3"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792532.894022_file_upload",
+    "type": "file_upload",
+    "user": "zxc",
+    "timestamp": "2025-09-25T09:28:52.894022+00:00",
+    "details": {
+      "file_name": "Polus Employment Agreement.pdf",
+      "file_id": "bac7001a-2752-401f-b827-f9a382cf5b95",
+      "file_size": 316375,
+      "file_type": "pdf",
+      "chunk_count": 18,
+      "collection_id": "col_98534fa3"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792533.355808_file_upload",
+    "type": "file_upload",
+    "user": "zxc",
+    "timestamp": "2025-09-25T09:28:53.355808+00:00",
+    "details": {
+      "file_name": "POSH policy .pdf",
+      "file_id": "3a878dde-9219-4d3f-a3ef-51391809ae76",
+      "file_size": 164967,
+      "file_type": "pdf",
+      "chunk_count": 1,
+      "collection_id": "col_98534fa3"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792533.902154_file_upload",
+    "type": "file_upload",
+    "user": "zxc",
+    "timestamp": "2025-09-25T09:28:53.902154+00:00",
+    "details": {
+      "file_name": "Probation & Confirmation Policy.pdf",
+      "file_id": "45f5974c-764a-46f8-99a8-9d30f48c72d3",
+      "file_size": 294028,
+      "file_type": "pdf",
+      "chunk_count": 4,
+      "collection_id": "col_98534fa3"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758792534.355198_file_upload",
+    "type": "file_upload",
+    "user": "zxc",
+    "timestamp": "2025-09-25T09:28:54.355198+00:00",
+    "details": {
+      "file_name": "Reimbursement Policy.pdf",
+      "file_id": "483ebdca-0379-46d1-a6af-fe2b929c3fdb",
+      "file_size": 301380,
+      "file_type": "pdf",
+      "chunk_count": 3,
+      "collection_id": "col_98534fa3"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758793192.455354_chat_query",
+    "type": "chat_query",
+    "user": "asdfg",
+    "timestamp": "2025-09-25T09:39:52.455354+00:00",
+    "details": {
+      "question": "hi",
+      "session_id": "session_1758793189127_nlk9b6uc3",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 1369,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758793211.275526_chat_query",
+    "type": "chat_query",
+    "user": "asdfg",
+    "timestamp": "2025-09-25T09:40:11.275526+00:00",
+    "details": {
+      "question": "cloud hosting options",
+      "session_id": "session_1758793189127_nlk9b6uc3",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 2175,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758793238.637683_chat_query",
+    "type": "chat_query",
+    "user": "asdfg",
+    "timestamp": "2025-09-25T09:40:38.637683+00:00",
+    "details": {
+      "question": "leave policy?",
+      "session_id": "session_1758793189127_nlk9b6uc3",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3799,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794273.786485_file_upload",
+    "type": "file_upload",
+    "user": "hr",
+    "timestamp": "2025-09-25T09:57:53.786485+00:00",
+    "details": {
+      "file_name": "Employee Benefits Policy.pdf",
+      "file_id": "cb0a6e11-b39f-4269-973a-facedaa69fc6",
+      "file_size": 451549,
+      "file_type": "pdf",
+      "chunk_count": 12,
+      "collection_id": "col_a30ebac6"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794274.235222_file_upload",
+    "type": "file_upload",
+    "user": "hr",
+    "timestamp": "2025-09-25T09:57:54.235222+00:00",
+    "details": {
+      "file_name": "Employee Referal Policy.pdf",
+      "file_id": "9f01c1c1-426a-439f-90f9-e05603ea4c8c",
+      "file_size": 313511,
+      "file_type": "pdf",
+      "chunk_count": 3,
+      "collection_id": "col_a30ebac6"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794274.904707_file_upload",
+    "type": "file_upload",
+    "user": "hr",
+    "timestamp": "2025-09-25T09:57:54.904707+00:00",
+    "details": {
+      "file_name": "Employee Relation & Grievances.pdf",
+      "file_id": "86b105c4-bcf4-4bf3-a11d-7bff173ec806",
+      "file_size": 312758,
+      "file_type": "pdf",
+      "chunk_count": 5,
+      "collection_id": "col_a30ebac6"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794276.219076_file_upload",
+    "type": "file_upload",
+    "user": "hr",
+    "timestamp": "2025-09-25T09:57:56.219076+00:00",
+    "details": {
+      "file_name": "HSE Policy.pdf",
+      "file_id": "9b498b70-9283-4fc4-9a4e-c800218ac051",
+      "file_size": 339406,
+      "file_type": "pdf",
+      "chunk_count": 11,
+      "collection_id": "col_a30ebac6"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794304.558227_file_upload",
+    "type": "file_upload",
+    "user": "hr",
+    "timestamp": "2025-09-25T09:58:24.558227+00:00",
+    "details": {
+      "file_name": "Information_Security_Policy.pdf",
+      "file_id": "39c9e673-212e-4014-9795-55144b67652f",
+      "file_size": 928121,
+      "file_type": "pdf",
+      "chunk_count": 224,
+      "collection_id": "col_a30ebac6"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794305.01167_file_upload",
+    "type": "file_upload",
+    "user": "hr",
+    "timestamp": "2025-09-25T09:58:25.011670+00:00",
+    "details": {
+      "file_name": "L&D Policy.pdf",
+      "file_id": "0e1beef2-e92d-4fc9-8299-a0051caf769e",
+      "file_size": 149903,
+      "file_type": "pdf",
+      "chunk_count": 1,
+      "collection_id": "col_a30ebac6"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794305.961261_file_upload",
+    "type": "file_upload",
+    "user": "hr",
+    "timestamp": "2025-09-25T09:58:25.961261+00:00",
+    "details": {
+      "file_name": "Leave Policy.pdf",
+      "file_id": "742d91b5-372f-4152-8eac-4c4757783960",
+      "file_size": 464863,
+      "file_type": "pdf",
+      "chunk_count": 7,
+      "collection_id": "col_a30ebac6"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794306.413297_file_upload",
+    "type": "file_upload",
+    "user": "hr",
+    "timestamp": "2025-09-25T09:58:26.413297+00:00",
+    "details": {
+      "file_name": "Maternity Policy.pdf",
+      "file_id": "ae786e2e-1143-4b66-aca9-94d0aba3fbba",
+      "file_size": 143653,
+      "file_type": "pdf",
+      "chunk_count": 1,
+      "collection_id": "col_a30ebac6"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794307.044742_file_upload",
+    "type": "file_upload",
+    "user": "hr",
+    "timestamp": "2025-09-25T09:58:27.044742+00:00",
+    "details": {
+      "file_name": "Office etiquettes Guidelines.pdf",
+      "file_id": "5b2f03de-5ccc-4b72-9147-d8844f78a752",
+      "file_size": 293644,
+      "file_type": "pdf",
+      "chunk_count": 4,
+      "collection_id": "col_a30ebac6"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794308.024541_file_upload",
+    "type": "file_upload",
+    "user": "hr",
+    "timestamp": "2025-09-25T09:58:28.024541+00:00",
+    "details": {
+      "file_name": "PIP Policy.pdf",
+      "file_id": "f2989672-b074-4b1f-b17c-dd18f87f8f81",
+      "file_size": 404692,
+      "file_type": "pdf",
+      "chunk_count": 7,
+      "collection_id": "col_a30ebac6"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794310.253881_file_upload",
+    "type": "file_upload",
+    "user": "hr",
+    "timestamp": "2025-09-25T09:58:30.253881+00:00",
+    "details": {
+      "file_name": "Polus Employment Agreement.pdf",
+      "file_id": "bf7d1121-508e-444e-9913-f35cd8372ddb",
+      "file_size": 316375,
+      "file_type": "pdf",
+      "chunk_count": 18,
+      "collection_id": "col_a30ebac6"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794310.736424_file_upload",
+    "type": "file_upload",
+    "user": "hr",
+    "timestamp": "2025-09-25T09:58:30.736424+00:00",
+    "details": {
+      "file_name": "POSH policy .pdf",
+      "file_id": "18cc14c2-fa6f-4185-8635-f5cb21b54384",
+      "file_size": 164967,
+      "file_type": "pdf",
+      "chunk_count": 1,
+      "collection_id": "col_a30ebac6"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794311.278523_file_upload",
+    "type": "file_upload",
+    "user": "hr",
+    "timestamp": "2025-09-25T09:58:31.278523+00:00",
+    "details": {
+      "file_name": "Probation & Confirmation Policy.pdf",
+      "file_id": "f5a103ce-0472-4b79-a575-5fbe89b954df",
+      "file_size": 294028,
+      "file_type": "pdf",
+      "chunk_count": 4,
+      "collection_id": "col_a30ebac6"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794311.856273_file_upload",
+    "type": "file_upload",
+    "user": "hr",
+    "timestamp": "2025-09-25T09:58:31.856273+00:00",
+    "details": {
+      "file_name": "Reimbursement Policy.pdf",
+      "file_id": "1db80792-9f6c-4d32-9b31-999ff5f3d249",
+      "file_size": 301380,
+      "file_type": "pdf",
+      "chunk_count": 3,
+      "collection_id": "col_a30ebac6"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794324.026559_chat_query",
+    "type": "chat_query",
+    "user": "hr",
+    "timestamp": "2025-09-25T09:58:44.026559+00:00",
+    "details": {
+      "question": "Leave policy?",
+      "session_id": "session_1758794314721_wxixg1ssr",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 4765,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794431.788008_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:00:31.788008+00:00",
+    "details": {
+      "file_name": "Technology Acquisition Questionnaire (RFP).pdf",
+      "file_id": "0716c4b0-aadf-4700-bafb-57e8a05e3517",
+      "file_size": 367852,
+      "file_type": "pdf",
+      "chunk_count": 18,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794434.929852_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:00:34.929852+00:00",
+    "details": {
+      "file_name": "Technology Acquisition Questionnaire (RFP).docx (1).pdf",
+      "file_id": "07a1bddf-4d32-493f-ad56-180afec662cb",
+      "file_size": 367852,
+      "file_type": "pdf",
+      "chunk_count": 18,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794436.111768_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:00:36.111768+00:00",
+    "details": {
+      "file_name": "NCBS - Fibi Implementation.pdf",
+      "file_id": "e1e761da-54fc-4df8-80f2-056fddb905ac",
+      "file_size": 488521,
+      "file_type": "pdf",
+      "chunk_count": 5,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794437.573032_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:00:37.573032+00:00",
+    "details": {
+      "file_name": "Data_Privacy - PolusSolutions.pdf",
+      "file_id": "c2554b9e-f4b6-4253-835f-af793fd0c502",
+      "file_size": 194010,
+      "file_type": "pdf",
+      "chunk_count": 10,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794466.954548_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:01:06.954548+00:00",
+    "details": {
+      "file_name": "Information_Security_Policy - Polus Solutions.pdf",
+      "file_id": "8524f4a4-fa57-4d8f-8ef0-1f3660e3a327",
+      "file_size": 928121,
+      "file_type": "pdf",
+      "chunk_count": 224,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794479.118392_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:01:19.118392+00:00",
+    "details": {
+      "file_name": "Fibi Proposal - Salve Regina Universiy.pdf",
+      "file_id": "2b245f26-214a-40d8-bfb8-c394e4b01a91",
+      "file_size": 6755550,
+      "file_type": "pdf",
+      "chunk_count": 96,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794479.283546_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:01:19.283546+00:00",
+    "details": {
+      "file_name": "Organisation Chart - Polus Solutions.pdf",
+      "file_id": "ac45096c-85dd-4135-91d3-9fe525472910",
+      "file_size": 139679,
+      "file_type": "pdf",
+      "chunk_count": 1,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794480.315571_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:01:20.315571+00:00",
+    "details": {
+      "file_name": "SEO Analysis - FIBI Research.pdf",
+      "file_id": "17197cc0-0f0b-469c-9662-d9b3f323cac2",
+      "file_size": 173662,
+      "file_type": "pdf",
+      "chunk_count": 4,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794481.706991_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:01:21.706991+00:00",
+    "details": {
+      "file_name": "Hecvat supporting document - Data_Privacy - PolusSolutions.pdf",
+      "file_id": "8f734eec-c5c9-4cc7-9d06-543616b785d2",
+      "file_size": 194010,
+      "file_type": "pdf",
+      "chunk_count": 10,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794483.872026_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:01:23.872026+00:00",
+    "details": {
+      "file_name": "Fibi - eRA functional information - Polus Solutions.pdf",
+      "file_id": "98678380-9fbe-4c01-91c6-09de156a5f89",
+      "file_size": 9118123,
+      "file_type": "pdf",
+      "chunk_count": 15,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794486.245241_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:01:26.245241+00:00",
+    "details": {
+      "file_name": "Project Management Methodology and Scope of Work - Polus Solutions.pdf",
+      "file_id": "b82888b2-b1b3-4a7b-96e7-c3635c7b0aeb",
+      "file_size": 365113,
+      "file_type": "pdf",
+      "chunk_count": 20,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794490.175179_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:01:30.175179+00:00",
+    "details": {
+      "file_name": "Licensing Agreement - Fibi_Polus.pdf",
+      "file_id": "a821cc61-26ab-48b0-9a7f-42edf05952dd",
+      "file_size": 278238,
+      "file_type": "pdf",
+      "chunk_count": 33,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794490.560976_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:01:30.560976+00:00",
+    "details": {
+      "file_name": "Terms of Service - IACUC.pdf",
+      "file_id": "3bbe0eb2-e58b-487d-b211-0cf5f74e5ea1",
+      "file_size": 168777,
+      "file_type": "pdf",
+      "chunk_count": 2,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794492.452015_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:01:32.452015+00:00",
+    "details": {
+      "file_name": "System Specifications And Implementation Plan.pdf",
+      "file_id": "ae0af3f9-bb03-4fe4-a3bd-736dfecd0c60",
+      "file_size": 2156482,
+      "file_type": "pdf",
+      "chunk_count": 15,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794498.943584_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:01:38.943584+00:00",
+    "details": {
+      "file_name": "Appendix A- Non-Technical Requirements.pdf",
+      "file_id": "5037d438-1e59-42dc-b2a5-5a5048daa7e1",
+      "file_size": 1240845,
+      "file_type": "pdf",
+      "chunk_count": 54,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794499.747581_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:01:39.747581+00:00",
+    "details": {
+      "file_name": "APPENDIX B - SUBMISSION FORM.pdf",
+      "file_id": "0d2ad934-c9ba-4ebc-bbd0-105830a12e42",
+      "file_size": 135626,
+      "file_type": "pdf",
+      "chunk_count": 7,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794500.426634_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:01:40.426634+00:00",
+    "details": {
+      "file_name": "Fibi IACUC.pdf",
+      "file_id": "1435cb10-8bb4-4a41-98bf-150ecb09ca1c",
+      "file_size": 131531,
+      "file_type": "pdf",
+      "chunk_count": 4,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794512.397232_chat_query",
+    "type": "chat_query",
+    "user": "bd",
+    "timestamp": "2025-09-25T10:01:52.397232+00:00",
+    "details": {
+      "question": "cloud hosting",
+      "session_id": "session_1758794505098_9urs7htx5",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 2802,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758794531.265059_chat_query",
+    "type": "chat_query",
+    "user": "hr",
+    "timestamp": "2025-09-25T10:02:11.265059+00:00",
+    "details": {
+      "question": "cloud hosting specs",
+      "session_id": "session_1758794522922_httwctb5j",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3647,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758798557.247418_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-25T11:09:17.247418+00:00",
+    "details": {
+      "question": "hi",
+      "session_id": "session_1758689462813_n1ajs7",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 2651,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758798568.168812_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-25T11:09:28.168812+00:00",
+    "details": {
+      "question": "leave policy",
+      "session_id": "session_1758689462813_n1ajs7",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3817,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758798584.995534_chat_query",
+    "type": "chat_query",
+    "user": "user",
+    "timestamp": "2025-09-25T11:09:44.995534+00:00",
+    "details": {
+      "question": "cloud hosting spec",
+      "session_id": "session_1758689462813_n1ajs7",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 2737,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758799890.766698_chat_query",
+    "type": "chat_query",
+    "user": "bd",
+    "timestamp": "2025-09-25T11:31:30.766698+00:00",
+    "details": {
+      "question": "Hi",
+      "session_id": "session_1758799886846_rpcv5lsjr",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 2054,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758799910.045144_chat_query",
+    "type": "chat_query",
+    "user": "hr",
+    "timestamp": "2025-09-25T11:31:50.045144+00:00",
+    "details": {
+      "question": "hi",
+      "session_id": "session_1758799906478_w57s684b7",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 1968,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758801021.953687_chat_query",
+    "type": "chat_query",
+    "user": "superadmin",
+    "timestamp": "2025-09-25T11:50:21.953687+00:00",
+    "details": {
+      "question": "Hi",
+      "session_id": "session_1758801015334_e0eghf8sx",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 1915,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758801064.99322_chat_query",
+    "type": "chat_query",
+    "user": "superadmin",
+    "timestamp": "2025-09-25T11:51:04.993220+00:00",
+    "details": {
+      "question": "cloud hosting specs",
+      "session_id": "session_1758801015334_e0eghf8sx",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3946,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758802845.291397_chat_query",
+    "type": "chat_query",
+    "user": "superadmin",
+    "timestamp": "2025-09-25T12:20:45.291397+00:00",
+    "details": {
+      "question": "Leave policy?",
+      "session_id": "session_1758802832422_a4wgr6uf2",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3902,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758802900.432644_chat_query",
+    "type": "chat_query",
+    "user": "superadmin",
+    "timestamp": "2025-09-25T12:21:40.432644+00:00",
+    "details": {
+      "question": "leave policy",
+      "session_id": "session_1758802892036_m9klgn6ba",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 5141,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758803296.503147_chat_query",
+    "type": "chat_query",
+    "user": "superadmin",
+    "timestamp": "2025-09-25T12:28:16.503147+00:00",
+    "details": {
+      "question": "Leave Policz_",
+      "session_id": "session_1758803287950_z2y2adj8d",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 1815,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758803318.523007_chat_query",
+    "type": "chat_query",
+    "user": "superadmin",
+    "timestamp": "2025-09-25T12:28:38.523007+00:00",
+    "details": {
+      "question": "Cloud hosting specs",
+      "session_id": "session_1758803308714_su1evpcaw",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3355,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758803406.470881_chat_query",
+    "type": "chat_query",
+    "user": "superadmin",
+    "timestamp": "2025-09-25T12:30:06.470881+00:00",
+    "details": {
+      "question": "leave policy",
+      "session_id": "session_1758803394011_w9u2libcw",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 4906,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758803445.096613_chat_query",
+    "type": "chat_query",
+    "user": "bd",
+    "timestamp": "2025-09-25T12:30:45.096613+00:00",
+    "details": {
+      "question": "leave policy?",
+      "session_id": "session_1758803437925_e5b7r24mn",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3477,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758803703.752791_chat_query",
+    "type": "chat_query",
+    "user": "hr",
+    "timestamp": "2025-09-25T12:35:03.752791+00:00",
+    "details": {
+      "question": "Leave policy?",
+      "session_id": "session_1758803693386_0z4pjileo",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 4421,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758803708.115289_chat_query",
+    "type": "chat_query",
+    "user": "bd",
+    "timestamp": "2025-09-25T12:35:08.115289+00:00",
+    "details": {
+      "question": "Leave Policy?",
+      "session_id": "session_1758803660637_yjityewxk",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3152,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758803838.897097_chat_query",
+    "type": "chat_query",
+    "user": "bd",
+    "timestamp": "2025-09-25T12:37:18.897097+00:00",
+    "details": {
+      "question": "Leave Policy",
+      "session_id": "session_1758803825416_cio20umy5",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 5096,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758803843.686795_chat_query",
+    "type": "chat_query",
+    "user": "hr",
+    "timestamp": "2025-09-25T12:37:23.686795+00:00",
+    "details": {
+      "question": "Leave Policy",
+      "session_id": "session_1758803835816_25r2e65nl",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 4755,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758803889.02676_chat_query",
+    "type": "chat_query",
+    "user": "superadmin",
+    "timestamp": "2025-09-25T12:38:09.026760+00:00",
+    "details": {
+      "question": "leave polcy?",
+      "session_id": "session_1758803882252_qhj5pfm58",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 2733,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758803922.866894_chat_query",
+    "type": "chat_query",
+    "user": "superadmin",
+    "timestamp": "2025-09-25T12:38:42.866894+00:00",
+    "details": {
+      "question": "cloud hosting specs",
+      "session_id": "session_1758803915635_lkaq2p0iq",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 1679,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758804084.037019_chat_query",
+    "type": "chat_query",
+    "user": "bd",
+    "timestamp": "2025-09-25T12:41:24.037019+00:00",
+    "details": {
+      "question": "leave policy",
+      "session_id": "session_1758804075128_9geumm1br",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 4780,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758804119.292446_chat_query",
+    "type": "chat_query",
+    "user": "superadmin",
+    "timestamp": "2025-09-25T12:41:59.292446+00:00",
+    "details": {
+      "question": "leave policy",
+      "session_id": "session_1758804114485_qhvgo968l",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 1750,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758804315.933348_chat_query",
+    "type": "chat_query",
+    "user": "bd",
+    "timestamp": "2025-09-25T12:45:15.933348+00:00",
+    "details": {
+      "question": "leave policy",
+      "session_id": "session_1758804310414_loxlol7vz",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 1712,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758804344.05491_chat_query",
+    "type": "chat_query",
+    "user": "hr",
+    "timestamp": "2025-09-25T12:45:44.054910+00:00",
+    "details": {
+      "question": "cloud hosting specs",
+      "session_id": "session_1758804334482_2atvzo4le",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 2746,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758804410.533824_chat_query",
+    "type": "chat_query",
+    "user": "hr2",
+    "timestamp": "2025-09-25T12:46:50.533824+00:00",
+    "details": {
+      "question": "cloud hosting specs",
+      "session_id": "session_1758804401925_l8t9fkgre",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3889,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758804903.263704_chat_query",
+    "type": "chat_query",
+    "user": "hr2",
+    "timestamp": "2025-09-25T12:55:03.263704+00:00",
+    "details": {
+      "question": "claude hosting specs",
+      "session_id": "session_1758804891558_k6zw230vx",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 1909,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758804918.363819_chat_query",
+    "type": "chat_query",
+    "user": "hr2",
+    "timestamp": "2025-09-25T12:55:18.363819+00:00",
+    "details": {
+      "question": "leave policy",
+      "session_id": "session_1758804891558_k6zw230vx",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3446,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758804948.692272_chat_query",
+    "type": "chat_query",
+    "user": "hr2",
+    "timestamp": "2025-09-25T12:55:48.692272+00:00",
+    "details": {
+      "question": "Leave policy",
+      "session_id": "session_1758804936236_60i2vyxaw",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3727,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758805005.315806_chat_query",
+    "type": "chat_query",
+    "user": "hr2",
+    "timestamp": "2025-09-25T12:56:45.315806+00:00",
+    "details": {
+      "question": "Leave policy",
+      "session_id": "session_1758804936236_60i2vyxaw",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 3916,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758805204.486751_chat_query",
+    "type": "chat_query",
+    "user": "superadmin",
+    "timestamp": "2025-09-25T13:00:04.486751+00:00",
+    "details": {
+      "question": "Hi",
+      "session_id": "session_1758805200792_kbhj8dlu6",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 1454,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758806100.884786_chat_query",
+    "type": "chat_query",
+    "user": "hr2",
+    "timestamp": "2025-09-25T13:15:00.884786+00:00",
+    "details": {
+      "question": "hi",
+      "session_id": "session_1758806097394_bkuqx3cfw",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 1641,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1758809119.626121_file_upload",
+    "type": "file_upload",
+    "user": "bd",
+    "timestamp": "2025-09-25T14:05:19.626121+00:00",
+    "details": {
+      "file_name": "HSE Policy.pdf",
+      "file_id": "66ea624c-9395-4bce-9666-81475370df31",
+      "file_size": 339406,
+      "file_type": "pdf",
+      "chunk_count": 11,
+      "collection_id": "col_11b50c79"
+    },
+    "metadata": {
+      "processing_time": "completed",
+      "vector_store_type": "qdrant"
+    }
+  }
+]

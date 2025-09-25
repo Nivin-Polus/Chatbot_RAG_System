@@ -2,12 +2,16 @@ import { useState, useEffect } from "react";
 import Login from "./components/Login";
 import ChatWindow from "./components/ChatWindow";
 import AdminDashboard from "./components/AdminDashboard";
+import SuperAdminDashboard from "./components/SuperAdminDashboard";
+import UserAdminDashboard from "./components/UserAdminDashboard";
+import RegularUserDashboard from "./components/RegularUserDashboard";
 import api from "./api/api";
 import "./styles.css";
 
 function App() {
   const [loggedIn, setLoggedIn] = useState(!!localStorage.getItem("access_token"));
   const [userRole, setUserRole] = useState(localStorage.getItem("user_role"));
+  const [userData, setUserData] = useState(null);
   const [isValidating, setIsValidating] = useState(true);
 
   // Validate token on app start
@@ -20,12 +24,14 @@ function App() {
           await api.get("/files/list");
           setLoggedIn(true);
           setUserRole(localStorage.getItem("user_role"));
+          setUserData({
+            username: localStorage.getItem("username"),
+            role: localStorage.getItem("user_role"),
+            website_id: localStorage.getItem("website_id")
+          });
         } catch (err) {
           // Token is invalid, clear storage
-          localStorage.removeItem("access_token");
-          localStorage.removeItem("user_role");
-          setLoggedIn(false);
-          setUserRole(null);
+          clearUserData();
         }
       }
       setIsValidating(false);
@@ -34,16 +40,24 @@ function App() {
     validateToken();
   }, []);
 
-  const handleLogout = () => {
+  const clearUserData = () => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("user_role");
+    localStorage.removeItem("username");
+    localStorage.removeItem("website_id");
     setLoggedIn(false);
     setUserRole(null);
+    setUserData(null);
   };
 
-  const handleLogin = () => {
+  const handleLogout = () => {
+    clearUserData();
+  };
+
+  const handleLogin = (loginData) => {
     setLoggedIn(true);
-    setUserRole(localStorage.getItem("user_role"));
+    setUserRole(loginData.role);
+    setUserData(loginData);
   };
 
   // Show loading while validating token
@@ -61,30 +75,29 @@ function App() {
     return <Login onLogin={handleLogin} />;
   }
 
-  const isAdmin = userRole === "admin";
+  // Role-based dashboard rendering
+  const renderDashboard = () => {
+    switch (userRole) {
+      case 'super_admin':
+        return <SuperAdminDashboard onLogout={handleLogout} />;
+      case 'user_admin':
+      case 'admin': // Legacy support
+        return <UserAdminDashboard onLogout={handleLogout} />;
+      case 'user':
+        return <RegularUserDashboard onLogout={handleLogout} />;
+      default:
+        return (
+          <div className="error-container">
+            <h2>Unknown user role: {userRole}</h2>
+            <button onClick={handleLogout}>Logout</button>
+          </div>
+        );
+    }
+  };
 
   return (
     <div className="app-container">
-      <header className="app-header">
-        <h1>Knowledge Base Chatbot</h1>
-        <div className="header-info">
-          <span className="user-role">Role: {userRole}</span>
-          <button className="logout-btn" onClick={handleLogout}>
-            Logout
-          </button>
-        </div>
-      </header>
-      <div className="main-content">
-        {isAdmin ? (
-          // Admin Interface - New Dashboard
-          <AdminDashboard />
-        ) : (
-          // User Interface - Only Chat
-          <div className="user-layout">
-            <ChatWindow />
-          </div>
-        )}
-      </div>
+      {renderDashboard()}
     </div>
   );
 }

@@ -1,12 +1,13 @@
 # app/api/routes_files.py
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response, Query, Form, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from app.core.vector_singleton import get_vector_store
-from app.core.database import get_db, DATABASE_AVAILABLE, InMemoryFileMetadata
+from app.core.database import get_db, DATABASE_AVAILABLE
 from app.api.routes_auth import get_current_user
+from app.models.file_metadata import FileMetadata
 from app.utils.file_parser import parse_file
 from app.services.file_storage import FileStorageService
 from app.config import settings
@@ -30,9 +31,11 @@ class FileMeta(BaseModel):
     file_id: str
     file_name: str
     uploaded_by: str
-    upload_timestamp: str = None
-    file_size: int = None
+    uploader_id: Optional[str] = None
+    upload_timestamp: Optional[str] = None
+    file_size: Optional[int] = None
     processing_status: str = "completed"
+    collection_id: Optional[str] = None
 
 # In-memory metadata store for MVP (replace with DB in production)
 file_metadata_db = {}
@@ -43,44 +46,110 @@ file_metadata_db = {}
 @router.post("/upload", response_model=FileMeta)
 async def upload_file(
     uploaded_file: UploadFile = File(...),
+    collection_id: Optional[str] = Form(None),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     # Check if user has admin role
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in ["admin", "user_admin", "super_admin"]:
         raise HTTPException(status_code=403, detail="Only admin users can upload files")
+
+    # Determine website context (optional)
+    user_website_id = current_user.get("website_id")
+    uploader_id = current_user.get("user_id") or current_user.get("username")
+
+    if current_user.get("role") != "super_admin" and not user_website_id:
+        # Try to load from database for admins/users
+        from app.models.user import User
+        user_obj = db.query(User).filter(User.username == current_user["username"]).first()
+        if user_obj and user_obj.website_id:
+            user_website_id = user_obj.website_id
+        if user_obj and user_obj.user_id:
+            uploader_id = user_obj.user_id
+
+    collection_obj = None
+    if collection_id:
+        from app.models.collection import Collection, CollectionUser
+        collection_obj = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+        if not collection_obj:
+            raise HTTPException(status_code=404, detail="Collection not found")
+
+        # Align website context with collection
+        if not user_website_id and collection_obj.website_id:
+            user_website_id = collection_obj.website_id
+
+        if (
+            collection_obj.website_id
+            and user_website_id
+            and collection_obj.website_id != user_website_id
+            and current_user.get("role") != "super_admin"
+        ):
+            raise HTTPException(status_code=403, detail="Collection does not belong to your website")
+
+        # Permission checks for non super admins
+        role = current_user.get("role")
+        user_id = current_user.get("user_id")
+        if role in ["user_admin", "admin"] and collection_obj.admin_user_id != user_id:
+            raise HTTPException(status_code=403, detail="You are not the admin for this collection")
+        if role == "user":
+            membership = db.query(CollectionUser).filter(
+                CollectionUser.collection_id == collection_id,
+                CollectionUser.user_id == user_id
+            ).first()
+            if not membership:
+                raise HTTPException(status_code=403, detail="You do not have access to this collection")
+
+    if not uploader_id:
+        # Fallback to username if no primary key is available (shouldn't happen for real users)
+        uploader_id = current_user["username"]
+
+    # If no website_id is found, allow upload without website context
+    if not user_website_id:
+        logger.info(f"Allowing file upload without website context for user: {current_user['username']}")
     
     # Validate file type
     ext = uploaded_file.filename.split('.')[-1].lower()
-    if ext not in settings.ALLOWED_FILE_TYPES.split(','):
+    allowed_extensions = {
+        extension.strip().lower()
+        for extension in settings.ALLOWED_FILE_TYPES.split(',')
+        if extension.strip()
+    }
+
+    if ext not in allowed_extensions:
         raise HTTPException(status_code=400, detail="File type not allowed")
 
     # Read file content
     content = await uploaded_file.read()
     text_chunks = parse_file(uploaded_file.filename, content)
 
-    # Save file to disk using FileStorageService
+    # Save file to disk using FileStorageService with website_id
     # Reset file position for reading again
     uploaded_file.file.seek(0)
-    file_metadata = file_storage_service.save_file(uploaded_file, current_user["username"], db)
+    file_metadata = file_storage_service.save_file_with_website(
+        uploaded_file,
+        uploader_id,
+        user_website_id,
+        db,
+        collection_id=collection_id
+    )
     file_id = file_metadata.file_id
 
     # Get singleton vector store and store embeddings
     vector_store = get_vector_store()
     logger.info(f"[UPLOAD DEBUG] Vector store type: {'Qdrant' if vector_store.client else 'In-memory fallback'}")
     logger.info(f"[UPLOAD DEBUG] Processing {len(text_chunks)} chunks for file: {uploaded_file.filename}")
-    
     for i, chunk in enumerate(text_chunks):
         chunk_metadata = {
             "file_id": file_id,
             "file_name": uploaded_file.filename,
             "chunk_index": i,
-            "text": chunk
+            "text": chunk,
+            "website_id": user_website_id,
+            "collection_id": collection_id,
+            "uploader_id": uploader_id
         }
         vector_store.add_document(chunk, chunk_metadata)
-        logger.info(f"[UPLOAD DEBUG] Added chunk {i+1}/{len(text_chunks)} to vector store")
-    
-    # Update processing status
+        logger.info(f"[UPLOAD DEBUG] Added chunk {i+1}/{len(text_chunks)} to vector store for file: {uploaded_file.filename}")
     file_storage_service.update_processing_status(file_id, "completed", len(text_chunks), db)
     
     # Debug: Check if documents were actually stored
@@ -94,9 +163,11 @@ async def upload_file(
         file_id=file_id,
         file_name=uploaded_file.filename,
         uploaded_by=current_user["username"],
+        uploader_id=uploader_id,
         upload_timestamp=file_metadata.upload_timestamp.isoformat() if file_metadata.upload_timestamp else None,
         file_size=file_metadata.file_size,
-        processing_status="completed"
+        processing_status="completed",
+        collection_id=collection_id
     )
     file_metadata_db[file_id] = metadata
 
@@ -111,7 +182,8 @@ async def upload_file(
             "file_id": file_id,
             "file_size": file_metadata.file_size,
             "file_type": ext,
-            "chunk_count": len(text_chunks)
+            "chunk_count": len(text_chunks),
+            "collection_id": collection_id
         },
         metadata={
             "processing_time": "completed",
@@ -132,7 +204,7 @@ async def delete_file(
     db: Session = Depends(get_db)
 ):
     # Check if user has admin role
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in ["admin", "user_admin", "super_admin"]:
         raise HTTPException(status_code=403, detail="Only admin users can delete files")
     
     # Check if file exists in both in-memory store and database
@@ -184,24 +256,71 @@ async def delete_file(
 # List files endpoint
 # ------------------------
 @router.get("/list", response_model=List[FileMeta])
-async def list_files(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+async def list_files(
+    collection_id: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     try:
         if DATABASE_AVAILABLE and db:
             # Get files from database
             from app.models.file_metadata import FileMetadata
-            files = db.query(FileMetadata).all()
-            
+
+            from app.models.user import User
+            from app.models.collection import Collection, CollectionUser
+
+            query = db.query(FileMetadata)
+
+            if collection_id:
+                query = query.filter(FileMetadata.collection_id == collection_id)
+
+            role = current_user.get("role")
+            user_id = current_user.get("user_id")
+            user_website_id = current_user.get("website_id")
+
+            if role != "super_admin":
+                if not user_website_id and user_id:
+                    user_obj = db.query(User).filter(User.user_id == user_id).first()
+                    user_website_id = user_obj.website_id if user_obj else None
+
+                if user_website_id:
+                    query = query.filter(FileMetadata.website_id == user_website_id)
+                elif user_id:
+                    query = query.filter(FileMetadata.uploader_id == user_id)
+
+                if collection_id:
+                    if role in ["user_admin", "admin"]:
+                        collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+                        if not collection or collection.admin_user_id != user_id:
+                            raise HTTPException(status_code=403, detail="You do not manage this collection")
+                    elif role == "user":
+                        membership = db.query(CollectionUser).filter(
+                            CollectionUser.collection_id == collection_id,
+                            CollectionUser.user_id == user_id
+                        ).first()
+                        if not membership:
+                            raise HTTPException(status_code=403, detail="You do not have access to this collection")
+
+            files = query.all()
+
             # Convert to response format and update in-memory store
             file_list = []
             for file_metadata in files:
                 file_dict = file_metadata.to_dict()
+                uploader_name = (
+                    file_metadata.uploader.username
+                    if hasattr(file_metadata, "uploader") and file_metadata.uploader
+                    else file_dict.get("uploader_id")
+                )
                 metadata = FileMeta(
                     file_id=file_dict["file_id"],
                     file_name=file_dict["file_name"],
-                    uploaded_by=file_dict["uploader_id"],
+                    uploaded_by=uploader_name,
+                    uploader_id=file_dict.get("uploader_id"),
                     upload_timestamp=file_dict["upload_timestamp"],
                     file_size=file_dict["file_size"],
-                    processing_status=file_dict["processing_status"]
+                    processing_status=file_dict["processing_status"],
+                    collection_id=file_dict.get("collection_id")
                 )
                 file_list.append(metadata)
                 # Keep in-memory store in sync
@@ -210,10 +329,14 @@ async def list_files(current_user: dict = Depends(get_current_user), db: Session
             return file_list
         else:
             # Use in-memory storage only
+            if collection_id:
+                return [meta for meta in file_metadata_db.values() if meta.collection_id == collection_id]
             return list(file_metadata_db.values())
     except Exception as e:
         logger.error(f"Failed to list files: {e}")
         # Fallback to in-memory storage
+        if collection_id:
+            return [meta for meta in file_metadata_db.values() if meta.collection_id == collection_id]
         return list(file_metadata_db.values())
 
 
@@ -228,67 +351,84 @@ async def download_file(
 ):
     """Download original file by file_id"""
     try:
-        # Check permissions - admin can download any file, users can download their own
-        file_path = file_storage_service.get_file_path(file_id, db)
-        
-        if not file_path:
-            # Try in-memory metadata store as fallback
-            if file_id in file_metadata_db:
-                metadata = file_metadata_db[file_id]
-                # Check permissions
-                if current_user.get("role") != "admin" and metadata.uploaded_by != current_user["username"]:
-                    raise HTTPException(status_code=403, detail="Permission denied")
-                
-                # Try to find file in uploads directory
-                import glob
-                possible_files = glob.glob(f"uploads/*/{file_id}.*")
-                if possible_files:
-                    file_path = possible_files[0]
-                else:
-                    raise HTTPException(status_code=404, detail="File not found on disk")
-                    
-                return FileResponse(
-                    path=file_path,
-                    filename=metadata.file_name,
-                    media_type='application/octet-stream'
-                )
-            else:
-                raise HTTPException(status_code=404, detail="File not found")
-        
-        # Database mode - get file metadata
+        role = current_user.get("role")
+        user_id = current_user.get("user_id")
+        user_website_id = current_user.get("website_id")
+
+        db_metadata = None
         if DATABASE_AVAILABLE and db:
             from app.models.file_metadata import FileMetadata
-            file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
-            
-            if not file_metadata:
-                raise HTTPException(status_code=404, detail="File metadata not found")
-            
-            # Check if user has permission to download
-            if current_user.get("role") != "admin" and file_metadata.uploader_id != current_user["username"]:
-                raise HTTPException(status_code=403, detail="Permission denied")
-            
-            filename = file_metadata.file_name
-        else:
-            # Fallback mode - use in-memory metadata
-            if file_id in file_metadata_db:
-                metadata = file_metadata_db[file_id]
-                if current_user.get("role") != "admin" and metadata.uploaded_by != current_user["username"]:
-                    raise HTTPException(status_code=403, detail="Permission denied")
-                filename = metadata.file_name
+            db_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
+
+        cached_metadata = file_metadata_db.get(file_id)
+
+        if not db_metadata and not cached_metadata:
+            raise HTTPException(status_code=404, detail="File metadata not found")
+
+        filename = None
+        uploader_id = None
+        collection_id = None
+        website_id = None
+
+        if db_metadata:
+            filename = db_metadata.file_name
+            uploader_id = db_metadata.uploader_id
+            collection_id = db_metadata.collection_id
+            website_id = db_metadata.website_id
+        if cached_metadata:
+            filename = filename or cached_metadata.file_name
+            uploader_id = uploader_id or cached_metadata.uploader_id
+            collection_id = collection_id or cached_metadata.collection_id
+
+        if role != "super_admin":
+            if website_id and user_website_id and website_id != user_website_id:
+                raise HTTPException(status_code=403, detail="File belongs to a different website")
+
+            if uploader_id and uploader_id == user_id:
+                pass  # uploader can always download
             else:
-                raise HTTPException(status_code=404, detail="File metadata not found")
-        
-        # Check if file exists on disk
+                if collection_id and db_metadata:
+                    from app.models.collection import Collection, CollectionUser
+                    collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+                    if role in ["user_admin", "admin"]:
+                        if not collection or collection.admin_user_id != user_id:
+                            raise HTTPException(status_code=403, detail="You do not manage this collection")
+                    elif role == "user":
+                        membership = db.query(CollectionUser).filter(
+                            CollectionUser.collection_id == collection_id,
+                            CollectionUser.user_id == user_id
+                        ).first()
+                        if not membership:
+                            raise HTTPException(status_code=403, detail="You do not have access to this collection")
+                elif collection_id and not db_metadata:
+                    # No database metadata to verify, restrict to uploader or super admin
+                    raise HTTPException(status_code=403, detail="Unable to verify collection permissions")
+                elif role == "user":
+                    raise HTTPException(status_code=403, detail="Permission denied")
+
+        file_path = file_storage_service.get_file_path(file_id, db)
+        if not file_path:
+            import glob
+            possible_files = glob.glob(f"uploads/*/{file_id}.*")
+            if possible_files:
+                file_path = possible_files[0]
+            else:
+                raise HTTPException(status_code=404, detail="File not found on disk")
+
+        if not filename:
+            filename = f"download-{file_id}"
+
         if not os.path.exists(file_path):
             raise HTTPException(status_code=404, detail="File not found on disk")
-        
-        # Return file using FileResponse
+
         return FileResponse(
             path=file_path,
             filename=filename,
             media_type='application/octet-stream'
         )
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Download failed for file {file_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
@@ -310,7 +450,7 @@ async def get_file_metadata(
         raise HTTPException(status_code=404, detail="File not found")
     
     # Check permissions
-    if current_user.get("role") != "admin" and file_metadata.uploader_id != current_user["username"]:
+    if current_user.get("role") not in ["admin", "user_admin", "super_admin"] and file_metadata.uploader_id != current_user["username"]:
         raise HTTPException(status_code=403, detail="Permission denied")
     
     return file_metadata.to_dict()
@@ -322,7 +462,7 @@ async def get_file_metadata(
 @router.get("/debug/vector-stats")
 async def get_vector_stats(current_user: dict = Depends(get_current_user)):
     """Debug endpoint to check vector database contents"""
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in ["admin", "user_admin", "super_admin"]:
         raise HTTPException(status_code=403, detail="Only admin users can access debug info")
     
     try:
@@ -385,7 +525,7 @@ async def reset_all_files(
     db: Session = Depends(get_db)
 ):
     """Reset all files - delete all uploaded files and their data (admin only)"""
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in ["admin", "user_admin", "super_admin"]:
         raise HTTPException(status_code=403, detail="Only admin users can reset files")
     
     try:

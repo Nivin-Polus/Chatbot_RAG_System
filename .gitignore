@@ -137,10 +137,6 @@ chatbot_backend/.cache/
 chatbot_backend/sentence_transformers/
 chatbot_backend/.transformers_cache/
 chatbot_backend/.env
-/chatbot_backend
-chatbot_backend/.env
-chatbot_backend/.env
-chatbot_backend/.env
 
 # Ignore Python cache and environment files
 __pycache__/
@@ -159,3 +155,5 @@ __pycache__/
 chatbot_backend/__pycache__/
 chatbot_backend/app/__pycache__/
 chatbot_backend/app/*.pyc
+
+chatbot_frontend/node_modules/

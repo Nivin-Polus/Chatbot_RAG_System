@@ -86,6 +86,45 @@ class VectorStore:
             logger.info(f"Document added to memory: {metadata.get('file_name') if metadata else 'unknown'}")
         return doc_id
 
+    def add_documents_with_metadata(self, documents: list[dict]):
+        """Bulk add documents where each item has text and payload metadata"""
+        if not documents:
+            return []
+
+        self._ensure_collection()
+        inserted_ids = []
+
+        if self.client:
+            points = []
+            for doc in documents:
+                text = doc.get("text", "")
+                payload = doc.get("metadata", {})
+                vector = self.embeddings.encode(text)
+                doc_id = str(uuid.uuid4())
+                inserted_ids.append(doc_id)
+                points.append(
+                    self.PointStruct(
+                        id=doc_id,
+                        vector=vector.tolist(),
+                        payload=payload
+                    )
+                )
+            if points:
+                self.client.upsert(collection_name=self.collection_name, points=points)
+        else:
+            for doc in documents:
+                text = doc.get("text", "")
+                payload = doc.get("metadata", {})
+                vector = self.embeddings.encode(text)
+                doc_id = str(uuid.uuid4())
+                inserted_ids.append(doc_id)
+                self.documents[doc_id] = {
+                    "vector": vector,
+                    "payload": payload
+                }
+
+        return inserted_ids
+
     def delete_document(self, point_id: str):
         if self.client:
             self.client.delete(collection_name=self.collection_name, points=[point_id])
@@ -123,16 +162,43 @@ class VectorStore:
             logger.info(f"Deleted {len(to_delete)} chunks for file {file_id} from memory")
             return len(to_delete)
 
-    def search(self, query: str, top_k: int = 5):
+    def search(self, query: str, top_k: int = 5, collection_id: str = None):
         query_vector = self.embeddings.encode(query)
         
         if self.client:
             # Use Qdrant
+            qdrant_filter = None
+            if collection_id:
+                try:
+                    try:
+                        from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+                    except ImportError:
+                        from qdrant_client.models import Filter, FieldCondition, MatchValue  # type: ignore
+
+                    qdrant_filter = Filter(
+                        must=[
+                            FieldCondition(
+                                key="collection_id",
+                                match=MatchValue(value=collection_id)
+                            )
+                        ]
+                    )
+                except Exception as filter_error:
+                    logger.warning(f"Failed to apply collection filter: {filter_error}")
+
             results = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_vector.tolist(),
-                limit=top_k
+                limit=top_k,
+                query_filter=qdrant_filter
             )
+            try:
+                payload_collections = [r.payload.get("collection_id") for r in results[:5]]
+                logger.info(
+                    f"[QDRANT SEARCH] filter={collection_id} returned {len(results)} results, sample collections={payload_collections}"
+                )
+            except Exception as log_error:
+                logger.warning(f"[QDRANT SEARCH] Failed to log payload collections: {log_error}")
             return [{"payload": r.payload, "score": r.score} for r in results]
         else:
             # Use fallback: simple cosine similarity
@@ -146,6 +212,10 @@ class VectorStore:
             scores = []
             for doc_id, doc_data in self.documents.items():
                 try:
+                    # Skip documents outside requested collection
+                    if collection_id and doc_data["payload"].get("collection_id") and doc_data["payload"].get("collection_id") != collection_id:
+                        continue
+
                     # Cosine similarity
                     doc_vector = doc_data["vector"]
                     
