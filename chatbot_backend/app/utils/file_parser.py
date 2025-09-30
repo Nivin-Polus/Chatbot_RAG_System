@@ -31,7 +31,7 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE) -> List[str]:
 def parse_file(filename: str, content: bytes, chunk_size: int = CHUNK_SIZE) -> List[str]:
     """
     Extract text from file and split into chunks.
-    Supports PDF, DOCX, PPTX, XLS/XLSX, TXT.
+    Supports PDF, DOCX, PPTX, XLS/XLSX, TXT, CSV.
     """
     import logging
     logger = logging.getLogger("file_parser")
@@ -98,6 +98,57 @@ def parse_file(filename: str, content: bytes, chunk_size: int = CHUNK_SIZE) -> L
             except UnicodeDecodeError:
                 text = content.decode("latin-1")
                 logger.info(f"[FILE PARSER] TXT: Decoded with Latin-1")
+
+        elif ext == "csv":
+            logger.info(f"[FILE PARSER] Processing CSV file")
+            try:
+                # First try basic text decoding to ensure file is readable
+                try:
+                    decoded_content = content.decode("utf-8")
+                except UnicodeDecodeError:
+                    try:
+                        decoded_content = content.decode("latin-1")
+                    except UnicodeDecodeError:
+                        decoded_content = content.decode("utf-8", errors="ignore")
+                
+                # Try to read CSV with pandas
+                try:
+                    df = pd.read_csv(BytesIO(content))
+                    row_count = len(df)
+                    col_count = len(df.columns)
+                    
+                    # Convert CSV to readable text format
+                    text_lines = []
+                    
+                    # Add header row
+                    header = " | ".join(df.columns.astype(str))
+                    text_lines.append(f"Headers: {header}")
+                    text_lines.append("-" * len(header))
+                    
+                    # Add data rows (limit to prevent huge files)
+                    max_rows = min(1000, row_count)  # Limit to 1000 rows for performance
+                    for index, row in df.head(max_rows).iterrows():
+                        row_text = " | ".join([str(cell) if pd.notna(cell) else "" for cell in row])
+                        if row_text.strip():
+                            text_lines.append(f"Row {index + 1}: {row_text}")
+                    
+                    if row_count > max_rows:
+                        text_lines.append(f"... and {row_count - max_rows} more rows")
+                    
+                    text = "\n".join(text_lines)
+                    logger.info(f"[FILE PARSER] CSV: Processed {min(max_rows, row_count)} of {row_count} rows, {col_count} columns")
+                    
+                except Exception as pandas_error:
+                    logger.warning(f"[FILE PARSER] CSV pandas parsing failed: {pandas_error}")
+                    # Fallback: treat as plain text
+                    text = decoded_content
+                    logger.info(f"[FILE PARSER] CSV: Using fallback text parsing")
+                
+            except Exception as csv_error:
+                logger.error(f"[FILE PARSER] CSV processing failed: {csv_error}")
+                # Last resort: return minimal text
+                text = f"CSV file content (parsing failed): {filename}"
+                logger.info(f"[FILE PARSER] CSV: Using minimal fallback")
 
         else:
             logger.error(f"[FILE PARSER] Unsupported file type: {ext}")

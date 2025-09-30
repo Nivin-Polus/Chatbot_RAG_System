@@ -1,63 +1,21 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import api from '../api/api';
 import FileUploader from './FileUploader';
 import ChatWindow from './ChatWindow';
-import './SuperAdminDashboard.css';
+import Layout from './Layout';
 
-// Material UI Components
-import {
-  Box,
-  Drawer,
-  AppBar,
-  Toolbar,
-  List,
-  Typography,
-  Divider,
-  IconButton,
-  Container,
-  Grid,
-  Card,
-  CardContent,
-  CardHeader,
-  Button,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  TextField,
-  MenuItem,
-  Select,
-  FormControl,
-  InputLabel,
-  Chip,
-  LinearProgress,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Snackbar,
-  Alert,
-  FormControlLabel,
-  Switch
-} from '@mui/material';
-import ChatIcon from '@mui/icons-material/Chat';
-
-import {
-  Menu as MenuIcon,
-  Dashboard as DashboardIcon,
-  Collections as CollectionsIcon,
-  People as PeopleIcon,
-  SmartToy as PromptIcon,
-  ExitToApp as LogoutIcon,
-  Add as AddIcon,
-  ChevronLeft as ChevronLeftIcon,
-  Notifications as NotificationsIcon,
-  AccountCircle
-} from '@mui/icons-material';
-
+// Modern icon components using emojis and SVG
+const DashboardIcon = () => <span className="w-6 h-6 text-xl">📊</span>;
+const CollectionsIcon = () => <span className="w-6 h-6 text-xl">📚</span>;
+const PeopleIcon = () => <span className="w-6 h-6 text-xl">👥</span>;
+const PromptIcon = () => <span className="w-6 h-6 text-xl">🤖</span>;
+const LogoutIcon = () => <span className="w-6 h-6 text-xl">🚪</span>;
+const AddIcon = () => <span className="w-6 h-6 text-xl">➕</span>;
+const ChatIcon = () => <span className="w-6 h-6 text-xl">💬</span>;
+const AccountCircle = () => <span className="w-6 h-6 text-xl">👤</span>;
+const NotificationsIcon = () => <span className="w-6 h-6 text-xl">🔔</span>;
+const MenuIcon = () => <span className="w-6 h-6 text-xl">☰</span>;
+const CloseIcon = () => <span className="w-6 h-6 text-xl">✕</span>;
 
 const SuperAdminDashboard = ({ onLogout }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -93,6 +51,8 @@ const SuperAdminDashboard = ({ onLogout }) => {
   const [selectedCollectionId, setSelectedCollectionId] = useState(null);
   const [collectionPrompts, setCollectionPrompts] = useState({});
   const [promptDialog, setPromptDialog] = useState({ open: false, mode: 'create', prompt: null });
+  const [healthOverview, setHealthOverview] = useState(null);
+  const [resetDialog, setResetDialog] = useState({ open: false, password: '' });
   const [promptForm, setPromptForm] = useState(getDefaultPromptForm);
   const [promptCollectionFilter, setPromptCollectionFilter] = useState('all');
   const [chatCollectionId, setChatCollectionId] = useState('');
@@ -129,7 +89,8 @@ const SuperAdminDashboard = ({ onLogout }) => {
     website_url: '',
     admin_email: '',
     admin_username: '',
-    admin_password: ''
+    admin_password: '',
+    is_active: true
   });
 
   const [newUser, setNewUser] = useState({
@@ -147,468 +108,46 @@ const SuperAdminDashboard = ({ onLogout }) => {
     setNotification({ open: true, message, severity });
   };
 
-  const ChangeUserPasswordDialog = () => (
-    <Dialog open={userPasswordDialog.open} onClose={closeUserPasswordDialog} maxWidth="sm" fullWidth>
-      <DialogTitle>Reset Password</DialogTitle>
-      <DialogContent>
-        <Typography variant="body2" sx={{ mb: 2 }}>
-          Set a new password for <strong>{userPasswordDialog.user?.username}</strong>.
-        </Typography>
-        <Grid container spacing={2}>
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="New Password"
-              type="password"
-              value={userPasswordForm.new_password}
-              onChange={(e) => setUserPasswordForm((prev) => ({ ...prev, new_password: e.target.value }))}
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Confirm Password"
-              type="password"
-              value={userPasswordForm.confirm_password}
-              onChange={(e) => setUserPasswordForm((prev) => ({ ...prev, confirm_password: e.target.value }))}
-            />
-          </Grid>
-        </Grid>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={closeUserPasswordDialog}>Cancel</Button>
-        <Button variant="contained" onClick={handleResetUserPassword}>Update Password</Button>
-      </DialogActions>
-    </Dialog>
-  );
-
-  const ChangeSelfPasswordDialog = () => (
-    <Dialog open={selfPasswordDialog} onClose={closeSelfPasswordDialog} maxWidth="sm" fullWidth>
-      <DialogTitle>Change Your Password</DialogTitle>
-      <DialogContent>
-        <Grid container spacing={2} sx={{ mt: 1 }}>
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Current Password"
-              type="password"
-              value={selfPasswordForm.current_password}
-              onChange={(e) => setSelfPasswordForm((prev) => ({ ...prev, current_password: e.target.value }))}
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="New Password"
-              type="password"
-              value={selfPasswordForm.new_password}
-              onChange={(e) => setSelfPasswordForm((prev) => ({ ...prev, new_password: e.target.value }))}
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Confirm Password"
-              type="password"
-              value={selfPasswordForm.confirm_password}
-              onChange={(e) => setSelfPasswordForm((prev) => ({ ...prev, confirm_password: e.target.value }))}
-            />
-          </Grid>
-        </Grid>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={closeSelfPasswordDialog}>Cancel</Button>
-        <Button variant="contained" onClick={handleChangeOwnPassword}>Change Password</Button>
-      </DialogActions>
-    </Dialog>
-  );
-
-  const EditCollectionDialog = () => (
-    <Dialog open={editCollectionDialog.open} onClose={closeEditCollectionDialog} maxWidth="sm" fullWidth>
-      <DialogTitle>Edit Collection</DialogTitle>
-      <DialogContent>
-        <Grid container spacing={2} sx={{ mt: 1 }}>
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Collection Name"
-              value={editCollectionForm.name}
-              onChange={(e) => handleEditCollectionFieldChange('name', e.target.value)}
-              required
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Description"
-              multiline
-              rows={3}
-              value={editCollectionForm.description}
-              onChange={(e) => handleEditCollectionFieldChange('description', e.target.value)}
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Website URL"
-              type="url"
-              value={editCollectionForm.website_url}
-              onChange={(e) => handleEditCollectionFieldChange('website_url', e.target.value)}
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={editCollectionForm.is_active}
-                  onChange={(e) => handleEditCollectionFieldChange('is_active', e.target.checked)}
-                />
-              }
-              label={editCollectionForm.is_active ? 'Active' : 'Inactive'}
-            />
-          </Grid>
-        </Grid>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={closeEditCollectionDialog}>Cancel</Button>
-        <Button variant="contained" onClick={handleSaveCollection}>
-          Save Changes
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-
-  const EditUserDialog = () => (
-    <Dialog open={editUserDialog.open} onClose={closeEditUserDialog} maxWidth="sm" fullWidth>
-      <DialogTitle>Edit User</DialogTitle>
-      <DialogContent>
-        <Grid container spacing={2} sx={{ mt: 1 }}>
-          <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              label="Full Name"
-              value={editUserForm.full_name}
-              onChange={(e) => handleEditUserFieldChange('full_name', e.target.value)}
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              label="Email"
-              type="email"
-              value={editUserForm.email}
-              onChange={(e) => handleEditUserFieldChange('email', e.target.value)}
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <FormControl fullWidth>
-              <InputLabel>Role</InputLabel>
-              <Select
-                value={editUserForm.role}
-                label="Role"
-                onChange={(e) => handleEditUserFieldChange('role', e.target.value)}
-              >
-                <MenuItem value="super_admin" disabled>Super Admin</MenuItem>
-                <MenuItem value="user_admin">User Admin</MenuItem>
-                <MenuItem value="user">Regular User</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <FormControl fullWidth disabled={editUserForm.role === 'super_admin'}>
-              <InputLabel>Collection</InputLabel>
-              <Select
-                value={editUserForm.collection_id || ''}
-                label="Collection"
-                onChange={(e) => handleEditUserFieldChange('collection_id', e.target.value)}
-              >
-                <MenuItem value="">None</MenuItem>
-                {dashboardData.collections.map((collection) => (
-                  <MenuItem key={collection.collection_id} value={collection.collection_id}>
-                    {collection.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-        </Grid>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={closeEditUserDialog}>Cancel</Button>
-        <Button variant="contained" onClick={handleSaveUser}>Save Changes</Button>
-      </DialogActions>
-    </Dialog>
-  );
-
-  const handleDeleteUser = async (user) => {
-    if (!user || !user.user_id) {
-      return;
-    }
-
-    if (user.role === 'super_admin') {
-      showNotification('Super admin accounts cannot be deleted.', 'warning');
-      return;
-    }
-
-    const currentUserId = currentUserIdRef.current;
-    if (currentUserId && String(currentUserId) === String(user.user_id)) {
-      showNotification('You cannot delete the account you are currently using.', 'warning');
-      return;
-    }
-
-    const confirmed = window.confirm(`Are you sure you want to delete the user "${user.username}"?`);
-    if (!confirmed) {
-      return;
-    }
-
-    try {
-      await api.delete(`/users/${user.user_id}`);
-      showNotification('User deleted successfully!');
-      await loadData(true);
-    } catch (error) {
-      showNotification('Error deleting user: ' + (error.response?.data?.detail || error.message), 'error');
-    }
-  };
-
-  const handleCloseNotification = () => {
-    setNotification((prev) => ({ ...prev, open: false }));
-  };
-
-  const handleCollectionChange = useCallback((collectionId) => {
-    setSelectedCollectionId(collectionId);
-  }, []);
-
-  const openUserPasswordDialog = (user) => {
-    if (!user) return;
-    setUserPasswordForm({ new_password: '', confirm_password: '' });
-    setUserPasswordDialog({ open: true, user });
-  };
-
-  const closeUserPasswordDialog = () => {
-    setUserPasswordDialog({ open: false, user: null });
-  };
-
-  const handleResetUserPassword = async () => {
-    const { new_password, confirm_password } = userPasswordForm;
-    if (!userPasswordDialog.user) return;
-
-    if (!new_password || new_password.length < 6) {
-      showNotification('New password must be at least 6 characters.', 'warning');
-      return;
-    }
-
-    if (new_password !== confirm_password) {
-      showNotification('Passwords do not match.', 'warning');
-      return;
-    }
-
-    try {
-      await api.post('/users/reset-password', {
-        user_id: userPasswordDialog.user.user_id,
-        new_password
-      });
-      showNotification('Password reset successfully!');
-      closeUserPasswordDialog();
-    } catch (error) {
-      showNotification('Error resetting password: ' + (error.response?.data?.detail || error.message), 'error');
-    }
-  };
-
-  const openSelfPasswordDialog = () => {
-    setSelfPasswordForm({ current_password: '', new_password: '', confirm_password: '' });
-    setSelfPasswordDialog(true);
-  };
-
-  const closeSelfPasswordDialog = () => {
-    setSelfPasswordDialog(false);
-  };
-
-  const handleChangeOwnPassword = async () => {
-    const { current_password, new_password, confirm_password } = selfPasswordForm;
-
-    if (!current_password) {
-      showNotification('Current password is required.', 'warning');
-      return;
-    }
-
-    if (!new_password || new_password.length < 6) {
-      showNotification('New password must be at least 6 characters.', 'warning');
-      return;
-    }
-
-    if (new_password !== confirm_password) {
-      showNotification('Passwords do not match.', 'warning');
-      return;
-    }
-
-    try {
-      await api.post('/auth/change-password', {
-        current_password,
-        new_password
-      });
-      showNotification('Password changed successfully!');
-      closeSelfPasswordDialog();
-    } catch (error) {
-      showNotification('Error changing password: ' + (error.response?.data?.detail || error.message), 'error');
-    }
-  };
-
-  const openEditCollectionDialog = (collection) => {
-    if (!collection) return;
-    setEditCollectionForm({
-      name: collection.name || '',
-      description: collection.description || '',
-      website_url: collection.website_url || '',
-      is_active: collection.is_active !== false
-    });
-    setEditCollectionDialog({ open: true, collection });
-  };
-
-  const closeEditCollectionDialog = () => {
-    setEditCollectionDialog({ open: false, collection: null });
-  };
-
-  const handleEditCollectionFieldChange = (field, value) => {
-    setEditCollectionForm((prev) => ({
-      ...prev,
-      [field]: value
-    }));
-  };
-
-  const handleSaveCollection = async () => {
-    const collection = editCollectionDialog.collection;
-    if (!collection) return;
-
-    try {
-      const payload = {
-        name: editCollectionForm.name,
-        description: editCollectionForm.description,
-        website_url: editCollectionForm.website_url,
-        is_active: editCollectionForm.is_active
-      };
-
-      await api.put(`/collections/${collection.collection_id}`, payload);
-      showNotification('Collection updated successfully!');
-      closeEditCollectionDialog();
-      await loadCollections(true);
-    } catch (error) {
-      showNotification('Error updating collection: ' + (error.response?.data?.detail || error.message), 'error');
-    }
-  };
-
-  const openEditUserDialog = (user) => {
-    if (!user) return;
-    setEditUserForm({
-      full_name: user.full_name || '',
-      email: user.email || '',
-      role: user.role || 'user'
-    });
-    setEditUserDialog({ open: true, user });
-  };
-
-  const closeEditUserDialog = () => {
-    setEditUserDialog({ open: false, user: null });
-  };
-
-  const handleEditUserFieldChange = (field, value) => {
-    setEditUserForm((prev) => ({
-      ...prev,
-      [field]: value
-    }));
-  };
-
-  const handleSaveUser = async () => {
-    const user = editUserDialog.user;
-    if (!user) return;
-
-    try {
-      const payload = {
-        full_name: editUserForm.full_name,
-        email: editUserForm.email,
-        role: editUserForm.role
-      };
-
-      await api.put(`/users/${user.user_id}`, payload);
-      showNotification('User updated successfully!');
-      closeEditUserDialog();
-      await loadUsers(true);
-    } catch (error) {
-      showNotification('Error updating user: ' + (error.response?.data?.detail || error.message), 'error');
-    }
-  };
-
-  const handleNewCollectionChange = useCallback((field, value) => {
-    setNewCollection(prev => ({ ...prev, [field]: value }));
-  }, []);
-
-const handleNewUserChange = useCallback((field, value) => {
-    setNewUser(prev => ({ ...prev, [field]: value }));
-  }, []);
-
-  const handleDrawerToggle = () => {
-    setMobileOpen(!mobileOpen);
-  };
-
   useEffect(() => {
-    if (!loadedTabsRef.current.has('overview')) {
-      loadedTabsRef.current.add('overview');
-      loadData(true, 'overview');
-    }
-  }, []);
+    if (!notification.open) return;
 
-  useEffect(() => {
-    const needsLoad = !loadedTabsRef.current.has(activeTab);
-    if (needsLoad) {
-      loadedTabsRef.current.add(activeTab);
-      loadData(true);
-    }
-  }, [activeTab]);
+    const timer = setTimeout(() => {
+      setNotification(prev => ({ ...prev, open: false }));
+    }, 4000);
 
-  useEffect(() => {
-    if (!dashboardData.collections.length) {
-      return;
-    }
+    return () => clearTimeout(timer);
+  }, [notification.open]);
 
-    if (activeTab === 'collections' || activeTab === 'files') {
-      setSelectedCollectionId((prev) => prev || dashboardData.collections[0].collection_id);
-    }
-  }, [activeTab, dashboardData.collections]);
+  // Navigation items
+  const menuItems = [
+    { id: 'overview', label: 'Overview', icon: DashboardIcon, description: 'System overview and statistics' },
+    { id: 'collections', label: 'Collections', icon: CollectionsIcon, description: 'Manage document collections' },
+    { id: 'files', label: 'Files', icon: CollectionsIcon, description: 'File management' },
+    { id: 'users', label: 'Users', icon: PeopleIcon, description: 'User management' },
+    { id: 'prompts', label: 'Prompts', icon: PromptIcon, description: 'AI prompt management' },
+    { id: 'chat', label: 'Chat', icon: ChatIcon, description: 'Test chat interface' },
+    { id: 'reset', label: 'Reset', icon: CloseIcon, description: 'Reset system to defaults (requires superadmin password)' }
+  ];
 
-  useEffect(() => {
-    if (!dashboardData.collections.length) {
-      return;
-    }
-
-    const fallbackCollectionId = selectedCollectionId || dashboardData.collections[0].collection_id;
-
-    setNewUser((prev) => {
-      if (prev.collection_id === fallbackCollectionId) {
-        return prev;
-      }
-      return {
-        ...prev,
-        collection_id: fallbackCollectionId
-      };
-    });
-  }, [dashboardData.collections, selectedCollectionId]);
-
-  const loadData = async (force = false, tabOverride = null) => {
+  // Load data function
+  const loadData = useCallback(async (force = false, tabOverride = null) => {
     const tabToLoad = tabOverride || activeTab;
     const hasData = () => {
       switch (tabToLoad) {
-        case 'collections':
-          return dashboardData.collections.length > 0;
-        case 'users':
-          return dashboardData.users.length > 0;
-        case 'prompts':
-          return dashboardData.prompts.length > 0;
         case 'overview':
+          return dashboardData.systemStats && Object.keys(dashboardData.systemStats).length > 0;
+        case 'collections':
+          return dashboardData.collections && dashboardData.collections.length > 0;
+        case 'users':
+          return dashboardData.users && dashboardData.users.length > 0;
+        case 'prompts':
+          return dashboardData.prompts && dashboardData.prompts.length > 0;
         default:
-          return Object.keys(dashboardData.systemStats).length > 0;
+          return false;
       }
     };
 
-    if (!force && hasData()) {
+    if (!force && hasData() && loadedTabsRef.current.has(tabToLoad)) {
       return;
     }
 
@@ -616,7 +155,7 @@ const handleNewUserChange = useCallback((field, value) => {
     try {
       switch (tabToLoad) {
         case 'overview':
-          await loadOverviewData(force);
+          await Promise.all([loadOverviewData(force), loadHealth(force)]);
           break;
         case 'collections':
           await loadCollections(force);
@@ -627,1385 +166,1695 @@ const handleNewUserChange = useCallback((field, value) => {
         case 'prompts':
           await loadPrompts(force);
           break;
-        case 'files':
-          await loadCollections(force);
-          break;
-        case 'chat':
-          await Promise.all([loadCollections(force), loadPrompts(force)]);
-          break;
-        default:
-          await loadOverviewData(force);
       }
+      loadedTabsRef.current.add(tabToLoad);
     } catch (error) {
-      showNotification('Error loading data: ' + (error.response?.data?.detail || error.message), 'error');
+      console.error(`Error loading ${tabToLoad} data:`, error);
+      showNotification(`Failed to load ${tabToLoad} data`, 'error');
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab, dashboardData]);
 
   const loadOverviewData = async (force = false) => {
     try {
+      // Load all data and calculate stats from actual arrays (like old frontend)
       const [collectionsRes, usersRes, promptsRes] = await Promise.all([
         api.get('/collections/'),
         api.get('/users/'),
         api.get('/prompts/')
       ]);
-
+      
+      // Calculate stats from actual data
       const systemStats = {
-        totalCollections: collectionsRes.data.length,
-        totalUsers: usersRes.data.length,
-        totalPrompts: promptsRes.data.length,
-        activeCollections: collectionsRes.data.filter(c => c.is_active).length,
-        activeUsers: usersRes.data.filter(u => u.is_active).length,
-        superAdmins: usersRes.data.filter(u => u.role === 'super_admin').length,
-        userAdmins: usersRes.data.filter(u => u.role === 'user_admin').length,
-        regularUsers: usersRes.data.filter(u => u.role === 'user').length
+        total_collections: collectionsRes.data.length,
+        total_users: usersRes.data.length,
+        total_files: 0, // Will be updated when files are loaded
+        total_prompts: promptsRes.data.length
       };
-
-      const groupedPrompts = promptsRes.data.reduce((acc, prompt) => {
-        const key = prompt.collection_id || 'global';
-        if (!acc[key]) acc[key] = [];
-        acc[key].push(prompt);
-        return acc;
-      }, {});
-
+      
       setDashboardData(prev => ({
-        collections: force ? collectionsRes.data : prev.collections.length ? prev.collections : collectionsRes.data,
-        users: force ? usersRes.data : prev.users.length ? prev.users : usersRes.data,
-        prompts: force ? promptsRes.data : prev.prompts.length ? prev.prompts : promptsRes.data,
+        ...prev,
+        collections: collectionsRes.data,
+        users: usersRes.data,
+        prompts: promptsRes.data,
         systemStats
       }));
-      setCollectionPrompts(groupedPrompts);
     } catch (error) {
-      showNotification('Error loading overview data', 'error');
+      console.error('Error loading overview data:', error);
+      // Fallback to basic stats
+      setDashboardData(prev => ({
+        ...prev,
+        systemStats: {
+          total_collections: 0,
+          total_users: 0,
+          total_files: 0,
+          total_prompts: 0
+        }
+      }));
     }
   };
 
   const loadCollections = async (force = false) => {
-    if (!force && dashboardData.collections.length > 0) {
-      if (!selectedCollectionId && dashboardData.collections.length) {
-        setSelectedCollectionId(dashboardData.collections[0].collection_id);
+    try {
+      const response = await api.get('/collections/');
+      setDashboardData(prev => ({
+        ...prev,
+        collections: response.data || [],
+        systemStats: {
+          ...prev.systemStats,
+          total_collections: response.data?.length || 0
+        }
+      }));
+    } catch (error) {
+      console.error('Error loading collections:', error);
+      setDashboardData(prev => ({
+        ...prev,
+        collections: []
+      }));
+    }
+  };
+
+  const saveCollectionChanges = async () => {
+    if (!editCollectionDialog.collection) return;
+
+    try {
+      const collectionData = {
+        name: editCollectionForm.name,
+        description: editCollectionForm.description,
+        website_url: editCollectionForm.website_url,
+        is_active: editCollectionForm.is_active
+      };
+
+      await api.put(`/collections/${editCollectionDialog.collection.collection_id}`, collectionData);
+      
+      // Update local state
+      setDashboardData(prev => ({
+        ...prev,
+        collections: prev.collections.map(c => 
+          c.collection_id === editCollectionDialog.collection.collection_id 
+            ? { ...c, ...collectionData }
+            : c
+        )
+      }));
+      
+      setEditCollectionDialog({ open: false, collection: null });
+      showNotification('Collection updated successfully!');
+    } catch (error) {
+      console.error('Error updating collection:', error);
+      showNotification('Failed to update collection: ' + (error.response?.data?.detail || error.message), 'error');
+    }
+  };
+
+  const savePromptChanges = async () => {
+    try {
+      if (promptDialog.mode === 'create') {
+        // Create new prompt
+        console.log('Creating prompt with data:', promptForm);
+        const response = await api.post('/prompts/', promptForm);
+        console.log('Prompt create response:', response.data);
+        
+        // Refresh prompts data
+        await loadPrompts();
+        showNotification('Prompt created successfully!');
+      } else {
+        // Update existing prompt
+        console.log('Updating prompt with data:', promptForm);
+        const response = await api.put(`/prompts/${promptDialog.prompt.prompt_id}`, promptForm);
+        console.log('Prompt update response:', response.data);
+        
+        // Update local state
+        setDashboardData(prev => ({
+          ...prev,
+          prompts: prev.prompts.map(p => 
+            p.prompt_id === promptDialog.prompt.prompt_id 
+              ? { ...p, ...response.data }
+              : p
+          )
+        }));
+        
+        // Also update collection prompts if it's in there
+        if (promptForm.collection_id) {
+          setCollectionPrompts(prev => ({
+            ...prev,
+            [promptForm.collection_id]: prev[promptForm.collection_id]?.map(p => 
+              p.prompt_id === promptDialog.prompt.prompt_id 
+                ? { ...p, ...response.data }
+                : p
+            ) || []
+          }));
+        }
+        
+        showNotification('Prompt updated successfully!');
       }
-      if (!chatCollectionId && dashboardData.collections.length) {
-        setChatCollectionId(dashboardData.collections[0].collection_id);
-      }
-      return dashboardData.collections;
+      
+      setPromptDialog({ open: false, mode: 'create', prompt: null });
+      setPromptForm(getDefaultPromptForm());
+      
+    } catch (error) {
+      console.error('Error saving prompt:', error);
+      showNotification('Failed to save prompt: ' + (error.response?.data?.detail || error.message), 'error');
     }
-
-    const response = await api.get('/collections/');
-    setDashboardData(prev => ({ ...prev, collections: response.data }));
-
-    if (!selectedCollectionId && response.data.length) {
-      setSelectedCollectionId(response.data[0].collection_id);
-    }
-
-    if (!chatCollectionId && response.data.length) {
-      setChatCollectionId(response.data[0].collection_id);
-    }
-
-    return response.data;
   };
 
   const loadUsers = async (force = false) => {
-    if (!force && dashboardData.users.length > 0) return;
-    const response = await api.get('/users/');
-    setDashboardData(prev => ({ ...prev, users: response.data }));
+    try {
+      const response = await api.get('/users/');
+      setDashboardData(prev => ({
+        ...prev,
+        users: response.data || [],
+        systemStats: {
+          ...prev.systemStats,
+          total_users: response.data?.length || 0
+        }
+      }));
+    } catch (error) {
+      console.error('Error loading users:', error);
+      setDashboardData(prev => ({
+        ...prev,
+        users: []
+      }));
+    }
   };
 
   const loadPrompts = async (force = false) => {
-    if (!force && dashboardData.prompts.length > 0) return;
-    const response = await api.get('/prompts/');
-
-    const grouped = response.data.reduce((acc, prompt) => {
-      const key = prompt.collection_id || 'global';
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(prompt);
-      return acc;
-    }, {});
-
-    setDashboardData(prev => ({ ...prev, prompts: response.data }));
-    setCollectionPrompts(grouped);
-  };
-
-  const resolveCollectionById = (collectionId) =>
-    dashboardData.collections.find((c) => c.collection_id === collectionId);
-
-  const handlePromptCollectionFilterChange = async (event) => {
-    const value = event.target.value;
-    setPromptCollectionFilter(value);
-    await loadPrompts(true);
-  };
-
-  const openPromptDialog = (mode, collectionId = null, prompt = null) => {
-    const base = getDefaultPromptForm();
-    const resolvedCollectionId = collectionId || (
-      promptCollectionFilter !== 'all'
-        ? promptCollectionFilter
-        : selectedCollectionId || dashboardData.collections[0]?.collection_id || ''
-    );
-    const collectionData = resolveCollectionById(resolvedCollectionId);
-
-    if (mode === 'edit' && prompt) {
-      setPromptForm({
-        ...base,
-        ...prompt,
-        collection_id: prompt.collection_id || resolvedCollectionId || '',
-        vector_db_id: prompt.vector_db_id || collectionData?.vector_db_id || ''
-      });
-    } else {
-      setPromptForm({
-        ...base,
-        collection_id: resolvedCollectionId || '',
-        vector_db_id: collectionData?.vector_db_id || ''
-      });
-    }
-
-    setPromptDialog({ open: true, mode, prompt: prompt || null });
-  };
-
-  const closePromptDialog = () => {
-    setPromptDialog({ open: false, mode: 'create', prompt: null });
-    setPromptForm(getDefaultPromptForm());
-  };
-
-  const handlePromptFieldChange = (field, value) => {
-    setPromptForm((prev) => ({
-      ...prev,
-      [field]: field === 'max_tokens' ? Number(value) : field === 'temperature' ? Number(value) : value
-    }));
-  };
-
-  const sanitizePromptPayload = (form) => {
-    const payload = {
-      ...form,
-      max_tokens: Number(form.max_tokens),
-      temperature: Number(form.temperature)
-    };
-
-    const optionalFields = ['collection_id', 'vector_db_id', 'description', 'user_prompt_template', 'context_template'];
-    optionalFields.forEach((field) => {
-      if (payload[field] === '' || payload[field] === null) {
-        delete payload[field];
-      }
-    });
-
-    if (Number.isNaN(payload.max_tokens)) {
-      throw new Error('Maximum tokens must be a valid number');
-    }
-
-    if (Number.isNaN(payload.temperature)) {
-      throw new Error('Temperature must be a valid number');
-    }
-
-    return payload;
-  };
-
-  const handlePromptSubmit = async () => {
     try {
-      if (!promptForm.collection_id) {
-        showNotification('Please select a collection for this prompt', 'error');
-        return;
-      }
-
-      const payload = sanitizePromptPayload(promptForm);
-
-      if (promptDialog.mode === 'create') {
-        await api.post('/prompts/', payload);
-        showNotification('Prompt created successfully!');
-      } else if (promptDialog.prompt) {
-        await api.put(`/prompts/${promptDialog.prompt.prompt_id}`, payload);
-        showNotification('Prompt updated successfully!');
-      }
-
-      closePromptDialog();
-      await loadPrompts(true);
-    } catch (error) {
-      const detail = error.response?.data?.detail || error.message;
-      showNotification(`Error saving prompt: ${detail}`, 'error');
-    }
-  };
-
-  const handleDeletePrompt = async (prompt) => {
-    if (!window.confirm(`Delete prompt "${prompt.name}"? This action cannot be undone.`)) {
-      return;
-    }
-    try {
-      await api.delete(`/prompts/${prompt.prompt_id}`);
-      showNotification('Prompt deleted successfully!');
-      await loadPrompts(true);
-    } catch (error) {
-      showNotification('Error deleting prompt: ' + (error.response?.data?.detail || error.message), 'error');
-    }
-  };
-
-  const handleSetDefaultPrompt = async (prompt) => {
-    try {
-      await api.put(`/prompts/${prompt.prompt_id}`, { is_default: true });
-      showNotification('Default prompt updated successfully!');
-      await loadPrompts(true);
-    } catch (error) {
-      showNotification('Error updating default prompt: ' + (error.response?.data?.detail || error.message), 'error');
-    }
-  };
-
-  const handleTogglePromptActive = async (prompt) => {
-    try {
-      await api.put(`/prompts/${prompt.prompt_id}`, { is_active: !prompt.is_active });
-      showNotification('Prompt status updated successfully!');
-      await loadPrompts(true);
-    } catch (error) {
-      showNotification('Error updating prompt status: ' + (error.response?.data?.detail || error.message), 'error');
-    }
-  };
-
-  const handleViewPrompts = async (collectionId) => {
-    await loadPrompts(true);
-    setPromptCollectionFilter(collectionId || 'all');
-    setActiveTab('prompts');
-  };
-
-  // Collection Management
-  const handleCreateCollection = async () => {
-    try {
-      await api.post('/collections/', newCollection);
-      setNewCollection({
-        name: '',
-        description: '',
-        website_url: '',
-        admin_email: '',
-        admin_username: '',
-        admin_password: ''
-      });
-      setCreateDialogOpen(false);
-      showNotification('Collection created successfully!');
-      loadData(true);
-    } catch (error) {
-      showNotification('Error creating collection: ' + (error.response?.data?.detail || error.message), 'error');
-    }
-  };
-
-  const deleteCollection = async (collectionId) => {
-    if (window.confirm('Are you sure you want to delete this collection? This will delete all associated data.')) {
-      try {
-        await api.delete(`/collections/${collectionId}`);
-        loadData(true);
-        showNotification('Collection deleted successfully!');
-      } catch (error) {
-        showNotification('Error deleting collection', 'error');
-      }
-    }
-  };
-
-  // User Management
-  const handleCreateUser = async () => {
-    try {
-      await api.post('/users/', newUser);
-      setNewUser({
-        username: '',
-        password: '',
-        email: '',
-        full_name: '',
-        role: 'user_admin',
-        collection_id: ''
-      });
-      setCreateDialogOpen(false);
-      showNotification('User created successfully!');
-      loadData(true);
-    } catch (error) {
-      showNotification('Error creating user: ' + (error.response?.data?.detail || error.message), 'error');
-    }
-  };
-
-  const openCreateDialog = (type) => {
-    setDialogType(type);
-    if (type === 'user') {
-      const defaultCollectionId = dashboardData.collections[0]?.collection_id || '';
-      setNewUser((prev) => ({
+      const response = await api.get('/prompts/');
+      setDashboardData(prev => ({
         ...prev,
-        collection_id: defaultCollectionId
+        prompts: response.data || [],
+        systemStats: {
+          ...prev.systemStats,
+          total_prompts: response.data?.length || 0
+        }
+      }));
+    } catch (error) {
+      console.error('Error loading prompts:', error);
+      setDashboardData(prev => ({
+        ...prev,
+        prompts: []
       }));
     }
-    setCreateDialogOpen(true);
   };
 
-  // Stats Cards Component
-  const StatCard = ({ title, value, subtitle, icon, color }) => (
-    <Card sx={{ height: '100%' }}>
-      <CardContent>
-        <Grid container spacing={3} alignItems="center">
-          <Grid item xs={8}>
-            <Typography color="textSecondary" gutterBottom variant="overline">
-              {title}
-            </Typography>
-            <Typography variant="h4" component="div">
-              {value}
-            </Typography>
-            <Typography variant="body2" color="textSecondary">
-              {subtitle}
-            </Typography>
-          </Grid>
-          <Grid item xs={4}>
-            <Box
-              sx={{
-                color: color,
-                fontSize: '3rem',
-                display: 'flex',
-                justifyContent: 'center'
-              }}
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Health loader
+  const loadHealth = async () => {
+    try {
+      const res = await api.get('/health');
+      setHealthOverview(res.data || null);
+    } catch (error) {
+      console.error('Error loading health:', error);
+      setHealthOverview(null);
+    }
+  };
+
+  // Stat Card Component
+  const StatCard = ({ title, value, subtitle, icon: Icon, color = 'primary' }) => (
+    <div className="card group hover:scale-105 transition-transform duration-200">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-gray-600 mb-1">{title}</p>
+          <p className="text-2xl font-bold text-gray-900">{value}</p>
+          {subtitle && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
+        </div>
+        <div className={`p-3 rounded-lg bg-${color}-100 text-${color}-600`}>
+          <Icon />
+        </div>
+      </div>
+    </div>
+  );
+
+  // Reset Tab Component
+  const ResetTab = () => (
+    <div className="space-y-6">
+      <div className="card">
+        <div className="card-header">
+          <h3 className="card-title">Reset System to Defaults</h3>
+          <p className="card-subtitle">This deletes all data and recreates default superadmin, admin, user, one collection and prompt. Enter superadmin password to confirm.</p>
+        </div>
+        <div className="space-y-4">
+          <div className="form-group">
+            <label className="form-label">Superadmin Password</label>
+            <input
+              type="password"
+              className="form-input"
+              value={resetDialog.password}
+              onChange={(e) => setResetDialog({ ...resetDialog, password: e.target.value })}
+              placeholder="Enter superadmin password"
+            />
+          </div>
+          <div className="p-3 rounded-md bg-error-50 text-error-700 text-sm">
+            <strong>Warning:</strong> This is destructive and cannot be undone.
+          </div>
+          <div className="flex space-x-3">
+            <button
+              onClick={() => setResetDialog({ open: false, password: '' })}
+              className="btn btn-secondary"
             >
-              {icon}
-            </Box>
-          </Grid>
-        </Grid>
-      </CardContent>
-    </Card>
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                if (!resetDialog.password) { showNotification('Please enter superadmin password', 'error'); return; }
+                if (!window.confirm('Are you sure you want to reset the entire system to defaults?')) return;
+                try {
+                  setLoading(true);
+                  await api.post('/health/reset', { password: resetDialog.password });
+                  showNotification('System reset successfully to default state', 'success');
+                  setResetDialog({ open: false, password: '' });
+                  await Promise.all([
+                    loadCollections(true),
+                    loadUsers(true),
+                    loadPrompts(true),
+                    loadOverviewData(true),
+                    loadHealth(true)
+                  ]);
+                  setActiveTab('overview');
+                } catch (error) {
+                  console.error('Error resetting system:', error);
+                  showNotification(`Reset failed: ${error.response?.data?.detail || error.message}`, 'error');
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              className="btn btn-primary"
+            >
+              Reset System
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 
-  const PromptDialog = () => (
-    <Dialog open={promptDialog.open} onClose={closePromptDialog} maxWidth="md" fullWidth>
-      <DialogTitle>
-        {promptDialog.mode === 'edit' ? 'Edit Prompt' : 'Create Prompt'}
-      </DialogTitle>
-      <DialogContent>
-        <Grid container spacing={2} sx={{ mt: 1 }}>
-          <Grid item xs={12} md={6}>
-            <FormControl fullWidth disabled>
-              <InputLabel>Collection</InputLabel>
-              <Select
-                value={promptForm.collection_id}
-                label="Collection"
-                onChange={(e) => handlePromptFieldChange('collection_id', e.target.value)}
-              >
-                {dashboardData.collections.map((collection) => (
-                  <MenuItem key={collection.collection_id} value={collection.collection_id}>
-                    {collection.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <FormControl fullWidth>
-              <InputLabel>Vector Database (Optional)</InputLabel>
-              <Select
-                value={promptForm.vector_db_id || ''}
-                label="Vector Database (Optional)"
-                onChange={(e) => handlePromptFieldChange('vector_db_id', e.target.value)}
-              >
-                <MenuItem value="">Use Collection Default</MenuItem>
-                {dashboardData.collections
-                  .filter((collection) => collection.vector_db_id)
-                  .map((collection) => (
-                    <MenuItem key={collection.vector_db_id} value={collection.vector_db_id}>
-                      {collection.name} — {collection.vector_db_id}
-                    </MenuItem>
-                  ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Prompt Name"
-              value={promptForm.name}
-              onChange={(e) => handlePromptFieldChange('name', e.target.value)}
-              required
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Description"
-              value={promptForm.description}
-              onChange={(e) => handlePromptFieldChange('description', e.target.value)}
-              multiline
-              rows={2}
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="System Prompt"
-              value={promptForm.system_prompt}
-              onChange={(e) => handlePromptFieldChange('system_prompt', e.target.value)}
-              multiline
-              rows={6}
-              required
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="User Prompt Template (optional)"
-              value={promptForm.user_prompt_template}
-              onChange={(e) => handlePromptFieldChange('user_prompt_template', e.target.value)}
-              multiline
-              rows={3}
-              placeholder="Use {query} and {context} placeholders to customize user prompts"
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Context Template (optional)"
-              value={promptForm.context_template}
-              onChange={(e) => handlePromptFieldChange('context_template', e.target.value)}
-              multiline
-              rows={3}
-              placeholder="Customize how retrieved document chunks are presented"
-            />
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <TextField
-              fullWidth
-              type="number"
-              label="Max Tokens"
-              value={promptForm.max_tokens}
-              onChange={(e) => handlePromptFieldChange('max_tokens', e.target.value)}
-              required
-            />
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <TextField
-              fullWidth
-              type="number"
-              inputProps={{ step: 0.1, min: 0, max: 2 }}
-              label="Temperature"
-              value={promptForm.temperature}
-              onChange={(e) => handlePromptFieldChange('temperature', e.target.value)}
-              required
-            />
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <TextField
-              fullWidth
-              label="Model Name"
-              value={promptForm.model_name}
-              onChange={(e) => handlePromptFieldChange('model_name', e.target.value)}
-              required
-            />
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={promptForm.is_active}
-                  onChange={(e) => handlePromptFieldChange('is_active', e.target.checked)}
-                />
-              }
-              label={promptForm.is_active ? 'Active' : 'Inactive'}
-            />
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={promptForm.is_default}
-                  onChange={(e) => handlePromptFieldChange('is_default', e.target.checked)}
-                  disabled={promptDialog.mode !== 'create' && promptDialog.prompt?.is_default}
-                />
-              }
-              label={promptForm.is_default ? 'Default for Collection' : 'Set as Default'}
-            />
-          </Grid>
-        </Grid>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={closePromptDialog}>Cancel</Button>
-        <Button variant="contained" onClick={handlePromptSubmit}>
-          {promptDialog.mode === 'edit' ? 'Update Prompt' : 'Create Prompt'}
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
+  // Overview Tab Component
+  const badge = (status) => {
+    const ok = status === 'healthy';
+    const warn = status === 'degraded';
+    const cls = ok ? 'bg-success-100 text-success-800' : warn ? 'bg-warning-100 text-warning-800' : 'bg-error-100 text-error-800';
+    const label = ok ? 'Healthy' : warn ? 'Degraded' : 'Unhealthy';
+    return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${cls}`}>{label}</span>;
+  };
 
-  // Sidebar Menu Items
-  const menuItems = [
-    { id: 'overview', label: 'Dashboard', icon: <DashboardIcon /> },
-    { id: 'collections', label: 'Collections', icon: <CollectionsIcon /> },
-    { id: 'files', label: 'Files', icon: <CollectionsIcon /> },
-    { id: 'users', label: 'Users', icon: <PeopleIcon /> },
-    { id: 'prompts', label: 'Prompts', icon: <PromptIcon /> },
-    { id: 'chat', label: 'Chat Debug', icon: <ChatIcon /> },
-  ];
-
-  // Drawer Content
-  const drawer = (
-    <Box sx={{ overflow: 'auto' }}>
-      <Toolbar sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1 }}>
-        <Typography variant="h6" noWrap component="div" sx={{ display: 'flex', alignItems: 'center' }}>
-          <CollectionsIcon sx={{ mr: 1 }} />
-          Super Admin
-        </Typography>
-      </Toolbar>
-      <Divider />
-      <List>
-        {menuItems.map((item) => (
-          <Button
-            key={item.id}
-            fullWidth
-            startIcon={item.icon}
-            onClick={() => setActiveTab(item.id)}
-            sx={{
-              justifyContent: 'flex-start',
-              px: 3,
-              py: 1.5,
-              my: 0.5,
-              mx: 1,
-              borderRadius: 1,
-              backgroundColor: activeTab === item.id ? 'primary.main' : 'transparent',
-              color: activeTab === item.id ? 'white' : 'text.primary',
-              '&:hover': {
-                backgroundColor: activeTab === item.id ? 'primary.dark' : 'action.hover',
-              }
-            }}
-          >
-            {item.label}
-          </Button>
-        ))}
-      </List>
-    </Box>
-  );
-
-  // Overview Tab Content
   const OverviewTab = () => (
-    <Box>
-      <Grid container spacing={3}>
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="TOTAL COLLECTIONS"
-            value={dashboardData.systemStats.totalCollections || 0}
-            subtitle={`${dashboardData.systemStats.activeCollections || 0} Active`}
-            icon="📚"
-            color="#4caf50"
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="TOTAL USERS"
-            value={dashboardData.systemStats.totalUsers || 0}
-            subtitle={`${dashboardData.systemStats.activeUsers || 0} Active`}
-            icon="👥"
-            color="#2196f3"
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="AI PROMPTS"
-            value={dashboardData.systemStats.totalPrompts || 0}
-            subtitle="Across all collections"
-            icon="🤖"
-            color="#ff9800"
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="ADMIN USERS"
-            value={dashboardData.systemStats.userAdmins || 0}
-            subtitle="Management team"
-            icon="⚡"
-            color="#9c27b0"
-          />
-        </Grid>
-      </Grid>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">System Overview</h2>
+          <p className="text-gray-600">Monitor your knowledge base system performance</p>
+        </div>
+        <div className="flex space-x-3">
+          <button
+            onClick={() => loadData(true, 'overview')}
+            className="btn btn-secondary"
+            disabled={loading}
+          >
+            {loading ? (
+              <>
+                <div className="spinner"></div>
+                Refreshing...
+              </>
+            ) : (
+              <>
+                <span>🔄</span>
+                Refresh
+              </>
+            )}
+          </button>
+          <button
+            onClick={() => {
+              setDialogType('collection');
+              setCreateDialogOpen(true);
+            }}
+            className="btn btn-primary"
+          >
+            <AddIcon />
+            Test Modal
+          </button>
+        </div>
+      </div>
 
-      <Grid container spacing={3} sx={{ mt: 1 }}>
-        <Grid item xs={12} md={6}>
-          <Card>
-            <CardHeader title="User Distribution" />
-            <CardContent>
-              <Grid container spacing={2}>
-                <Grid item xs={12}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1 }}>
-                    <Chip label="Super Admin" color="primary" />
-                    <Typography variant="h6">{dashboardData.systemStats.superAdmins || 0}</Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={12}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1 }}>
-                    <Chip label="User Admin" color="secondary" />
-                    <Typography variant="h6">{dashboardData.systemStats.userAdmins || 0}</Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={12}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1 }}>
-                    <Chip label="Regular User" color="success" />
-                    <Typography variant="h6">{dashboardData.systemStats.regularUsers || 0}</Typography>
-                  </Box>
-                </Grid>
-              </Grid>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <Card>
-            <CardHeader title="Recent Activity" />
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                <NotificationsIcon color="success" sx={{ mr: 2 }} />
-                <Typography>System is running smoothly</Typography>
-              </Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                <NotificationsIcon color="info" sx={{ mr: 2 }} />
-                <Typography>Last data refresh: {new Date().toLocaleTimeString()}</Typography>
-              </Box>
-              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                <NotificationsIcon color="success" sx={{ mr: 2 }} />
-                <Typography>All services operational</Typography>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-    </Box>
+      <div className="stats-grid">
+          <StatCard
+          title="Total Collections"
+          value={dashboardData.systemStats?.total_collections || 0}
+          subtitle="Document collections"
+          icon={CollectionsIcon}
+          color="primary"
+        />
+          <StatCard
+          title="Total Users"
+          value={dashboardData.systemStats?.total_users || 0}
+          subtitle="Registered users"
+          icon={PeopleIcon}
+          color="success"
+        />
+          <StatCard
+          title="Total Files"
+          value={dashboardData.systemStats?.total_files || 0}
+          subtitle="Uploaded documents"
+          icon={CollectionsIcon}
+          color="warning"
+        />
+          <StatCard
+          title="Total Prompts"
+          value={dashboardData.systemStats?.total_prompts || 0}
+          subtitle="AI prompts configured"
+          icon={PromptIcon}
+          color="error"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="card">
+          <div className="card-header">
+            <h3 className="card-title">Quick Actions</h3>
+            <p className="card-subtitle">Common administrative tasks</p>
+          </div>
+          <div className="space-y-3">
+            <button
+              onClick={() => setActiveTab('collections')}
+              className="w-full btn btn-primary text-left justify-start"
+            >
+              <CollectionsIcon />
+              Manage Collections
+            </button>
+            <button
+              onClick={() => setActiveTab('users')}
+              className="w-full btn btn-secondary text-left justify-start"
+            >
+              <PeopleIcon />
+              Manage Users
+            </button>
+            <button
+              onClick={() => setActiveTab('prompts')}
+              className="w-full btn btn-secondary text-left justify-start"
+            >
+              <PromptIcon />
+              Configure Prompts
+            </button>
+            <button
+              onClick={() => setActiveTab('chat')}
+              className="w-full btn btn-secondary text-left justify-start"
+            >
+              <ChatIcon />
+              Test Chat Interface
+            </button>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header">
+            <h3 className="card-title">System Health</h3>
+            <p className="card-subtitle">Current system status</p>
+          </div>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-gray-600">Vector DB (Qdrant)</span>
+              {badge(healthOverview?.services?.qdrant?.status || 'unhealthy')}
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-gray-600">AI Model</span>
+              {badge(healthOverview?.services?.ai_model?.status || 'unhealthy')}
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-gray-600">File Processing</span>
+              {badge(healthOverview?.services?.file_processing?.status || 'unhealthy')}
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-gray-600">Authentication</span>
+              {badge(healthOverview?.services?.authentication?.status || 'unhealthy')}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 
-  // Collections Tab Content
+  // Collections Tab Component
   const CollectionsTab = () => (
-    <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">Collection Management</Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => openCreateDialog('collection')}
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">Collections</h2>
+          <p className="text-gray-600">Manage document collections and their settings</p>
+        </div>
+        <button
+          onClick={() => {
+            setDialogType('collection');
+            setCreateDialogOpen(true);
+          }}
+          className="btn btn-primary"
         >
+          <AddIcon />
           Create Collection
-        </Button>
-      </Box>
+        </button>
+      </div>
 
       {dashboardData.collections.length === 0 ? (
-        <Card>
-          <CardContent sx={{ textAlign: 'center', py: 6 }}>
-            <CollectionsIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-            <Typography variant="h5" gutterBottom>
-              No Collections Yet
-            </Typography>
-            <Typography variant="body2" color="textSecondary" sx={{ mb: 3 }}>
-              Start by creating your first collection to organize your AI resources
-            </Typography>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => openCreateDialog('collection')}
-            >
-              Create Your First Collection
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="card text-center py-12">
+          <div className="text-6xl mb-4">📚</div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Collections Found</h3>
+          <p className="text-gray-600 mb-4">Create your first collection to start organizing documents</p>
+          <button
+            onClick={() => {
+              setDialogType('collection');
+              setCreateDialogOpen(true);
+            }}
+            className="btn btn-primary"
+          >
+            <AddIcon />
+            Create Collection
+          </button>
+        </div>
       ) : (
-        <Grid container spacing={3}>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {dashboardData.collections.map((collection) => (
-            <Grid item xs={12} md={6} lg={4} key={collection.collection_id}>
-              <Card sx={{ height: '100%' }}>
-                <CardHeader
-                  title={collection.name}
-                  action={
-                    <Chip
-                      label={collection.is_active ? 'Active' : 'Inactive'}
-                      color={collection.is_active ? 'success' : 'default'}
-                      size="small"
-                    />
-                  }
-                />
-                <CardContent>
-                  <Typography variant="body2" color="textSecondary" gutterBottom>
-                    <strong>ID:</strong> {collection.collection_id}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary" gutterBottom>
-                    <strong>Website:</strong> {collection.website_url || 'Not assigned'}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary" gutterBottom>
-                    <strong>Admin:</strong> {collection.admin_email}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary" gutterBottom>
-                    <strong>Users:</strong> {collection.user_count || 0}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary" gutterBottom>
-                    <strong>Prompts:</strong> {collection.prompt_count || 0}
-                  </Typography>
-                  {collection.description && (
-                    <Typography variant="body2" color="textSecondary">
-                      <strong>Description:</strong> {collection.description}
-                    </Typography>
-                  )}
-                </CardContent>
-                <Box sx={{ p: 2, display: 'flex', gap: 1 }}>
-                  <Button size="small" variant="outlined" onClick={() => {
-                    setSelectedCollectionId(collection.collection_id);
-                    setActiveTab('files');
-                  }}>Manage Documents</Button>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={() => handleViewPrompts(collection.collection_id)}
-                  >
-                    View Prompts
-                  </Button>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={() => openEditCollectionDialog(collection)}
-                  >
-                    Edit
-                  </Button>
-                  <Button size="small" color="error" onClick={() => deleteCollection(collection.collection_id)}>
-                    Delete
-                  </Button>
-                </Box>
-              </Card>
-            </Grid>
-          ))}
-        </Grid>
-      )}
-    </Box>
-  );
-
-  const FilesTab = ({ collections, selectedCollectionId, onCollectionChange, onFilesLoaded }) => {
-    const handleCollectionChange = useCallback((collectionId) => {
-      onCollectionChange(collectionId);
-    }, [onCollectionChange]);
-
-    return (
-      <Box>
-        <Typography variant="h4" sx={{ mb: 3 }}>Collection Document Library</Typography>
-        {collections && collections.length ? (
-          <FileUploader
-            collections={collections}
-            defaultCollectionId={selectedCollectionId}
-            onCollectionChange={handleCollectionChange}
-            onFilesLoaded={onFilesLoaded}
-            compact
-          />
-        ) : (
-          <Card>
-            <CardContent sx={{ textAlign: 'center', py: 6 }}>
-              <Typography variant="h5" gutterBottom>
-                No collections available
-              </Typography>
-              <Typography variant="body2" color="textSecondary">
-                Create a collection first to manage documents.
-              </Typography>
-            </CardContent>
-          </Card>
-        )}
-      </Box>
-    );
-  };
-
-
-  // Users Tab Content
-  const UsersTab = () => (
-    <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">User Management</Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => openCreateDialog('user')}
-        >
-          Create User
-        </Button>
-      </Box>
-
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Username</TableCell>
-              <TableCell>Full Name</TableCell>
-              <TableCell>Role</TableCell>
-              <TableCell>Collection</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {dashboardData.users.map((user) => (
-              <TableRow key={user.user_id}>
-                <TableCell>{user.username}</TableCell>
-                <TableCell>{user.full_name}</TableCell>
-                <TableCell>
-                  <Chip
-                    label={user.role.replace('_', ' ').toUpperCase()}
-                    color={
-                      user.role === 'super_admin' ? 'primary' :
-                      user.role === 'user_admin' ? 'secondary' : 'default'
-                    }
-                    size="small"
-                  />
-                </TableCell>
-                <TableCell>
-                  {(() => {
-                    if (user.role === 'super_admin') {
-                      return 'Global';
-                    }
-
-                    const collectionIds = user.collection_ids || [];
-
-                    if (!collectionIds.length) {
-                      return user.role === 'user_admin' ? 'No Collection Assigned' : 'No Access';
-                    }
-
-                    const names = collectionIds.map((cid) => {
-                      const collection = resolveCollectionById(cid);
-                      return collection?.name || cid;
+            <div key={collection.collection_id} className="card group hover:shadow-medium transition-shadow duration-200 relative">
+              {/* Action buttons positioned absolutely to the right */}
+              <div className="absolute top-4 right-4 flex space-x-1 z-10">
+                <button
+                  onClick={() => {
+                    setEditCollectionDialog({ open: true, collection });
+                    setEditCollectionForm({
+                      name: collection.name,
+                      description: collection.description || '',
+                      website_url: collection.website_url || '',
+                      is_active: collection.is_active
                     });
-
-                    return names.join(', ');
-                  })()}
-                </TableCell>
-                <TableCell>
-                  <Chip
-                    label={user.is_active ? 'Active' : 'Inactive'}
-                    color={user.is_active ? 'success' : 'default'}
-                    size="small"
-                  />
-                </TableCell>
-                <TableCell>
-                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                    {user.role === 'user_admin' && user.collection_id && (
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => handleViewPrompts(user.collection_id)}
-                      >
-                        View Prompts
-                      </Button>
-                    )}
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      onClick={() => openEditUserDialog(user)}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      color="info"
-                      onClick={() => openUserPasswordDialog(user)}
-                    >
-                      Change Password
-                    </Button>
-                    <Button
-                      size="small"
-                      color="error"
-                      disabled={
-                        user.role === 'super_admin' ||
-                        (currentUserIdRef.current && String(currentUserIdRef.current) === String(user.user_id))
+                  }}
+                  className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-all duration-200"
+                  title="Edit collection"
+                >
+                  <span className="text-sm">✏️</span>
+                </button>
+                <button
+                  onClick={async () => {
+                    if (window.confirm(`Are you sure you want to delete "${collection.name}"? This action cannot be undone.`)) {
+                      try {
+                        setLoading(true);
+                        await api.delete(`/collections/${collection.collection_id}`);
+                        showNotification(`Collection "${collection.name}" deleted successfully`, 'success');
+                        // Refresh collections data
+                        await loadCollections(true);
+                        await loadOverviewData(true);
+                      } catch (error) {
+                        console.error('Error deleting collection:', error);
+                        showNotification(`Failed to delete collection: ${error.response?.data?.detail || error.message}`, 'error');
+                      } finally {
+                        setLoading(false);
                       }
-                      onClick={() => handleDeleteUser(user)}
-                    >
-                      Delete
-                    </Button>
-                  </Box>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-    </Box>
+                    }
+                  }}
+                  className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-error-600 hover:bg-error-50 rounded-lg transition-all duration-200"
+                  title="Delete collection"
+                >
+                  <span className="text-sm">🗑️</span>
+                </button>
+              </div>
+              
+              <div className="card-header pr-20">
+                <div>
+                  <h3 className="card-title">{collection.name}</h3>
+                  <p className="card-subtitle">{collection.description || 'No description'}</p>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Admin Email:</span>
+                  <span className="font-medium">{collection.admin_email || 'N/A'}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Website:</span>
+                  <span className="font-medium truncate max-w-32">{collection.website_url || 'N/A'}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Status:</span>
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                    collection.is_active 
+                      ? 'bg-success-100 text-success-800' 
+                      : 'bg-gray-100 text-gray-800'
+                  }`}>
+                    {collection.is_active ? 'Active' : 'Inactive'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 
-  // Prompts Tab Content
-  const PromptsTab = () => {
-    const collectionOptions = dashboardData.collections.map((collection) => ({
-      value: collection.collection_id,
-      label: collection.name
-    }));
+  // Users Tab Component
+  const UsersTab = () => (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">Users</h2>
+          <p className="text-gray-600">Manage system users and their permissions</p>
+        </div>
+        <button
+          onClick={() => {
+            setDialogType('user');
+            setCreateDialogOpen(true);
+          }}
+          className="btn btn-primary"
+        >
+          <AddIcon />
+          Create User
+        </button>
+      </div>
 
-    const getPromptsForCollection = (collectionId) => {
-      if (collectionId === 'all') {
-        return dashboardData.prompts;
-      }
-      return collectionPrompts[collectionId] || [];
+      {dashboardData.users.length === 0 ? (
+        <div className="card text-center py-12">
+          <div className="text-6xl mb-4">👥</div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Users Found</h3>
+          <p className="text-gray-600 mb-4">Create your first user to start managing access</p>
+          <button
+            onClick={() => {
+              setDialogType('user');
+              setCreateDialogOpen(true);
+            }}
+            className="btn btn-primary"
+          >
+            <AddIcon />
+            Create User
+          </button>
+        </div>
+      ) : (
+        <UsersGroupedByCollection
+          collections={dashboardData.collections}
+          users={dashboardData.users}
+        />
+      )}
+    </div>
+  );
+
+  const UsersGroupedByCollection = ({ collections = [], users = [] }) => {
+    const { groupedUsers, unassignedUsers } = useMemo(() => {
+      const grouped = {};
+      const unassigned = [];
+
+      users.forEach((user) => {
+        const assignedCollections = user.collection_ids && user.collection_ids.length > 0
+          ? user.collection_ids
+          : [];
+
+        if (assignedCollections.length === 0) {
+          unassigned.push(user);
+          return;
+        }
+
+        assignedCollections.forEach((collectionId) => {
+          if (!grouped[collectionId]) {
+            grouped[collectionId] = [];
+          }
+          grouped[collectionId].push(user);
+        });
+      });
+
+      return { groupedUsers: grouped, unassignedUsers: unassigned };
+    }, [users]);
+
+    const renderUserCard = (user, keyPrefix) => {
+      const roleClass = user.role === 'super_admin'
+        ? 'bg-error-100 text-error-800'
+        : user.role === 'user_admin'
+        ? 'bg-warning-100 text-warning-800'
+        : 'bg-success-100 text-success-800';
+
+      const statusClass = user.is_active
+        ? 'bg-success-100 text-success-800'
+        : 'bg-gray-100 text-gray-800';
+
+      return (
+        <div key={`${keyPrefix}-${user.user_id}`} className="card shadow-sm">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center">
+              <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center mr-3">
+                <AccountCircle />
+              </div>
+              <div>
+                <div className="font-medium text-gray-900">{user.full_name || user.username}</div>
+                <div className="text-sm text-gray-500">@{user.username}</div>
+              </div>
+            </div>
+            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${roleClass}`}>
+              {user.role.replace('_', ' ').toUpperCase()}
+            </span>
+          </div>
+          <div className="mt-4 space-y-2 text-sm text-gray-600">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-gray-700">Email</span>
+              <span className="text-gray-900 font-medium">{user.email || 'N/A'}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-gray-700">Status</span>
+              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusClass}`}>
+                {user.is_active ? 'Active' : 'Inactive'}
+              </span>
+            </div>
+            <div>
+              <span className="font-medium text-gray-700">Collections</span>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {(user.collection_ids && user.collection_ids.length > 0)
+                  ? user.collection_ids.map((collectionId) => {
+                      const collection = collections.find((c) => c.collection_id === collectionId);
+                      const label = collection ? collection.name : collectionId;
+                      return (
+                        <span
+                          key={`${user.user_id}-${collectionId}`}
+                          className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-50 text-primary-700"
+                        >
+                          {label}
+                        </span>
+                      );
+                    })
+                  : (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                      None
+                    </span>
+                  )}
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              onClick={async () => {
+                try {
+                  setLoading(true);
+                  await api.put(`/users/${user.user_id}`, { is_active: !user.is_active });
+                  showNotification(`User "${user.username}" ${user.is_active ? 'disabled' : 'activated'}`, 'success');
+                  await loadUsers(true);
+                  await loadOverviewData(true);
+                } catch (error) {
+                  console.error('Error toggling user state:', error);
+                  showNotification(`Failed to update user: ${error.response?.data?.detail || error.message}`, 'error');
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              className="btn btn-secondary btn-sm"
+              title={user.is_active ? 'Disable user' : 'Activate user'}
+            >
+              {user.is_active ? 'Disable' : 'Activate'}
+            </button>
+            <button
+              onClick={() => {
+                setEditUserDialog({ open: true, user });
+                setEditUserForm({
+                  full_name: user.full_name || '',
+                  email: user.email || '',
+                  role: user.role || 'user'
+                });
+              }}
+              className="btn btn-tertiary btn-sm"
+              title="Edit user"
+            >
+              Edit
+            </button>
+            <button
+              onClick={() => {
+                setUserPasswordDialog({ open: true, user });
+              }}
+              className="btn btn-tertiary btn-sm"
+              title="Reset password"
+            >
+              Reset Password
+            </button>
+            <button
+              onClick={async () => {
+                if (window.confirm(`Are you sure you want to delete user "${user.username}"? This action cannot be undone.`)) {
+                  try {
+                    setLoading(true);
+                    await api.delete(`/users/${user.user_id}`);
+                    showNotification(`User "${user.username}" deleted successfully`, 'success');
+                    await loadUsers(true);
+                    await loadOverviewData(true);
+                  } catch (error) {
+                    console.error('Error deleting user:', error);
+                    showNotification(`Failed to delete user: ${error.response?.data?.detail || error.message}`, 'error');
+                  } finally {
+                    setLoading(false);
+                  }
+                }
+              }}
+              className="btn btn-danger btn-sm"
+              title="Delete user"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      );
     };
 
-    const filteredCollectionIds = promptCollectionFilter === 'all'
-      ? Object.keys(collectionPrompts)
-      : [promptCollectionFilter];
+    const collectionCards = (collections || []).map((collection) => {
+      const usersForCollection = groupedUsers[collection.collection_id] || [];
+
+      return (
+        <div key={collection.collection_id} className="card">
+          <div className="card-header flex flex-col md:flex-row md:items-center md:justify-between">
+            <div>
+              <h3 className="card-title">{collection.name}</h3>
+              <p className="card-subtitle">Users assigned to {collection.name}</p>
+            </div>
+            <div className="text-sm text-gray-500 mt-2 md:mt-0">
+              {usersForCollection.length} {usersForCollection.length === 1 ? 'user' : 'users'}
+            </div>
+          </div>
+          {usersForCollection.length === 0 ? (
+            <div className="p-6 text-sm text-gray-500">
+              No users assigned to this collection yet.
+            </div>
+          ) : (
+            <div className="p-6 pt-0">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {usersForCollection.map((user) => renderUserCard(user, collection.collection_id))}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    });
 
     return (
-      <Box>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 2 }}>
-          <Typography variant="h4">Prompt Management</Typography>
-          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-            <FormControl sx={{ minWidth: 220 }}>
-              <InputLabel id="prompt-collection-filter-label">Collection</InputLabel>
-              <Select
-                labelId="prompt-collection-filter-label"
-                value={promptCollectionFilter}
-                label="Collection"
-                onChange={handlePromptCollectionFilterChange}
-              >
-                <MenuItem value="all">All Collections</MenuItem>
-                {collectionOptions.map((option) => (
-                  <MenuItem key={option.value} value={option.value}>
-                    {option.label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => openPromptDialog('create')}
-            >
-              Create Prompt
-            </Button>
-          </Box>
-        </Box>
-
-        {filteredCollectionIds.length === 0 ? (
-          <Card>
-            <CardContent sx={{ textAlign: 'center', py: 6 }}>
-              <PromptIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-              <Typography variant="h5" gutterBottom>
-                No prompts found
-              </Typography>
-              <Typography variant="body2" color="textSecondary">
-                Create your first prompt to customize responses for your collections.
-              </Typography>
-            </CardContent>
-          </Card>
-        ) : (
-          filteredCollectionIds.map((collectionId) => {
-            const prompts = getPromptsForCollection(collectionId);
-            if (!prompts.length) return null;
-            const collection = resolveCollectionById(collectionId);
-            return (
-              <Box key={collectionId} sx={{ mb: 4 }}>
-                <Typography variant="h5" sx={{ mb: 2 }}>
-                  {collection?.name || 'Unassigned Collection'}
-                </Typography>
-                <Grid container spacing={3}>
-                  {prompts.map((prompt) => (
-                    <Grid item xs={12} md={6} lg={4} key={prompt.prompt_id}>
-                      <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                        <CardHeader
-                          title={prompt.name}
-                          subheader={prompt.description}
-                          action={
-                            <Box>
-                              {prompt.is_default && (
-                                <Chip label="Default" color="primary" size="small" sx={{ mr: 1 }} />
-                              )}
-                              <Chip
-                                label={prompt.is_active ? 'Active' : 'Inactive'}
-                                color={prompt.is_active ? 'success' : 'default'}
-                                size="small"
-                              />
-                            </Box>
-                          }
-                        />
-                        <CardContent sx={{ flexGrow: 1 }}>
-                          <Typography variant="body2" color="textSecondary" gutterBottom>
-                            <strong>Model:</strong> {prompt.model_name}
-                          </Typography>
-                          <Typography variant="body2" color="textSecondary" gutterBottom>
-                            <strong>Max Tokens:</strong> {prompt.max_tokens}
-                          </Typography>
-                          <Typography variant="body2" color="textSecondary" gutterBottom>
-                            <strong>Temperature:</strong> {prompt.temperature}
-                          </Typography>
-                          <Typography variant="body2" color="textSecondary" gutterBottom>
-                            <strong>Usage Count:</strong> {prompt.usage_count || 0}
-                          </Typography>
-                          {prompt.last_used && (
-                            <Typography variant="body2" color="textSecondary">
-                              <strong>Last Used:</strong> {new Date(prompt.last_used).toLocaleString()}
-                            </Typography>
-                          )}
-                        </CardContent>
-                        <Box sx={{ p: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                          <Button size="small" variant="outlined" onClick={() => openPromptDialog('edit', collectionId, prompt)}>
-                            Edit
-                          </Button>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            color={prompt.is_active ? 'warning' : 'success'}
-                            onClick={() => handleTogglePromptActive(prompt)}
-                          >
-                            {prompt.is_active ? 'Deactivate' : 'Activate'}
-                          </Button>
-                          {!prompt.is_default && (
-                            <Button size="small" variant="contained" onClick={() => handleSetDefaultPrompt(prompt)}>
-                              Set Default
-                            </Button>
-                          )}
-                          <Button size="small" color="error" onClick={() => handleDeletePrompt(prompt)}>
-                            Delete
-                          </Button>
-                        </Box>
-                      </Card>
-                    </Grid>
-                  ))}
-                </Grid>
-              </Box>
-            );
-          })
+      <div className="space-y-6">
+        {collectionCards}
+        {unassignedUsers.length > 0 && (
+          <div className="card">
+            <div className="card-header flex flex-col md:flex-row md:items-center md:justify-between">
+              <div>
+                <h3 className="card-title">Global & Unassigned Users</h3>
+                <p className="card-subtitle">Users without a specific collection assignment</p>
+              </div>
+              <div className="text-sm text-gray-500 mt-2 md:mt-0">
+                {unassignedUsers.length} {unassignedUsers.length === 1 ? 'user' : 'users'}
+              </div>
+            </div>
+            <div className="p-6 pt-0">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {unassignedUsers.map((user) => renderUserCard(user, 'global'))}
+              </div>
+            </div>
+          </div>
         )}
-      </Box>
+      </div>
     );
   };
 
-  // Create Dialog Content
-  const CreateDialog = () => (
-    <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="md" fullWidth>
-      <DialogTitle>
-        {dialogType === 'collection' ? 'Create New Collection' : 'Create New User'}
-      </DialogTitle>
-      <DialogContent>
-        <Grid container spacing={2} sx={{ mt: 1 }}>
-          {dialogType === 'collection' ? (
-            <>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Collection Name"
-                  value={newCollection.name}
-                  onChange={(e) => handleNewCollectionChange('name', e.target.value)}
-                  required
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Description"
-                  multiline
-                  rows={3}
-                  value={newCollection.description}
-                  onChange={(e) => setNewCollection({ ...newCollection, description: e.target.value })}
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Website URL"
-                  type="url"
-                  value={newCollection.website_url}
-                  onChange={(e) => setNewCollection({ ...newCollection, website_url: e.target.value })}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Admin Username"
-                  value={newCollection.admin_username}
-                  onChange={(e) => setNewCollection({ ...newCollection, admin_username: e.target.value })}
-                  required
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Admin Password"
-                  type="password"
-                  value={newCollection.admin_password}
-                  onChange={(e) => setNewCollection({ ...newCollection, admin_password: e.target.value })}
-                  required
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Admin Email"
-                  type="email"
-                  value={newCollection.admin_email}
-                  onChange={(e) => setNewCollection({ ...newCollection, admin_email: e.target.value })}
-                  required
-                />
-              </Grid>
-            </>
-          ) : (
-            <>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Username"
-                  value={newUser.username}
-                  onChange={(e) => handleNewUserChange('username', e.target.value)}
-                  required
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Password"
-                  type="password"
-                  value={newUser.password}
-                  onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                  required
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Email"
-                  type="email"
-                  value={newUser.email}
-                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                  required
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Full Name"
-                  value={newUser.full_name}
-                  onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })}
-                  required
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Role</InputLabel>
-                  <Select
-                    value={newUser.role}
-                    label="Role"
-                    onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-                  >
-                    <MenuItem value="user_admin">User Admin</MenuItem>
-                    <MenuItem value="user">Regular User</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <FormControl fullWidth disabled={!dashboardData.collections.length}>
-                  <InputLabel>Collection</InputLabel>
-                  <Select
-                    value={newUser.collection_id || ''}
-                    label="Collection"
-                    onChange={(e) => setNewUser({ ...newUser, collection_id: e.target.value })}
-                    required
-                  >
-                    {dashboardData.collections.map((collection) => (
-                      <MenuItem key={collection.collection_id} value={collection.collection_id}>
-                        {collection.name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-            </>
-          )}
-        </Grid>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
-        <Button
-          variant="contained"
-          onClick={dialogType === 'collection' ? handleCreateCollection : handleCreateUser}
+  // Prompts Tab Component
+  const PromptsTab = () => (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">AI Prompts</h2>
+          <p className="text-gray-600">Configure AI prompts for different collections</p>
+        </div>
+        <button
+          onClick={() => {
+            // Reset form for new prompt
+            setPromptForm(getDefaultPromptForm());
+            setPromptDialog({ open: true, mode: 'create', prompt: null });
+          }}
+          className="btn btn-primary"
         >
-          Create
-        </Button>
-      </DialogActions>
-    </Dialog>
+          <AddIcon />
+              Create Prompt
+        </button>
+      </div>
+
+      {dashboardData.prompts.length === 0 ? (
+        <div className="card text-center py-12">
+          <div className="text-6xl mb-4">🤖</div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Prompts Found</h3>
+          <p className="text-gray-600 mb-4">Create your first AI prompt to customize responses</p>
+          <button
+            onClick={() => {
+              // Reset form for new prompt
+              setPromptForm(getDefaultPromptForm());
+              setPromptDialog({ open: true, mode: 'create', prompt: null });
+            }}
+            className="btn btn-primary"
+          >
+            <AddIcon />
+            Create Prompt
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {dashboardData.prompts.map((prompt) => (
+            <div key={prompt.prompt_id} className="card">
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center space-x-3 mb-2">
+                    <h3 className="text-lg font-semibold text-gray-900">{prompt.name}</h3>
+                              {prompt.is_default && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800">
+                        Default
+                      </span>
+                    )}
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      prompt.is_active 
+                        ? 'bg-success-100 text-success-800' 
+                        : 'bg-gray-100 text-gray-800'
+                    }`}>
+                      {prompt.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
+                  <p className="text-gray-600 mb-3">{prompt.description}</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <span className="text-gray-500">Collection:</span>
+                      <span className="ml-2 font-medium">
+                        {(() => {
+                          if (!prompt.collection_id) return 'All';
+                          const collection = dashboardData.collections.find(c => c.collection_id === prompt.collection_id);
+                          return collection ? collection.name : prompt.collection_id;
+                        })()}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Model:</span>
+                      <span className="ml-2 font-medium">{prompt.model_name}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Max Tokens:</span>
+                      <span className="ml-2 font-medium">{prompt.max_tokens}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Temperature:</span>
+                      <span className="ml-2 font-medium">{prompt.temperature}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex space-x-1 ml-4">
+                  <button
+                    onClick={() => {
+                      // Populate form with existing prompt data
+                      setPromptForm({
+                        collection_id: prompt.collection_id || '',
+                        name: prompt.name || '',
+                        description: prompt.description || '',
+                        system_prompt: prompt.system_prompt || '',
+                        user_prompt_template: prompt.user_prompt_template || '',
+                        context_template: prompt.context_template || '',
+                        vector_db_id: prompt.vector_db_id || '',
+                        model_name: prompt.model_name || 'claude-3-haiku-20240307',
+                        max_tokens: prompt.max_tokens || 4000,
+                        temperature: prompt.temperature || 0.7,
+                        is_active: prompt.is_active !== undefined ? prompt.is_active : true,
+                        is_default: prompt.is_default !== undefined ? prompt.is_default : false
+                      });
+                      setPromptDialog({ open: true, mode: 'edit', prompt });
+                    }}
+                    className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-all duration-200"
+                    title="Edit prompt"
+                  >
+                    <span className="text-sm">✏️</span>
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (window.confirm(`Are you sure you want to delete prompt "${prompt.name}"? This action cannot be undone.`)) {
+                        try {
+                          setLoading(true);
+                          await api.delete(`/prompts/${prompt.prompt_id}`);
+                          showNotification(`Prompt "${prompt.name}" deleted successfully`, 'success');
+                          // Refresh prompts data
+                          await loadPrompts(true);
+                          await loadOverviewData(true);
+                        } catch (error) {
+                          console.error('Error deleting prompt:', error);
+                          showNotification(`Failed to delete prompt: ${error.response?.data?.detail || error.message}`, 'error');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }
+                    }}
+                    className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-error-600 hover:bg-error-50 rounded-lg transition-all duration-200"
+                    title="Delete prompt"
+                  >
+                    <span className="text-sm">🗑️</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 
-  const renderContent = () => {
-    if (loading) return <LinearProgress />;
+  // Chat Tab Component
+  const ChatTab = () => (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900">Chat Interface</h2>
+        <p className="text-gray-600">Test the AI chat functionality</p>
+      </div>
+      <div className="card">
+        <ChatWindow collections={dashboardData.collections} />
+      </div>
+    </div>
+  );
 
+  // Memoized callbacks for FileUploader to prevent infinite re-renders
+  const handleCollectionChange = useCallback((collectionId) => {
+    setSelectedCollectionId(collectionId);
+  }, []);
+
+  const handleFilesLoaded = useCallback((files) => {
+    setCollectionFiles(files);
+  }, []);
+
+  const handleStatsChange = useCallback((stats) => {
+    // Update file stats if needed
+    console.log('File stats updated:', stats);
+  }, []);
+
+  // Use collections directly (simplified to avoid useMemo issues)
+  const memoizedCollections = dashboardData.collections || [];
+
+  // Files Tab Component
+  const FilesTab = () => (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900">File Management</h2>
+        <p className="text-gray-600">Upload and manage documents across collections</p>
+      </div>
+      <FileUploader
+        collections={memoizedCollections}
+        defaultCollectionId={selectedCollectionId}
+        onCollectionChange={handleCollectionChange}
+        onFilesLoaded={handleFilesLoaded}
+        onStatsChange={handleStatsChange}
+      />
+    </div>
+  );
+
+  // Render content based on active tab
+  const renderContent = () => {
     switch (activeTab) {
       case 'overview':
         return <OverviewTab />;
       case 'collections':
         return <CollectionsTab />;
       case 'files':
-        return (
-          <FilesTab
-            collections={dashboardData.collections}
-            selectedCollectionId={selectedCollectionId}
-            onCollectionChange={setSelectedCollectionId}
-            onFilesLoaded={setCollectionFiles}
-          />
-        );
+        return <FilesTab />;
       case 'users':
         return <UsersTab />;
       case 'prompts':
         return <PromptsTab />;
       case 'chat':
         return <ChatTab />;
+      case 'reset':
+        return <ResetTab />;
       default:
         return <OverviewTab />;
     }
   };
 
-  const ChatTab = () => {
-    const collections = dashboardData.collections;
-    const promptsForCollection = chatCollectionId
-      ? dashboardData.prompts.filter((prompt) => prompt.collection_id === chatCollectionId)
-      : [];
-    const defaultPrompt = promptsForCollection.find((prompt) => prompt.is_default) || promptsForCollection[0];
-
-    return (
-      <Grid container spacing={3}>
-        <Grid item xs={12} md={4}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Chat Test Bench
-              </Typography>
-              <Typography variant="body2" color="textSecondary" gutterBottom>
-                Select a collection to test retrieval and prompt configuration.
-              </Typography>
-
-              <FormControl fullWidth margin="normal">
-                <InputLabel>Collection</InputLabel>
-                <Select
-                  value={chatCollectionId}
-                  label="Collection"
-                  onChange={(event) => setChatCollectionId(event.target.value)}
-                >
-                  {collections.map((collection) => (
-                    <MenuItem key={collection.collection_id} value={collection.collection_id}>
-                      {collection.name}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-
-              {chatCollectionId && (
-                <Box mt={2}>
-                  <Typography variant="subtitle2" gutterBottom>
-                    Active Prompt Details
-                  </Typography>
-                  {defaultPrompt ? (
-                    <Box>
-                      <Typography variant="body2"><strong>Name:</strong> {defaultPrompt.name}</Typography>
-                      <Typography variant="body2"><strong>Model:</strong> {defaultPrompt.model_name}</Typography>
-                      <Typography variant="body2"><strong>Temperature:</strong> {defaultPrompt.temperature}</Typography>
-                      <Typography variant="body2"><strong>Max Tokens:</strong> {defaultPrompt.max_tokens}</Typography>
-                    </Box>
-                  ) : (
-                    <Typography variant="body2" color="textSecondary">
-                      No prompts configured for this collection yet.
-                    </Typography>
-                  )}
-                </Box>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid item xs={12} md={8}>
-          <Card sx={{ height: '100%' }}>
-            <CardContent sx={{ height: '100%' }}>
-              <ChatWindow collectionId={chatCollectionId} key={chatCollectionId || 'no-collection'} />
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-    );
+  const sidebarProps = {
+    isOpen: !mobileOpen,
+    onClose: () => setMobileOpen(true),
+    title: "Super Admin",
+    icon: "🤖",
+    menuItems: menuItems.map(item => ({
+      ...item,
+      icon: item.icon
+    })),
+    activeTab,
+    onTabChange: (tab) => {
+      setActiveTab(tab);
+      setMobileOpen(false);
+    },
+    userInfo: {
+      name: "Super Administrator",
+      role: "Full Access"
+    },
+    onLogout
   };
 
-  const drawerWidth = 240;
+  const headerContent = (
+    <>
+      <button
+        className="inline-flex items-center space-x-2 px-4 py-2 rounded-lg bg-red-500 text-white font-semibold shadow-sm hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-1 transition"
+        onClick={onLogout}
+      >
+        <span className="text-lg">🚪</span>
+        <span>Logout</span>
+      </button>
+    </>
+  );
 
   return (
-    <Box sx={{ display: 'flex' }}>
-      {/* Snackbar Notification */}
-      <Snackbar
-        open={notification.open}
-        autoHideDuration={6000}
-        onClose={handleCloseNotification}
-        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
-      >
-        <Alert onClose={handleCloseNotification} severity={notification.severity} sx={{ width: '100%' }}>
-          {notification.message}
-        </Alert>
-      </Snackbar>
+    <>
+      <Layout sidebarProps={sidebarProps} headerContent={headerContent}>
+        {renderContent()}
+      </Layout>
 
-      {/* Create Dialog */}
-      <CreateDialog />
-      <PromptDialog />
-      <EditCollectionDialog />
-      <EditUserDialog />
-      <ChangeUserPasswordDialog />
-      <ChangeSelfPasswordDialog />
+      {/* Create Collection/User Dialog */}
+      {createDialogOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+        {dialogType === 'collection' ? 'Create New Collection' : 'Create New User'}
+            </h3>
+            <div className="space-y-4">
+          {dialogType === 'collection' ? (
+            <>
+                  <div className="form-group">
+                    <label className="form-label">Collection Name</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                  value={newCollection.name}
+                      onChange={(e) => setNewCollection({ ...newCollection, name: e.target.value })}
+                  required
+                />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Description</label>
+                    <textarea
+                      className="form-textarea"
+                  value={newCollection.description}
+                  onChange={(e) => setNewCollection({ ...newCollection, description: e.target.value })}
+                />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Website URL</label>
+                    <input
+                  type="url"
+                      className="form-input"
+                  value={newCollection.website_url}
+                  onChange={(e) => setNewCollection({ ...newCollection, website_url: e.target.value })}
+                />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Admin Email</label>
+                    <input
+                      type="email"
+                      className="form-input"
+                      value={newCollection.admin_email}
+                      onChange={(e) => setNewCollection({ ...newCollection, admin_email: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Admin Username</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                  value={newCollection.admin_username}
+                  onChange={(e) => setNewCollection({ ...newCollection, admin_username: e.target.value })}
+                  required
+                />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Admin Password</label>
+                    <input
+                  type="password"
+                      className="form-input"
+                  value={newCollection.admin_password}
+                  onChange={(e) => setNewCollection({ ...newCollection, admin_password: e.target.value })}
+                  required
+                />
+                  </div>
+            </>
+          ) : (
+            <>
+                  <div className="form-group">
+                    <label className="form-label">Username</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                  value={newUser.username}
+                      onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
+                  required
+                />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Email</label>
+                    <input
+                  type="email"
+                      className="form-input"
+                  value={newUser.email}
+                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                  required
+                />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Full Name</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                  value={newUser.full_name}
+                  onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })}
+                  required
+                />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Password</label>
+                    <input
+                      type="password"
+                      className="form-input"
+                      value={newUser.password}
+                      onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Role</label>
+                    <select
+                      className="form-select"
+                    value={newUser.role}
+                    onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+                  >
+                      <option value="user_admin">User Admin</option>
+                      <option value="user">Regular User</option>
+                      <option value="super_admin">Super Admin</option>
+                    </select>
+                  </div>
+                  {newUser.role !== 'super_admin' && (
+                    <div className="form-group">
+                      <label className="form-label">Collection <span className="text-red-500">*</span></label>
+                      <select
+                        className="form-select"
+                        value={newUser.collection_id}
+                        onChange={(e) => setNewUser({ ...newUser, collection_id: e.target.value })}
+                        required
+                      >
+                        <option value="">Select Collection</option>
+                        {dashboardData.collections.map(collection => (
+                          <option key={collection.collection_id} value={collection.collection_id}>
+                          {collection.name}
+                          </option>
+                      ))}
+                      </select>
+                    </div>
+                  )}
+            </>
+          )}
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => setCreateDialogOpen(false)}
+                  className="btn btn-secondary flex-1"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      setLoading(true);
+                      
+                      if (dialogType === 'collection') {
+                        // Create collection
+                        const response = await api.post('/collections/', newCollection);
+                        showNotification(`Collection "${newCollection.name}" created successfully!`, 'success');
+                        
+                        // Reset form
+                        setNewCollection({
+                          name: '',
+                          description: '',
+                          website_url: '',
+                          admin_email: '',
+                          admin_username: '',
+                          admin_password: '',
+                          is_active: true
+                        });
+                        
+                        // Refresh data
+                        await loadCollections(true);
+                        await loadOverviewData(true);
+                        
+                      } else {
+                        // Validate user form
+                        if (!newUser.username || !newUser.password || !newUser.email) {
+                          showNotification('Please fill in all required fields', 'error');
+                          return;
+                        }
+                        
+                        if (newUser.role !== 'super_admin' && !newUser.collection_id) {
+                          showNotification('Please select a collection for non-super-admin users', 'error');
+                          return;
+                        }
+                        
+                        // Create user
+                        const response = await api.post('/users/', newUser);
+                        showNotification(`User "${newUser.username}" created successfully!`, 'success');
+                        
+                        // Reset form
+                        setNewUser({
+                          username: '',
+                          email: '',
+                          full_name: '',
+                          password: '',
+                          role: 'user_admin',
+                          collection_id: ''
+                        });
+                        
+                        // Refresh data
+                        await loadUsers(true);
+                        await loadOverviewData(true);
+                      }
+                      
+                      setCreateDialogOpen(false);
+                      
+                    } catch (error) {
+                      console.error(`Error creating ${dialogType}:`, error);
+                      showNotification(
+                        `Failed to create ${dialogType}: ${error.response?.data?.detail || error.message}`, 
+                        'error'
+                      );
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  className="btn btn-primary flex-1"
+                >
+                  Create
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
-      {/* App Bar */}
-      <AppBar
-        position="fixed"
-        sx={{
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
-          ml: { sm: `${drawerWidth}px` },
-        }}
-      >
-        <Toolbar>
-          <IconButton
-            color="inherit"
-            aria-label="open drawer"
-            edge="start"
-            onClick={handleDrawerToggle}
-            sx={{ mr: 2, display: { sm: 'none' } }}
-          >
-            <MenuIcon />
-          </IconButton>
-          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-            {menuItems.find(item => item.id === activeTab)?.label || 'Dashboard'}
-          </Typography>
-          <IconButton color="inherit">
-            <AccountCircle />
-          </IconButton>
-          <Typography variant="body2" sx={{ ml: 1 }}>
-            {localStorage.getItem('username') || 'Super Admin'}
-          </Typography>
-          <Button color="inherit" onClick={openSelfPasswordDialog} sx={{ ml: 2 }}>
+      {/* Edit User Dialog */}
+      {editUserDialog.open && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              Edit User: {editUserDialog.user?.username}
+            </h3>
+            <div className="space-y-4">
+              <div className="form-group">
+                <label className="form-label">Full Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={editUserForm.full_name}
+                  onChange={(e) => setEditUserForm({ ...editUserForm, full_name: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Email</label>
+                <input
+                  type="email"
+                  className="form-input"
+                  value={editUserForm.email}
+                  onChange={(e) => setEditUserForm({ ...editUserForm, email: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Role</label>
+                <select
+                  className="form-select"
+                  value={editUserForm.role}
+                  onChange={(e) => setEditUserForm({ ...editUserForm, role: e.target.value })}
+                >
+                  <option value="user_admin">User Admin</option>
+                  <option value="user">Regular User</option>
+                </select>
+              </div>
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => setEditUserDialog({ open: false, user: null })}
+                  className="btn btn-secondary flex-1"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    setEditUserDialog({ open: false, user: null });
+                    showNotification('User updated successfully!');
+                  }}
+                  className="btn btn-primary flex-1"
+                >
+                  Update
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Collection Dialog */}
+      {editCollectionDialog.open && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              Edit Collection: {editCollectionDialog.collection?.name}
+            </h3>
+            <div className="space-y-4">
+              <div className="form-group">
+                <label className="form-label">Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={editCollectionForm.name}
+                  onChange={(e) => setEditCollectionForm({ ...editCollectionForm, name: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Description</label>
+                <textarea
+                  className="form-textarea"
+                  value={editCollectionForm.description}
+                  onChange={(e) => setEditCollectionForm({ ...editCollectionForm, description: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Website URL</label>
+                <input
+                  type="url"
+                  className="form-input"
+                  value={editCollectionForm.website_url}
+                  onChange={(e) => setEditCollectionForm({ ...editCollectionForm, website_url: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    className="mr-2"
+                    checked={editCollectionForm.is_active}
+                    onChange={(e) => setEditCollectionForm({ ...editCollectionForm, is_active: e.target.checked })}
+                  />
+                  Active
+                </label>
+              </div>
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => setEditCollectionDialog({ open: false, collection: null })}
+                  className="btn btn-secondary flex-1"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveCollectionChanges}
+                  className="btn btn-primary flex-1"
+                >
+                  Update
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* User Password Dialog */}
+      {userPasswordDialog.open && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              Reset Password for {userPasswordDialog.user?.username}
+            </h3>
+            <div className="space-y-4">
+              <div className="form-group">
+                <label className="form-label">New Password</label>
+                <input
+                  type="password"
+                  className="form-input"
+                  value={userPasswordForm.new_password}
+                  onChange={(e) => setUserPasswordForm({ ...userPasswordForm, new_password: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Confirm Password</label>
+                <input
+                  type="password"
+                  className="form-input"
+                  value={userPasswordForm.confirm_password}
+                  onChange={(e) => setUserPasswordForm({ ...userPasswordForm, confirm_password: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => setUserPasswordDialog({ open: false, user: null })}
+                  className="btn btn-secondary flex-1"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!userPasswordForm.new_password || userPasswordForm.new_password !== userPasswordForm.confirm_password) {
+                      showNotification('Passwords do not match', 'error');
+                      return;
+                    }
+                    try {
+                      setLoading(true);
+                      await api.post('/users/reset-password', {
+                        user_id: userPasswordDialog.user?.user_id,
+                        new_password: userPasswordForm.new_password
+                      });
+                      setUserPasswordDialog({ open: false, user: null });
+                      setUserPasswordForm({ new_password: '', confirm_password: '' });
+                      showNotification('Password updated successfully!');
+                    } catch (error) {
+                      console.error('Error updating password:', error);
+                      showNotification(`Failed to update password: ${error.response?.data?.detail || error.message}`, 'error');
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  className="btn btn-primary flex-1"
+                >
+                  Update Password
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Self Password Dialog */}
+      {selfPasswordDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              Change Your Password
+            </h3>
+            <div className="space-y-4">
+              <div className="form-group">
+                <label className="form-label">Current Password</label>
+                <input
+                  type="password"
+                  className="form-input"
+                  value={selfPasswordForm.current_password}
+                  onChange={(e) => setSelfPasswordForm({ ...selfPasswordForm, current_password: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">New Password</label>
+                <input
+                  type="password"
+                  className="form-input"
+                  value={selfPasswordForm.new_password}
+                  onChange={(e) => setSelfPasswordForm({ ...selfPasswordForm, new_password: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Confirm Password</label>
+                <input
+                  type="password"
+                  className="form-input"
+                  value={selfPasswordForm.confirm_password}
+                  onChange={(e) => setSelfPasswordForm({ ...selfPasswordForm, confirm_password: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => setSelfPasswordDialog(false)}
+                  className="btn btn-secondary flex-1"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    setSelfPasswordDialog(false);
+                    showNotification('Password changed successfully!');
+                  }}
+                  className="btn btn-primary flex-1"
+                >
             Change Password
-          </Button>
-          <IconButton color="inherit" onClick={onLogout} sx={{ ml: 2 }}>
-            <LogoutIcon />
-          </IconButton>
-        </Toolbar>
-      </AppBar>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
-      {/* Sidebar Drawer */}
-      <Box
-        component="nav"
-        sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}
-      >
-        <Drawer
-          variant="temporary"
-          open={mobileOpen}
-          onClose={handleDrawerToggle}
-          ModalProps={{ keepMounted: true }}
-          sx={{
-            display: { xs: 'block', sm: 'none' },
-            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
-          }}
-        >
-          {drawer}
-        </Drawer>
-        <Drawer
-          variant="permanent"
-          sx={{
-            display: { xs: 'none', sm: 'block' },
-            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
-          }}
-          open
-        >
-          {drawer}
-        </Drawer>
-      </Box>
+      {/* Prompt Dialog */}
+      {promptDialog.open && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
+          <div className="bg-white rounded-xl p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              {promptDialog.mode === 'create' ? 'Create New Prompt' : 'Edit Prompt'}
+            </h3>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="form-group">
+                  <label className="form-label">Collection</label>
+                  <select
+                    className="form-select"
+                    value={promptForm.collection_id}
+                    onChange={(e) => setPromptForm({ ...promptForm, collection_id: e.target.value })}
+                    required
+                  >
+                    <option value="">Select Collection</option>
+                    {dashboardData.collections.map(collection => (
+                      <option key={collection.collection_id} value={collection.collection_id}>
+                        {collection.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Name</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={promptForm.name}
+                    onChange={(e) => setPromptForm({ ...promptForm, name: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Description</label>
+                <textarea
+                  className="form-textarea"
+                  value={promptForm.description}
+                  onChange={(e) => setPromptForm({ ...promptForm, description: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">System Prompt</label>
+                <textarea
+                  className="form-textarea"
+                  value={promptForm.system_prompt}
+                  onChange={(e) => setPromptForm({ ...promptForm, system_prompt: e.target.value })}
+                  rows={4}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">User Prompt Template</label>
+                <textarea
+                  className="form-textarea"
+                  value={promptForm.user_prompt_template}
+                  onChange={(e) => setPromptForm({ ...promptForm, user_prompt_template: e.target.value })}
+                  rows={3}
+                />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="form-group">
+                  <label className="form-label">Model Name</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={promptForm.model_name}
+                    onChange={(e) => setPromptForm({ ...promptForm, model_name: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Max Tokens</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    value={promptForm.max_tokens}
+                    onChange={(e) => setPromptForm({ ...promptForm, max_tokens: parseInt(e.target.value) })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Temperature</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="2"
+                    className="form-input"
+                    value={promptForm.temperature}
+                    onChange={(e) => setPromptForm({ ...promptForm, temperature: parseFloat(e.target.value) })}
+                  />
+                </div>
+              </div>
+              <div className="flex items-center space-x-4">
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    className="mr-2"
+                    checked={promptForm.is_active}
+                    onChange={(e) => setPromptForm({ ...promptForm, is_active: e.target.checked })}
+                  />
+                  Active
+                </label>
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    className="mr-2"
+                    checked={promptForm.is_default}
+                    onChange={(e) => setPromptForm({ ...promptForm, is_default: e.target.checked })}
+                  />
+                  Default
+                </label>
+              </div>
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => setPromptDialog({ open: false, mode: 'create', prompt: null })}
+                  className="btn btn-secondary flex-1"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={savePromptChanges}
+                  className="btn btn-primary flex-1"
+                >
+                  {promptDialog.mode === 'create' ? 'Create' : 'Update'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
-      {/* Main Content */}
-      <Box
-        component="main"
-        sx={{
-          flexGrow: 1,
-          p: 3,
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
-        }}
-      >
-        <Toolbar />
-        <Container maxWidth="xl">
-          {renderContent()}
-        </Container>
-      </Box>
-    </Box>
+      {/* Notification */}
+      {notification.open && (
+        <div className="fixed top-4 right-4 z-[9999]">
+          <div className={`alert ${
+            notification.severity === 'success' ? 'alert-success' :
+            notification.severity === 'error' ? 'alert-error' :
+            notification.severity === 'warning' ? 'alert-warning' : 'alert-info'
+          }`}>
+            <span className="mr-2">
+              {notification.severity === 'success' ? '✅' :
+               notification.severity === 'error' ? '❌' :
+               notification.severity === 'warning' ? '⚠️' : 'ℹ️'}
+            </span>
+            {notification.message}
+            <button
+              onClick={() => setNotification({ ...notification, open: false })}
+              className="ml-4 text-current opacity-70 hover:opacity-100"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 };
 

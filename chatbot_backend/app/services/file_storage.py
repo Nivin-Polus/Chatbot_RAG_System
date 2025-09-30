@@ -1,11 +1,9 @@
-import os
-import shutil
-from pathlib import Path
 from typing import Optional
 from fastapi import UploadFile, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.models.file_metadata import FileMetadata
+from app.models.file_binary import FileBinary
 from app.config import settings
 import uuid
 import logging
@@ -13,10 +11,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 class FileStorageService:
-    def __init__(self):
-        self.base_upload_dir = Path("uploads")
-        self.base_upload_dir.mkdir(exist_ok=True)
-    
     def save_file(self, file: UploadFile, user_id: str, db: Session) -> FileMetadata:
         """Save uploaded file and create metadata record (legacy method)"""
         # For backward compatibility, use default website
@@ -31,45 +25,47 @@ class FileStorageService:
         user_id: str,
         website_id: Optional[str],
         db: Session,
-        collection_id: Optional[str] = None
+        collection_id: Optional[str] = None,
+        file_content: Optional[bytes] = None,
     ) -> FileMetadata:
-        """Save uploaded file and create metadata record with website_id"""
+        """Save uploaded file to database and create metadata record with website_id"""
         try:
             # Generate unique file ID
             file_id = str(uuid.uuid4())
             
-            # Create user directory
-            user_dir = self.base_upload_dir / user_id
-            user_dir.mkdir(exist_ok=True)
-            
-            # Get file extension
-            file_extension = Path(file.filename).suffix
-            
-            # Create file path
-            file_path = user_dir / f"{file_id}{file_extension}"
-            
-            # Save file to disk
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-            
-            # Get file size
-            file_size = file_path.stat().st_size
-            
-            # Create metadata record with website_id (without collection_id for now)
+            if file_content is None:
+                # Ensure pointer at start before reading
+                file.file.seek(0)
+                file_content = file.file.read()
+
+            if file_content is None:
+                raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+            file_size = len(file_content)
+            mime_type = file.content_type or "application/octet-stream"
+
+            # Create metadata record with website_id
             file_metadata = FileMetadata(
                 file_id=file_id,
                 file_name=file.filename,
-                file_path=str(file_path),
+                file_path=None,
                 file_size=file_size,
-                file_type=file.content_type or "application/octet-stream",
+                file_type=mime_type,
                 website_id=website_id,
                 uploader_id=user_id,
                 collection_id=collection_id,
                 processing_status="pending"
             )
             
+            file_binary = FileBinary(
+                file_id=file_id,
+                data=file_content,
+                mime_type=mime_type,
+            )
+
             # Save to database
             db.add(file_metadata)
+            db.add(file_binary)
             db.commit()
             db.refresh(file_metadata)
             
@@ -84,26 +80,17 @@ class FileStorageService:
             db.rollback()
             raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
     
-    def get_file_path(self, file_id: str, db: Session) -> Optional[str]:
-        """Get file path by file ID"""
-        file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
-        if file_metadata and os.path.exists(file_metadata.file_path):
-            return file_metadata.file_path
-        return None
+    def get_file_binary(self, file_id: str, db: Session) -> Optional[FileBinary]:
+        """Retrieve file binary record by file ID"""
+        return db.query(FileBinary).filter(FileBinary.file_id == file_id).first()
     
     def delete_file(self, file_id: str, db: Session) -> bool:
-        """Delete file from disk and database"""
+        """Delete file and associated metadata from database"""
         try:
             file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
             if not file_metadata:
                 return False
-            
-            # Delete file from disk
-            if os.path.exists(file_metadata.file_path):
-                os.remove(file_metadata.file_path)
-                logger.info(f"File deleted from disk: {file_metadata.file_path}")
-            
-            # Delete metadata from database
+
             db.delete(file_metadata)
             db.commit()
             

@@ -1,10 +1,9 @@
 # app/api/routes_files.py
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response, Query, Form, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Form, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from app.core.vector_singleton import get_vector_store
 from app.core.database import get_db, DATABASE_AVAILABLE
 from app.api.routes_auth import get_current_user
 from app.models.file_metadata import FileMetadata
@@ -16,7 +15,6 @@ from app.services.activity_tracker import activity_tracker
 from pydantic import BaseModel
 import logging
 from uuid import uuid4
-import os
 
 logger = logging.getLogger("files_logger")
 logging.basicConfig(level=logging.INFO)
@@ -118,23 +116,30 @@ async def upload_file(
     if ext not in allowed_extensions:
         raise HTTPException(status_code=400, detail="File type not allowed")
 
-    # Read file content
+    # Read file content once
     content = await uploaded_file.read()
-    text_chunks = parse_file(uploaded_file.filename, content)
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
-    # Save file to disk using FileStorageService with website_id
-    # Reset file position for reading again
-    uploaded_file.file.seek(0)
+    try:
+        text_chunks = parse_file(uploaded_file.filename, content)
+    except Exception as parse_error:
+        logger.error(f"[UPLOAD ERROR] Failed to parse file {uploaded_file.filename}: {str(parse_error)}")
+        raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(parse_error)}")
+
     file_metadata = file_storage_service.save_file_with_website(
         uploaded_file,
         uploader_id,
         user_website_id,
         db,
-        collection_id=collection_id
+        collection_id=collection_id,
+        file_content=content,
     )
     file_id = file_metadata.file_id
 
     # Get singleton vector store and store embeddings
+    # Import here to avoid PyO3 initialization issues during module import
+    from app.core.vector_singleton import get_vector_store
     vector_store = get_vector_store()
     logger.info(f"[UPLOAD DEBUG] Vector store type: {'Qdrant' if vector_store.client else 'In-memory fallback'}")
     logger.info(f"[UPLOAD DEBUG] Processing {len(text_chunks)} chunks for file: {uploaded_file.filename}")
@@ -162,15 +167,13 @@ async def upload_file(
     metadata = FileMeta(
         file_id=file_id,
         file_name=uploaded_file.filename,
-        uploaded_by=current_user["username"],
+        uploaded_by=current_user.get('username', 'unknown'),
         uploader_id=uploader_id,
         upload_timestamp=file_metadata.upload_timestamp.isoformat() if file_metadata.upload_timestamp else None,
         file_size=file_metadata.file_size,
         processing_status="completed",
-        collection_id=collection_id
+        collection_id=collection_id,
     )
-    file_metadata_db[file_id] = metadata
-
     logger.info(f"File uploaded: {uploaded_file.filename} by {current_user['username']}")
 
     # Log activity
@@ -183,12 +186,12 @@ async def upload_file(
             "file_size": file_metadata.file_size,
             "file_type": ext,
             "chunk_count": len(text_chunks),
-            "collection_id": collection_id
+            "collection_id": collection_id,
         },
         metadata={
             "processing_time": "completed",
-            "vector_store_type": "qdrant" if vector_store.client else "in_memory"
-        }
+            "vector_store_type": "qdrant" if vector_store.client else "in_memory",
+        },
     )
 
     return metadata
@@ -213,6 +216,8 @@ async def delete_file(
 
     try:
         # Remove all chunks for this file from vector store
+        # Import here to avoid PyO3 initialization issues during module import
+        from app.core.vector_singleton import get_vector_store
         vector_store = get_vector_store()
         vector_store.delete_documents_by_file_id(file_id)
 
@@ -389,6 +394,7 @@ async def download_file(
             else:
                 if collection_id and db_metadata:
                     from app.models.collection import Collection, CollectionUser
+
                     collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
                     if role in ["user_admin", "admin"]:
                         if not collection or collection.admin_user_id != user_id:
@@ -396,36 +402,39 @@ async def download_file(
                     elif role == "user":
                         membership = db.query(CollectionUser).filter(
                             CollectionUser.collection_id == collection_id,
-                            CollectionUser.user_id == user_id
+                            CollectionUser.user_id == user_id,
                         ).first()
                         if not membership:
                             raise HTTPException(status_code=403, detail="You do not have access to this collection")
                 elif collection_id and not db_metadata:
-                    # No database metadata to verify, restrict to uploader or super admin
                     raise HTTPException(status_code=403, detail="Unable to verify collection permissions")
                 elif role == "user":
                     raise HTTPException(status_code=403, detail="Permission denied")
 
-        file_path = file_storage_service.get_file_path(file_id, db)
-        if not file_path:
-            import glob
-            possible_files = glob.glob(f"uploads/*/{file_id}.*")
-            if possible_files:
-                file_path = possible_files[0]
-            else:
-                raise HTTPException(status_code=404, detail="File not found on disk")
+        binary_record = file_storage_service.get_file_binary(file_id, db)
+        if not binary_record or not binary_record.data:
+            raise HTTPException(status_code=404, detail="File data not found")
 
         if not filename:
             filename = f"download-{file_id}"
 
-        if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="File not found on disk")
+        if db_metadata and not filename:
+            filename = db_metadata.file_name
 
-        return FileResponse(
-            path=file_path,
-            filename=filename,
-            media_type='application/octet-stream'
-        )
+        media_type = binary_record.mime_type
+        if not media_type and db_metadata:
+            media_type = db_metadata.file_type
+        if not media_type:
+            media_type = "application/octet-stream"
+
+        headers = {
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
+
+        async def iter_file():
+            yield binary_record.data
+
+        return StreamingResponse(iter_file(), media_type=media_type, headers=headers)
 
     except HTTPException:
         raise
@@ -466,6 +475,8 @@ async def get_vector_stats(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Only admin users can access debug info")
     
     try:
+        # Import here to avoid PyO3 initialization issues during module import
+        from app.core.vector_singleton import get_vector_store
         vector_store = get_vector_store()
         if vector_store.client:
             # Qdrant stats
@@ -534,6 +545,8 @@ async def reset_all_files(
         from pathlib import Path
         
         # Get vector store instance
+        # Import here to avoid PyO3 initialization issues during module import
+        from app.core.vector_singleton import get_vector_store
         vector_store = get_vector_store()
         
         # Get all files from database

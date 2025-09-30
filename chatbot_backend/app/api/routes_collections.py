@@ -3,7 +3,7 @@ Collections API routes for the collection-based RAG system.
 Handles CRUD operations for collections and collection-user assignments.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
@@ -12,7 +12,7 @@ import logging
 from urllib.parse import urlparse
 
 from ..core.database import get_db
-from ..models.collection import Collection, CollectionUser
+from ..models.collection import Collection, CollectionUser, CollectionWebsite
 from ..models.user import User
 from ..models.system_prompt import SystemPrompt
 from ..models.website import Website
@@ -39,6 +39,23 @@ class CollectionUpdate(BaseModel):
     description: Optional[str] = None
     website_url: Optional[str] = None
     is_active: Optional[bool] = None
+    admin_user_id: Optional[str] = None
+
+
+class CollectionWebsiteCreate(BaseModel):
+    url: str
+
+
+class CollectionWebsiteResponse(BaseModel):
+    id: int
+    collection_id: str
+    url: str
+    normalized_url: str
+    created_at: str
+    created_by: Optional[str]
+
+    class Config:
+        from_attributes = True
 
 
 class CollectionResponse(BaseModel):
@@ -53,6 +70,7 @@ class CollectionResponse(BaseModel):
     file_count: int
     created_at: str
     updated_at: Optional[str]
+    website_urls: List[CollectionWebsiteResponse] = []
 
     class Config:
         from_attributes = True
@@ -94,22 +112,7 @@ async def get_collections(
                     Collection.collection_id.in_(collection_ids)
                 ).all()
         
-        return [
-            CollectionResponse(
-                collection_id=c.collection_id,
-                name=c.name,
-                description=c.description,
-                website_url=c.website_url,
-                admin_email=c.admin_email,
-                is_active=c.is_active,
-                user_count=c.user_count,
-                prompt_count=c.prompt_count,
-                file_count=c.file_count,
-                created_at=c.created_at.isoformat() if c.created_at else "",
-                updated_at=c.updated_at.isoformat() if c.updated_at else None
-            )
-            for c in collections
-        ]
+        return [_collection_to_response(c) for c in collections]
     except Exception as e:
         logger.error(f"Error getting collections: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve collections")
@@ -126,7 +129,7 @@ async def create_collection(
         # Generate unique collection ID
         collection_id = f"col_{uuid.uuid4().hex[:8]}"
 
-        # Determine target website (optional)
+        # Determine target website (ensure one always exists)
         target_website: Optional[Website] = None
         target_website_id: Optional[str] = None
 
@@ -142,6 +145,21 @@ async def create_collection(
                 target_website = db.query(Website).filter(Website.domain == domain).first()
                 if target_website:
                     target_website_id = target_website.website_id
+        
+        # If still no website, use or create default
+        if not target_website_id:
+            default_site = db.query(Website).filter(Website.domain == "default.local").first()
+            if not default_site:
+                default_site = Website(
+                    name="Default Organization",
+                    domain="default.local",
+                    is_active=True
+                )
+                db.add(default_site)
+                db.flush()
+            target_website_id = default_site.website_id
+            target_website = default_site
+            logger.info(f"Using default website for collection: {target_website_id}")
 
         # Check if admin user exists by username first, then by email if provided
         admin_user = db.query(User).filter(User.username == collection_data.admin_username).first()
@@ -173,13 +191,18 @@ async def create_collection(
             if admin_user.role != "user_admin" and not admin_user.is_super_admin():
                 admin_user.role = "user_admin"
                 updated = True
+            # Ensure user is active when assigned as collection admin
+            if not admin_user.is_active:
+                admin_user.is_active = True
+                updated = True
             if updated:
                 db.add(admin_user)
 
-        # Ensure website reference aligns with admin if still missing
-        if not target_website_id and admin_user.website_id:
-            target_website_id = admin_user.website_id
-            target_website = db.query(Website).filter(Website.website_id == target_website_id).first()
+        # Ensure admin user has website_id aligned
+        if target_website_id and admin_user.website_id != target_website_id:
+            admin_user.website_id = target_website_id
+            db.add(admin_user)
+            logger.info(f"Aligned admin user website_id to collection: {target_website_id}")
 
         # Create collection
         collection = Collection(
@@ -250,19 +273,7 @@ async def create_collection(
 
         logger.info(f"Created collection {collection_id} with admin {admin_user.email}")
 
-        return CollectionResponse(
-            collection_id=collection.collection_id,
-            name=collection.name,
-            description=collection.description,
-            website_url=collection.website_url,
-            admin_email=collection.admin_email,
-            is_active=collection.is_active,
-            user_count=1,
-            prompt_count=1,
-            file_count=0,
-            created_at=collection.created_at.isoformat(),
-            updated_at=collection.updated_at.isoformat() if collection.updated_at else None
-        )
+        return _collection_to_response(collection)
 
     except Exception as e:
         db.rollback()
@@ -293,6 +304,10 @@ async def get_collection(
         if not user_assignment:
             raise HTTPException(status_code=403, detail="Access denied")
     
+    return _collection_to_response(collection)
+
+
+def _collection_to_response(collection: Collection) -> CollectionResponse:
     return CollectionResponse(
         collection_id=collection.collection_id,
         name=collection.name,
@@ -303,9 +318,46 @@ async def get_collection(
         user_count=collection.user_count,
         prompt_count=collection.prompt_count,
         file_count=collection.file_count,
-        created_at=collection.created_at.isoformat(),
-        updated_at=collection.updated_at.isoformat() if collection.updated_at else None
+        created_at=collection.created_at.isoformat() if collection.created_at else "",
+        updated_at=collection.updated_at.isoformat() if collection.updated_at else None,
+        website_urls=[
+            CollectionWebsiteResponse(
+                id=wm.id,
+                collection_id=wm.collection_id,
+                url=wm.url,
+                normalized_url=wm.normalized_url,
+                created_at=wm.created_at.isoformat() if wm.created_at else "",
+                created_by=wm.created_by
+            )
+            for wm in collection.website_mappings
+        ]
     )
+
+
+def _normalize_url(raw_url: str) -> str:
+    if not raw_url:
+        return ""
+
+    candidate = raw_url.strip()
+    if not candidate:
+        return ""
+
+    parsed = urlparse(candidate)
+    if not parsed.scheme:
+        parsed = urlparse(f"https://{candidate}")
+
+    netloc = parsed.netloc.lower()
+    path = parsed.path.rstrip("/")
+
+    if not netloc:
+        netloc = parsed.path.lower().rstrip("/")
+        path = ""
+
+    normalized = netloc
+    if path:
+        normalized = f"{normalized}{path}"
+
+    return normalized
 
 
 @router.put("/{collection_id}", response_model=CollectionResponse)
@@ -315,18 +367,15 @@ async def update_collection(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Update a collection"""
     collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
-    
+
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
-    
-    # Check permissions (super admin or collection admin)
+
     if current_user.role != "super_admin" and collection.admin_user_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     try:
-        # Update fields
         if collection_data.name is not None:
             collection.name = collection_data.name
         if collection_data.description is not None:
@@ -335,27 +384,122 @@ async def update_collection(
             collection.website_url = collection_data.website_url
         if collection_data.is_active is not None:
             collection.is_active = collection_data.is_active
-        
+        if collection_data.admin_user_id is not None:
+            collection.admin_user_id = collection_data.admin_user_id
+
         db.commit()
-        
-        return CollectionResponse(
-            collection_id=collection.collection_id,
-            name=collection.name,
-            description=collection.description,
-            website_url=collection.website_url,
-            admin_email=collection.admin_email,
-            is_active=collection.is_active,
-            user_count=collection.user_count,
-            prompt_count=collection.prompt_count,
-            file_count=collection.file_count,
-            created_at=collection.created_at.isoformat(),
-            updated_at=collection.updated_at.isoformat() if collection.updated_at else None
-        )
-        
+        db.refresh(collection)
+
+        return _collection_to_response(collection)
+
     except Exception as e:
         db.rollback()
         logger.error(f"Error updating collection {collection_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update collection")
+
+
+@router.get("/{collection_id}/websites", response_model=List[CollectionWebsiteResponse])
+async def list_collection_websites(
+    collection_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    if current_user.role != "super_admin" and collection.admin_user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return [
+        CollectionWebsiteResponse(
+            id=wm.id,
+            collection_id=wm.collection_id,
+            url=wm.url,
+            normalized_url=wm.normalized_url,
+            created_at=wm.created_at.isoformat() if wm.created_at else "",
+            created_by=wm.created_by
+        )
+        for wm in collection.website_mappings
+    ]
+
+
+@router.post("/{collection_id}/websites", response_model=CollectionWebsiteResponse, status_code=status.HTTP_201_CREATED)
+async def add_collection_website(
+    collection_id: str,
+    website_data: CollectionWebsiteCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    if current_user.role != "super_admin" and collection.admin_user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    normalized = _normalize_url(website_data.url)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Invalid URL")
+
+    existing = db.query(CollectionWebsite).filter(
+        CollectionWebsite.collection_id == collection_id,
+        CollectionWebsite.normalized_url == normalized
+    ).first()
+
+    if existing:
+        raise HTTPException(status_code=400, detail="URL already mapped to collection")
+
+    mapping = CollectionWebsite(
+        collection_id=collection_id,
+        url=website_data.url.strip(),
+        normalized_url=normalized,
+        created_by=current_user.user_id
+    )
+
+    db.add(mapping)
+    db.commit()
+    db.refresh(mapping)
+
+    return CollectionWebsiteResponse(
+        id=mapping.id,
+        collection_id=mapping.collection_id,
+        url=mapping.url,
+        normalized_url=mapping.normalized_url,
+        created_at=mapping.created_at.isoformat() if mapping.created_at else "",
+        created_by=mapping.created_by
+    )
+
+
+@router.delete("/{collection_id}/websites/{mapping_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_collection_website(
+    collection_id: str,
+    mapping_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    if current_user.role != "super_admin" and collection.admin_user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    mapping = db.query(CollectionWebsite).filter(
+        CollectionWebsite.id == mapping_id,
+        CollectionWebsite.collection_id == collection_id
+    ).first()
+
+    if not mapping:
+        raise HTTPException(status_code=404, detail="Mapping not found")
+
+    db.delete(mapping)
+    db.commit()
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete("/{collection_id}")

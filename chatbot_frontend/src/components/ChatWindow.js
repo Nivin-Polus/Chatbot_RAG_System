@@ -168,33 +168,46 @@ export default function ChatWindow({ collectionId = null, collections = [] }) {
   };
 
   return (
-    <div className="chat-window">
+    <div className="flex flex-col h-[600px] bg-white rounded-xl shadow-soft border border-gray-200 overflow-hidden">
+      {/* Collection Selector */}
       {collections.length > 0 && !collectionId && (
-        <div className="collection-selector">
-          <label htmlFor="chat-collection-select">Collection:</label>
-          <select
-            id="chat-collection-select"
-            value={activeCollectionId || ""}
-            onChange={(e) => setActiveCollectionId(e.target.value || null)}
-          >
-            {collections.map((col) => (
-              <option key={col.collection_id} value={col.collection_id}>
-                {col.name || col.collection_id}
-              </option>
-            ))}
-          </select>
+        <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+          <div className="flex items-center space-x-3">
+            <label htmlFor="chat-collection-select" className="text-sm font-medium text-gray-700">
+              Collection:
+            </label>
+            <select
+              id="chat-collection-select"
+              value={activeCollectionId || ""}
+              onChange={(e) => setActiveCollectionId(e.target.value || null)}
+              className="form-select flex-1 max-w-xs"
+            >
+              {collections.map((col) => (
+                <option key={col.collection_id} value={col.collection_id}>
+                  {col.name || col.collection_id}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       )}
-      <div className="chat-header">
-        <div className="chat-title">
-          <h3>💬 Chat with your Knowledge Base</h3>
-          {messages.length > 0 && (
-            <span className="context-indicator">
-              {messages.length} messages in context
-            </span>
-          )}
+
+      {/* Chat Header */}
+      <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200">
+        <div className="flex items-center space-x-3">
+          <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center">
+            <span className="text-primary-600 text-lg">💬</span>
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">AI Assistant</h3>
+            {messages.length > 0 && (
+              <span className="text-xs text-gray-500">
+                {messages.length} messages in context
+              </span>
+            )}
+          </div>
         </div>
-        <div className="chat-actions">
+        <div className="flex items-center space-x-2">
           {messages.length > 0 && (
             <>
               <button 
@@ -202,94 +215,138 @@ export default function ChatWindow({ collectionId = null, collections = [] }) {
                   console.log("Current messages state:", messages);
                   console.log("Session ID:", sessionId);
                 }}
-                className="debug-btn"
+                className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
                 title="Debug current state"
               >
-                🐛 Debug
+                🐛
               </button>
               <button 
                 onClick={startNewChat} 
-                className="new-chat-btn"
+                className="p-2 text-gray-400 hover:text-primary-600 transition-colors"
                 title="Start a new conversation"
               >
-                🔄 New Chat
+                🔄
               </button>
             </>
           )}
         </div>
       </div>
-      <div className="messages">
+
+      {/* Messages Area */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
-          <div className="welcome-message">
-            Upload some documents and start asking questions about them!
+          <div className="text-center py-12">
+            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span className="text-2xl">🤖</span>
+            </div>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Welcome to AI Assistant</h3>
+            <p className="text-gray-600">Upload some documents and start asking questions about them!</p>
           </div>
         )}
+        
         {messages.map((m, i) => (
-          <div key={i} className={`message ${m.user ? "user" : "bot"} ${m.error ? "error" : ""}`}>
-            <div className={`message-content ${m.formatted ? "formatted-response" : ""}`}>
-              {m.formatted ? (
+          <div key={i} className={`flex ${m.user ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl ${
+              m.user 
+                ? 'bg-primary-600 text-white' 
+                : m.error 
+                ? 'bg-error-100 text-error-800 border border-error-200'
+                : 'bg-gray-100 text-gray-900'
+            }`}>
+              <div className={`text-sm ${m.formatted ? 'prose prose-sm max-w-none' : ''}`}>
+                {m.formatted ? (
+                  <div dangerouslySetInnerHTML={{ 
+                    __html: m.text
+                      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                      .replace(/\n\d+\./g, '<br/>$&')
+                      .replace(/\n-/g, '<br/>•')
+                      .replace(/\n/g, '<br/>')
+                  }} />
+                ) : (
+                  m.text
+                )}
+              </div>
+              {!m.user && (
+                <div className="flex items-center space-x-2 mt-2">
+                  <button 
+                    onClick={() => deleteMessage(i)}
+                    className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                    title="Delete this message"
+                  >
+                    🗑️
+                  </button>
+                  <button 
+                    onClick={() => deleteFromIndex(i)}
+                    className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                    title="Delete from here onwards"
+                  >
+                    ✂️
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        
+        {isTyping && (
+          <div className="flex justify-start">
+            <div className="max-w-xs lg:max-w-md px-4 py-3 rounded-2xl bg-gray-100 text-gray-900">
+              <div className="text-sm prose prose-sm max-w-none">
                 <div dangerouslySetInnerHTML={{ 
-                  __html: m.text
+                  __html: typingText
                     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                     .replace(/\n\d+\./g, '<br/>$&')
                     .replace(/\n-/g, '<br/>•')
                     .replace(/\n/g, '<br/>')
                 }} />
-              ) : (
-                m.text
-              )}
-            </div>
-            <div className="message-actions">
-              <button 
-                onClick={() => deleteMessage(i)}
-                className="delete-message-btn"
-                title="Delete this message"
-              >
-                🗑️
-              </button>
-              <button 
-                onClick={() => deleteFromIndex(i)}
-                className="delete-from-btn"
-                title="Delete from here onwards"
-              >
-                ✂️
-              </button>
-            </div>
-          </div>
-        ))}
-        {isTyping && (
-          <div className="message bot typing-message">
-            <div className="message-content formatted-response">
-              <div dangerouslySetInnerHTML={{ 
-                __html: typingText
-                  .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                  .replace(/\n\d+\./g, '<br/>$&')
-                  .replace(/\n-/g, '<br/>•')
-                  .replace(/\n/g, '<br/>')
-              }} />
-              <span className="typing-cursor">|</span>
+                <span className="typing-cursor animate-pulse">|</span>
+              </div>
             </div>
           </div>
         )}
+        
         {loading && (
-          <div className="message bot">
-            <div className="message-content typing">Thinking...</div>
+          <div className="flex justify-start">
+            <div className="max-w-xs lg:max-w-md px-4 py-3 rounded-2xl bg-gray-100 text-gray-900">
+              <div className="flex items-center space-x-2">
+                <div className="spinner"></div>
+                <span className="text-sm">Thinking...</span>
+              </div>
+            </div>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
-      <div className="input-section">
-        <textarea
-          value={question}
-          onChange={e => setQuestion(e.target.value)}
-          placeholder="Ask a question about your uploaded documents..."
-          onKeyDown={handleKeyPress}
-          rows={2}
-          disabled={loading}
-        />
-        <button onClick={sendQuestion} disabled={!question.trim() || loading}>
-          {loading ? "..." : "Send"}
-        </button>
+
+      {/* Input Section */}
+      <div className="border-t border-gray-200 p-4">
+        <div className="flex items-end space-x-3">
+          <div className="flex-1">
+            <textarea
+              value={question}
+              onChange={e => setQuestion(e.target.value)}
+              placeholder="Ask a question about your uploaded documents..."
+              onKeyDown={handleKeyPress}
+              rows={2}
+              disabled={loading}
+              className="form-textarea resize-none"
+            />
+          </div>
+          <button 
+            onClick={sendQuestion} 
+            disabled={!question.trim() || loading}
+            className="btn btn-primary px-6 py-3 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? (
+              <div className="spinner"></div>
+            ) : (
+              <>
+                <span className="mr-2">📤</span>
+                Send
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );

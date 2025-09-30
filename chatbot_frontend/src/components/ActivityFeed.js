@@ -94,120 +94,186 @@ export default function ActivityFeed() {
     : activities.filter(activity => activity.type === filter);
 
   return (
-    <div className="activity-feed-container">
-      <div className="activity-header">
-        <div className="activity-title">
-          <h2>📊 Activity Feed</h2>
-          <p>Track all system activities and user interactions</p>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">📊 Activity Feed</h2>
+          <p className="text-gray-600">Track all system activities and user interactions</p>
         </div>
-        
-        <div className="activity-stats">
-          <div className="stat-card">
-            <div className="stat-number">{stats.total_files_uploaded || 0}</div>
-            <div className="stat-label">Files Uploaded</div>
+        <button
+          onClick={loadActivities}
+          className="btn btn-secondary"
+          disabled={loading}
+        >
+          {loading ? (
+            <>
+              <div className="spinner mr-2"></div>
+              Refreshing...
+            </>
+          ) : (
+            <>
+              <span className="mr-2">🔄</span>
+              Refresh
+            </>
+          )}
+        </button>
+      </div>
+      
+      <div className="stats-grid">
+        <div className="card group hover:scale-105 transition-transform duration-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 mb-1">Files Uploaded</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.total_files_uploaded || 0}</p>
+            </div>
+            <div className="p-3 rounded-lg bg-primary-100 text-primary-600">
+              <span className="text-2xl">📤</span>
+            </div>
           </div>
-          <div className="stat-card">
-            <div className="stat-number">{stats.total_chat_sessions || 0}</div>
-            <div className="stat-label">Chat Sessions</div>
+        </div>
+        <div className="card group hover:scale-105 transition-transform duration-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 mb-1">Chat Sessions</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.total_chat_sessions || 0}</p>
+            </div>
+            <div className="p-3 rounded-lg bg-success-100 text-success-600">
+              <span className="text-2xl">💬</span>
+            </div>
           </div>
-          <div className="stat-card">
-            <div className="stat-number">{stats.total_queries || 0}</div>
-            <div className="stat-label">Total Queries</div>
+        </div>
+        <div className="card group hover:scale-105 transition-transform duration-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 mb-1">Total Queries</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.total_queries || 0}</p>
+            </div>
+            <div className="p-3 rounded-lg bg-warning-100 text-warning-600">
+              <span className="text-2xl">🔍</span>
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="activity-controls">
-        <div className="filter-buttons">
+      <div className="card">
+        <div className="card-header">
+          <h3 className="card-title">Filter Activities</h3>
+        </div>
+        <div className="flex flex-wrap gap-2">
           <button 
-            className={`filter-btn ${filter === "all" ? "active" : ""}`}
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
+              filter === "all" 
+                ? "bg-primary-600 text-white shadow-sm" 
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+            }`}
             onClick={() => setFilter("all")}
           >
             All Activities
           </button>
           <button 
-            className={`filter-btn ${filter === "file_upload" ? "active" : ""}`}
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
+              filter === "file_upload" 
+                ? "bg-primary-600 text-white shadow-sm" 
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+            }`}
             onClick={() => setFilter("file_upload")}
           >
             📤 Uploads
           </button>
           <button 
-            className={`filter-btn ${filter === "chat_query" ? "active" : ""}`}
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
+              filter === "chat_query" 
+                ? "bg-primary-600 text-white shadow-sm" 
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+            }`}
             onClick={() => setFilter("chat_query")}
           >
             🔍 Queries
           </button>
           <button 
-            className={`filter-btn ${filter === "chat_session_start" ? "active" : ""}`}
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
+              filter === "chat_session_start" 
+                ? "bg-primary-600 text-white shadow-sm" 
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+            }`}
             onClick={() => setFilter("chat_session_start")}
           >
             💬 Sessions
           </button>
           <button 
-            className={`filter-btn ${filter === "file_delete" ? "active" : ""}`}
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
+              filter === "file_delete" 
+                ? "bg-primary-600 text-white shadow-sm" 
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+            }`}
             onClick={() => setFilter("file_delete")}
           >
             🗑️ Deletes
           </button>
         </div>
-        
-        <button onClick={loadActivities} className="refresh-btn" disabled={loading}>
-          {loading ? "🔄" : "🔄"} Refresh
-        </button>
       </div>
 
       {error && (
-        <div className="error-message">
-          <span className="error-icon">❌</span>
-          {error}
+        <div className="alert alert-error">
+          <span className="alert-icon">❌</span>
+          <span className="alert-message">{error}</span>
         </div>
       )}
 
-      <div className="activity-list">
-        {loading ? (
-          <div className="loading-state">
-            <div className="loading-spinner"></div>
-            <p>Loading activities...</p>
-          </div>
-        ) : filteredActivities.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">📭</div>
-            <h3>No activities found</h3>
-            <p>Activities will appear here as users interact with the system</p>
-          </div>
-        ) : (
-          filteredActivities.map((activity, index) => (
-            <div key={activity.id} className="activity-item">
-              <div className="activity-icon">
-                {getActivityIcon(activity.type)}
-              </div>
-              
-              <div className="activity-content">
-                <div className="activity-header-item">
-                  <h4 className="activity-title-text">
-                    {getActivityTitle(activity)}
-                  </h4>
-                  <span className="activity-time">
-                    {formatTimeAgo(activity.timestamp)}
-                  </span>
-                </div>
-                
-                <div className="activity-description">
-                  {getActivityDescription(activity)}
-                </div>
-                
-                <div className="activity-meta">
-                  <span className="activity-user">
-                    👤 {activity.user}
-                  </span>
-                  <span className="activity-type">
-                    {activity.type.replace(/_/g, " ").toUpperCase()}
-                  </span>
-                </div>
-              </div>
+      <div className="card">
+        <div className="card-header">
+          <h3 className="card-title">Recent Activities</h3>
+        </div>
+        <div className="space-y-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="spinner mr-3"></div>
+              <span className="text-gray-600">Loading activities...</span>
             </div>
-          ))
-        )}
+          ) : filteredActivities.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span className="text-2xl">📭</span>
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">No activities found</h3>
+              <p className="text-gray-600">Activities will appear here as users interact with the system</p>
+            </div>
+          ) : (
+            filteredActivities.map((activity, index) => (
+              <div key={activity.id} className="flex items-start space-x-4 p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200">
+                <div className="flex-shrink-0 w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm">
+                  <span className="text-xl">{getActivityIcon(activity.type)}</span>
+                </div>
+                
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between">
+                    <h4 className="text-sm font-semibold text-gray-900">
+                      {getActivityTitle(activity)}
+                    </h4>
+                    <span className="text-xs text-gray-500 ml-2">
+                      {formatTimeAgo(activity.timestamp)}
+                    </span>
+                  </div>
+                  
+                  {getActivityDescription(activity) && (
+                    <p className="text-sm text-gray-600 mt-1">
+                      {getActivityDescription(activity)}
+                    </p>
+                  )}
+                  
+                  <div className="flex items-center space-x-4 mt-2">
+                    <span className="text-xs text-gray-500">
+                      👤 {activity.user}
+                    </span>
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-800">
+                      {activity.type.replace(/_/g, " ").toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );

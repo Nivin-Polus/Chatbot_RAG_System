@@ -109,3 +109,4 @@ temp/
 # Model related
 chatbot_backend/sentence_transformers/
 chatbot_backend/.transformers_cache/
+chatbot_frontend/node_modules/

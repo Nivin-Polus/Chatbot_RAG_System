@@ -23,7 +23,8 @@ import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from passlib.context import CryptContext
 
@@ -70,6 +71,46 @@ def _get_db_session():
     engine = create_engine(settings.database_url)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     return engine, SessionLocal()
+
+
+def _perform_schema_migrations(engine) -> None:
+    """Apply lightweight schema tweaks required for the latest application code."""
+    inspector = inspect(engine)
+
+    try:
+        if not inspector.has_table("file_metadata"):
+            LOGGER.info("Table 'file_metadata' not present yet; skipping column checks")
+            return
+    except SQLAlchemyError as exc:
+        LOGGER.warning("Unable to inspect existing tables: %s", exc)
+        return
+
+    columns = {column["name"]: column for column in inspector.get_columns("file_metadata")}
+
+    # Ensure file_content column exists for database-backed storage
+    if "file_content" not in columns:
+        LOGGER.info("Adding 'file_content' column to 'file_metadata' table")
+        try:
+            with engine.connect() as connection:
+                connection.execute(text("ALTER TABLE file_metadata ADD COLUMN file_content LONGBLOB NULL"))
+            LOGGER.info("'file_content' column created successfully")
+        except SQLAlchemyError as exc:
+            LOGGER.error("Failed to add 'file_content' column: %s", exc)
+            raise
+    else:
+        LOGGER.info("'file_content' column already present")
+
+    # Ensure file_path allows NULL now that content can live in the database
+    file_path_meta = columns.get("file_path")
+    if file_path_meta and not file_path_meta.get("nullable", False):
+        LOGGER.info("Making 'file_path' column nullable to support DB-backed storage")
+        try:
+            with engine.connect() as connection:
+                connection.execute(text("ALTER TABLE file_metadata MODIFY COLUMN file_path VARCHAR(500) NULL"))
+            LOGGER.info("'file_path' column updated to allow NULL values")
+        except SQLAlchemyError as exc:
+            LOGGER.error("Failed to alter 'file_path' column nullability: %s", exc)
+            raise
 
 
 def _ensure_default_website(db) -> Website:
@@ -217,6 +258,7 @@ def main() -> None:
     _ensure_database()
 
     engine, db = _get_db_session()
+    _perform_schema_migrations(engine)
     try:
         website = _ensure_default_website(db)
 

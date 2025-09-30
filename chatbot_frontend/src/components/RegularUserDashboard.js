@@ -82,9 +82,13 @@ const RegularUserDashboard = ({ onLogout }) => {
   const renderAccessibleFiles = () => {
     if (accessibleFiles.length === 0) {
       return (
-        <div className="no-files">
-          <p>You don't have access to any files yet.</p>
-          <p>Contact your administrator to get access to documents.</p>
+        <div className="card text-center py-12">
+          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <span className="text-2xl">📭</span>
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Files Available</h3>
+          <p className="text-gray-600 mb-4">You don't have access to any files yet.</p>
+          <p className="text-sm text-gray-500">Contact your administrator to get access to documents.</p>
         </div>
       );
     }
@@ -95,54 +99,88 @@ const RegularUserDashboard = ({ onLogout }) => {
 
     if (visibleFiles.length === 0) {
       return (
-        <div className="no-files">
-          <p>You don't have access to files in this collection.</p>
-          <p>Contact your administrator to request access.</p>
+        <div className="card text-center py-12">
+          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <span className="text-2xl">📚</span>
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Files in This Collection</h3>
+          <p className="text-gray-600 mb-4">You don't have access to files in this collection.</p>
+          <p className="text-sm text-gray-500">Contact your administrator to request access.</p>
         </div>
       );
     }
 
     return (
-      <div className="files-grid">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {visibleFiles.map(fileAccess => (
-          <div key={fileAccess.access_id} className="file-card">
-            <div className="file-header">
-              <h3>{fileAccess.file_name}</h3>
-              <div className="permissions">
-                {fileAccess.can_read && <span className="perm read">Read</span>}
-                {fileAccess.can_download && <span className="perm download">Download</span>}
+          <div key={fileAccess.access_id} className="card group hover:shadow-medium transition-shadow duration-200">
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex-1 min-w-0">
+                <h3 className="text-lg font-semibold text-gray-900 truncate">{fileAccess.file_name}</h3>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {fileAccess.can_read && (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-success-100 text-success-800">
+                      Read
+                    </span>
+                  )}
+                  {fileAccess.can_download && (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800">
+                      Download
+                    </span>
+                  )}
+                </div>
               </div>
+              {fileAccess.expires_at && new Date(fileAccess.expires_at) < new Date() && (
+                <div className="flex-shrink-0">
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-error-100 text-error-800">
+                    ⚠️ Expired
+                  </span>
+                </div>
+              )}
             </div>
 
-            <div className="file-info">
-              <p><strong>Size:</strong> {(fileAccess.file_size / 1024).toFixed(1)} KB</p>
-              <p><strong>Uploaded by:</strong> {fileAccess.uploader_name}</p>
-              <p><strong>Access granted:</strong> {new Date(fileAccess.granted_at).toLocaleDateString()}</p>
+            <div className="space-y-3 mb-4">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-500">Size:</span>
+                <span className="font-medium">{(fileAccess.file_size / 1024).toFixed(1)} KB</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-500">Uploaded by:</span>
+                <span className="font-medium truncate max-w-32">{fileAccess.uploader_name}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-500">Access granted:</span>
+                <span className="font-medium">{new Date(fileAccess.granted_at).toLocaleDateString()}</span>
+              </div>
               {fileAccess.expires_at && (
-                <p><strong>Expires:</strong> {new Date(fileAccess.expires_at).toLocaleDateString()}</p>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-500">Expires:</span>
+                  <span className="font-medium">{new Date(fileAccess.expires_at).toLocaleDateString()}</span>
+                </div>
               )}
               {fileAccess.notes && (
-                <p><strong>Notes:</strong> {fileAccess.notes}</p>
+                <div className="text-sm">
+                  <span className="text-gray-500">Notes:</span>
+                  <p className="text-gray-700 mt-1">{fileAccess.notes}</p>
+                </div>
               )}
             </div>
 
-            <div className="file-actions">
+            <div className="flex space-x-2">
               {fileAccess.can_download && (
                 <button
-                  className="download-btn"
+                  className="btn btn-primary btn-sm flex-1"
                   onClick={() => downloadFile(fileAccess.file_id, fileAccess.file_name)}
                 >
+                  <span className="mr-2">📥</span>
                   Download
                 </button>
               )}
-              <button className="view-btn">View in Chat</button>
+              <button className="btn btn-secondary btn-sm flex-1">
+                <span className="mr-2">💬</span>
+                View in Chat
+              </button>
             </div>
-
-            {fileAccess.expires_at && new Date(fileAccess.expires_at) < new Date() && (
-              <div className="expired-notice">
-                ⚠️ Access has expired
-              </div>
-            )}
           </div>
         ))}
       </div>
@@ -151,7 +189,11 @@ const RegularUserDashboard = ({ onLogout }) => {
 
   const TabButton = ({ id, label, isActive, onClick }) => (
     <button
-      className={`tab-button ${isActive ? 'active' : ''}`}
+      className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
+        isActive
+          ? 'bg-primary-600 text-white shadow-sm'
+          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+      }`}
       onClick={() => onClick(id)}
     >
       {label}
@@ -159,59 +201,123 @@ const RegularUserDashboard = ({ onLogout }) => {
   );
 
   return (
-    <div className="regular-user-dashboard">
-      <div className="dashboard-header">
-        <h1>💬 My Chatbot</h1>
-        <div className="header-actions">
-          <span className="user-info">Welcome, {username}</span>
-          <button onClick={onLogout} className="logout-btn">Logout</button>
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-primary-600 rounded-lg flex items-center justify-center">
+                <span className="text-white text-xl">💬</span>
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-gray-900">My Chatbot</h1>
+                <p className="text-sm text-gray-600">Knowledge Base Assistant</p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-4">
+              <span className="text-sm text-gray-600">Welcome, {username}</span>
+              <button 
+                onClick={onLogout} 
+                className="btn btn-secondary btn-sm"
+              >
+                <span className="mr-2">🚪</span>
+                Logout
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="dashboard-tabs">
-        <TabButton id="chat" label="💬 Chat" isActive={activeTab === 'chat'} onClick={setActiveTab} />
-        <TabButton id="files" label="📁 My Files" isActive={activeTab === 'files'} onClick={setActiveTab} />
+      {/* Navigation Tabs */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <nav className="flex space-x-8">
+            <TabButton id="chat" label="💬 Chat" isActive={activeTab === 'chat'} onClick={setActiveTab} />
+            <TabButton id="files" label="📁 My Files" isActive={activeTab === 'files'} onClick={setActiveTab} />
+          </nav>
+        </div>
       </div>
 
-      <div className="dashboard-content">
-        {loading && <div className="loading">Loading...</div>}
+      {/* Main Content */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <div className="spinner mr-3"></div>
+            <span className="text-gray-600">Loading...</span>
+          </div>
+        )}
 
         {/* Chat Tab */}
-        {activeTab === 'chat' && (
-          <div className="chat-tab">
-            <div className="chat-info">
-              <p>💡 You can ask questions about the documents you have access to. The AI will search through your accessible files to provide relevant answers.</p>
+        {activeTab === 'chat' && !loading && (
+          <div className="space-y-6">
+            <div className="card">
+              <div className="flex items-start space-x-3">
+                <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <span className="text-primary-600 text-lg">💡</span>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">AI Assistant Ready</h3>
+                  <p className="text-gray-600">
+                    You can ask questions about the documents you have access to. The AI will search through your accessible files to provide relevant answers.
+                  </p>
+                </div>
+              </div>
             </div>
+
             {activeCollectionId ? (
               <ChatWindow
                 collectionId={activeCollectionId}
                 collections={collections}
               />
             ) : (
-              <div className="no-collection">
-                <p>You have not been assigned to a collection yet. Please contact your administrator.</p>
+              <div className="card text-center py-12">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-2xl">📚</span>
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">No Collection Assigned</h3>
+                <p className="text-gray-600 mb-4">
+                  You have not been assigned to a collection yet. Please contact your administrator to get access to documents.
+                </p>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="btn btn-primary"
+                >
+                  <span className="mr-2">🔄</span>
+                  Refresh
+                </button>
               </div>
             )}
           </div>
         )}
 
         {/* Accessible Files Tab */}
-        {activeTab === 'files' && (
-          <div className="files-tab">
-            <div className="section">
-              <h2>Files You Can Access</h2>
-              {renderAccessibleFiles()}
+        {activeTab === 'files' && !loading && (
+          <div className="space-y-8">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">Files You Can Access</h2>
+              <p className="text-gray-600">View and download documents you have permission to access</p>
             </div>
 
-            <div className="section">
-              <h2>How to Get More Access</h2>
-              <div className="help-info">
-                <ol>
-                  <li>Contact your department administrator</li>
-                  <li>Request access to specific files you need</li>
-                  <li>Explain why you need access to those documents</li>
-                </ol>
-                <p>Your administrator can grant you read, download, or other permissions as needed.</p>
+            {renderAccessibleFiles()}
+
+            <div className="card">
+              <div className="card-header">
+                <h3 className="card-title">How to Get More Access</h3>
+                <p className="card-subtitle">Request additional file permissions</p>
+              </div>
+              <div className="space-y-4">
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <h4 className="font-semibold text-gray-900 mb-3">To request access to more files:</h4>
+                  <ol className="list-decimal list-inside space-y-2 text-sm text-gray-700">
+                    <li>Contact your department administrator</li>
+                    <li>Request access to specific files you need</li>
+                    <li>Explain why you need access to those documents</li>
+                  </ol>
+                  <p className="mt-3 text-sm text-gray-600">
+                    Your administrator can grant you read, download, or other permissions as needed.
+                  </p>
+                </div>
               </div>
             </div>
           </div>

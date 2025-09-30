@@ -11,7 +11,7 @@ class FileMetadata(Base):
     
     file_id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     file_name = Column(String(255), nullable=False)
-    file_path = Column(String(500), nullable=False)
+    file_path = Column(String(500), nullable=True)
     file_size = Column(Integer, nullable=False)
     file_type = Column(String(50), nullable=False)
     
@@ -38,6 +38,12 @@ class FileMetadata(Base):
     website = relationship("Website", back_populates="files")
     uploader = relationship("User", back_populates="uploaded_files")
     collection = relationship("Collection", back_populates="files")
+    binary = relationship(
+        "FileBinary",
+        back_populates="file_metadata",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
     user_accesses = relationship("UserFileAccess", foreign_keys="UserFileAccess.file_id", back_populates="file")
     
     def to_dict(self):

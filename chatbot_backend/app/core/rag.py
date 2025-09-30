@@ -1,7 +1,6 @@
 from typing import List, Dict, Optional
 import requests
 from sqlalchemy.orm import Session
-from app.core.vectorstore import VectorStore
 from app.config import settings
 from app.models.system_prompt import SystemPrompt
 from app.models.collection import Collection
@@ -26,9 +25,9 @@ Answering Rules:
 
 
 class RAG:
-    def __init__(self, vector_store: VectorStore, db_session: Session = None):
-        self.vector_store = vector_store
+    def __init__(self, db_session: Session = None):
         self.db_session = db_session
+        self._vector_store = None
 
         # Claude/LLM settings
         self.api_key = settings.CLAUDE_API_KEY
@@ -39,6 +38,45 @@ class RAG:
         self.default_max_tokens = getattr(settings, "CLAUDE_MAX_TOKENS", 4000)
         self.default_temperature = getattr(settings, "CLAUDE_TEMPERATURE", 0.7)
         self.default_system_prompt = getattr(settings, "SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
+
+    @property
+    def vector_store(self):
+        """Lazily initialize vector store to avoid PyO3 issues during module import"""
+        if self._vector_store is None:
+            from app.core.vectorstore import VectorStore
+            self._vector_store = VectorStore(settings.VECTOR_DB_URL)
+        return self._vector_store
+
+    # ------------------------------------------------------------------
+    # Small talk helpers
+    # ------------------------------------------------------------------
+    def _is_small_talk(self, query: str) -> bool:
+        """Simple heuristic to skip the RAG pipeline for casual greetings."""
+        if not query:
+            return False
+
+        normalized = query.strip().lower()
+        small_talk_phrases = {
+            "hi",
+            "hello",
+            "hey",
+            "good morning",
+            "good evening",
+            "good afternoon",
+            "how are you",
+            "what's up",
+            "hi there",
+            "hello there",
+        }
+
+        return normalized in small_talk_phrases
+
+    def _handle_small_talk(self, query: str) -> str:
+        """Return a friendly response for small talk interactions."""
+        return (
+            "Hello! I'm here to help with questions about your knowledge base documents. "
+            "Let me know what you'd like to learn or explore."
+        )
 
     def get_prompt_for_collection(self, collection_id: str) -> Optional[SystemPrompt]:
         """Get the active prompt for a specific collection from database"""

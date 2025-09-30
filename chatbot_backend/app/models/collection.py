@@ -41,6 +41,11 @@ class Collection(Base):
     files = relationship("FileMetadata", back_populates="collection")
     chat_sessions = relationship("ChatSession", back_populates="collection")
     chat_queries = relationship("ChatQuery", back_populates="collection")
+    website_mappings = relationship(
+        "CollectionWebsite",
+        back_populates="collection",
+        cascade="all, delete-orphan"
+    )
     
     def __repr__(self):
         return f"<Collection(id='{self.collection_id}', name='{self.name}')>"
@@ -90,3 +95,22 @@ class CollectionUser(Base):
     
     def __repr__(self):
         return f"<CollectionUser(collection='{self.collection_id}', user='{self.user_id}', role='{self.role}')>"
+
+
+class CollectionWebsite(Base):
+    """Mapping table for associating multiple website URLs with a collection."""
+
+    __tablename__ = "collection_websites"
+
+    id = Column(Integer, primary_key=True, index=True)
+    collection_id = Column(String(50), ForeignKey("collections.collection_id"), nullable=False, index=True)
+    url = Column(String(500), nullable=False)
+    normalized_url = Column(String(500), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(String(36), ForeignKey("users.user_id"), nullable=True)
+
+    collection = relationship("Collection", back_populates="website_mappings")
+    creator = relationship("User", foreign_keys=[created_by])
+
+    def __repr__(self):
+        return f"<CollectionWebsite(collection='{self.collection_id}', url='{self.url}')>"

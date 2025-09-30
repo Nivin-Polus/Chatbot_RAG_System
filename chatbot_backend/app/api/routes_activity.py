@@ -60,7 +60,7 @@ async def get_activities_by_user(
     current_user: dict = Depends(get_current_user)
 ):
     """Get activities filtered by user (admin only)"""
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in ["super_admin", "user_admin"]:
         raise HTTPException(status_code=403, detail="Only admin users can view other users' activities")
     
     try:
@@ -129,7 +129,7 @@ async def cleanup_old_activities(
     current_user: dict = Depends(get_current_user)
 ):
     """Clear old activities (admin only)"""
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in ["super_admin", "user_admin"]:
         raise HTTPException(status_code=403, detail="Only admin users can cleanup activities")
     
     try:
@@ -145,18 +145,19 @@ async def cleanup_old_activities(
 @router.delete("/reset-files")
 async def reset_files_only(current_user: dict = Depends(get_current_user)):
     """Reset files only - delete all uploaded files and their data (admin only)"""
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in ["super_admin", "user_admin"]:
         raise HTTPException(status_code=403, detail="Only admin users can reset files")
     
     try:
         import shutil
         import os
         from pathlib import Path
-        from app.core.vector_singleton import get_vector_store
         from app.core.database import get_db, SessionLocal
         from app.models.file_metadata import FileMetadata
         
         # Get vector store instance
+        # Import here to avoid PyO3 initialization issues during module import
+        from app.core.vector_singleton import get_vector_store
         vector_store = get_vector_store()
         
         # Get database session
@@ -248,14 +249,15 @@ async def reset_files_only(current_user: dict = Depends(get_current_user)):
 @router.delete("/reset-all")
 async def reset_everything(current_user: dict = Depends(get_current_user)):
     """Reset everything - clear all data (admin only)"""
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in ["super_admin", "user_admin"]:
         raise HTTPException(status_code=403, detail="Only admin users can reset the system")
     
     try:
-        from app.core.vector_singleton import get_vector_store
         from app.services.file_storage import FileStorageService
         from app.core.database import get_db
         from sqlalchemy.orm import Session
+        # Import here to avoid PyO3 initialization issues during module import
+        from app.core.vector_singleton import get_vector_store
         
         # Clear vector database
         vector_store = get_vector_store()

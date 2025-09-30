@@ -3,6 +3,7 @@ import FileUploader from "./FileUploader";
 import ChatWindow from "./ChatWindow";
 import AdminSettings from "./AdminSettings";
 import ActivityFeed from "./ActivityFeed";
+import Layout from "./Layout";
 import api from "../api/api";
 
 export default function AdminDashboard() {
@@ -137,186 +138,209 @@ export default function AdminDashboard() {
   };
 
   const renderDashboardOverview = () => (
-    <div className="dashboard-overview">
-      <div className="dashboard-welcome">
-        <h2>Welcome back, Admin!</h2>
-        <p>Here's what's happening with your knowledge base today.</p>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">Welcome back, Admin!</h2>
+          <p className="text-gray-600">Here's what's happening with your knowledge base today.</p>
+        </div>
+        <button
+          onClick={loadDashboardStats}
+          className="btn btn-secondary"
+        >
+          <span className="mr-2">🔄</span>
+          Refresh
+        </button>
       </div>
       
       <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-icon">📚</div>
-          <div className="stat-content">
-            <h3>{stats.totalFiles}</h3>
-            <p>Documents</p>
-            <span className="stat-change positive">
-              {storageStats?.total_size_mb || 0} MB total
-            </span>
+        <div className="card group hover:scale-105 transition-transform duration-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 mb-1">Documents</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.totalFiles}</p>
+              <p className="text-xs text-gray-500 mt-1">
+                {storageStats?.total_size_mb || 0} MB total
+              </p>
+            </div>
+            <div className="p-3 rounded-lg bg-primary-100 text-primary-600">
+              <span className="text-2xl">📚</span>
+            </div>
           </div>
         </div>
         
-        <div className="stat-card">
-          <div className="stat-icon">💬</div>
-          <div className="stat-content">
-            <h3>{stats.totalChats}</h3>
-            <p>Chat Sessions</p>
-            <span className="stat-change positive">
-              {chatAnalytics?.active_users || 0} active users
-            </span>
+        <div className="card group hover:scale-105 transition-transform duration-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 mb-1">Chat Sessions</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.totalChats}</p>
+              <p className="text-xs text-gray-500 mt-1">
+                {chatAnalytics?.active_users || 0} active users
+              </p>
+            </div>
+            <div className="p-3 rounded-lg bg-success-100 text-success-600">
+              <span className="text-2xl">💬</span>
+            </div>
           </div>
         </div>
         
-        <div className="stat-card">
-          <div className="stat-icon">⚡</div>
-          <div className="stat-content">
-            <h3>{systemHealth?.overall_status === "healthy" ? "99.9%" : "Issues"}</h3>
-            <p>System Health</p>
-            <span className={`stat-change ${systemHealth?.overall_status === "healthy" ? "positive" : "negative"}`}>
-              {systemHealth?.healthy_services || 0}/{systemHealth?.total_services || 4} services
-            </span>
+        <div className="card group hover:scale-105 transition-transform duration-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 mb-1">System Health</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {systemHealth?.overall_status === "healthy" ? "99.9%" : "Issues"}
+              </p>
+              <p className={`text-xs mt-1 ${
+                systemHealth?.overall_status === "healthy" ? "text-success-600" : "text-error-600"
+              }`}>
+                {systemHealth?.healthy_services || 0}/{systemHealth?.total_services || 4} services
+              </p>
+            </div>
+            <div className={`p-3 rounded-lg ${
+              systemHealth?.overall_status === "healthy" 
+                ? "bg-success-100 text-success-600" 
+                : "bg-error-100 text-error-600"
+            }`}>
+              <span className="text-2xl">⚡</span>
+            </div>
           </div>
         </div>
         
-        <div className="stat-card">
-          <div className="stat-icon">🔍</div>
-          <div className="stat-content">
-            <h3>{chatAnalytics?.total_queries || 0}</h3>
-            <p>Total Queries</p>
-            <span className="stat-change positive">
-              Avg {chatAnalytics?.avg_queries_per_session || 0} per session
-            </span>
+        <div className="card group hover:scale-105 transition-transform duration-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 mb-1">Total Queries</p>
+              <p className="text-2xl font-bold text-gray-900">{chatAnalytics?.total_queries || 0}</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Avg {chatAnalytics?.avg_queries_per_session || 0} per session
+              </p>
+            </div>
+            <div className="p-3 rounded-lg bg-warning-100 text-warning-600">
+              <span className="text-2xl">🔍</span>
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="dashboard-cards">
-        <div className="dashboard-card">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="card">
           <div className="card-header">
-            <h3>📊 System Health</h3>
-            <span className={`status-badge ${
-              systemHealth?.overall_status === "healthy" ? "active" : 
-              systemHealth?.overall_status === "degraded" ? "warning" : "error"
-            }`}>
-              {systemHealth?.overall_status === "healthy" ? "All Systems Operational" : 
-               systemHealth?.overall_status === "degraded" ? "Some Services Degraded" : "System Issues Detected"}
-            </span>
+            <div className="flex items-center justify-between">
+              <h3 className="card-title">📊 System Health</h3>
+              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                systemHealth?.overall_status === "healthy" ? "bg-success-100 text-success-800" : 
+                systemHealth?.overall_status === "degraded" ? "bg-warning-100 text-warning-800" : "bg-error-100 text-error-800"
+              }`}>
+                {systemHealth?.overall_status === "healthy" ? "All Systems Operational" : 
+                 systemHealth?.overall_status === "degraded" ? "Some Services Degraded" : "System Issues Detected"}
+              </span>
+            </div>
           </div>
-          <div className="card-content">
-            <div className="health-metrics">
-              <div className="metric">
-                <span className="metric-label">Vector Database</span>
-                <span className={`metric-status ${
-                  systemHealth?.services?.qdrant?.status === "healthy" ? "online" : 
-                  systemHealth?.services?.qdrant?.status === "degraded" ? "degraded" : "offline"
+          <div className="space-y-4">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-600">Vector Database</span>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                  systemHealth?.services?.qdrant?.status === "healthy" ? "bg-success-100 text-success-800" : 
+                  systemHealth?.services?.qdrant?.status === "degraded" ? "bg-warning-100 text-warning-800" : "bg-error-100 text-error-800"
                 }`}>
                   {systemHealth?.services?.qdrant?.status === "healthy" ? "Online" : 
                    systemHealth?.services?.qdrant?.status === "degraded" ? "Degraded" : "Offline"}
                 </span>
               </div>
-              <div className="metric">
-                <span className="metric-label">AI Model</span>
-                <span className={`metric-status ${systemHealth?.services?.ai_model?.status === "healthy" ? "online" : "offline"}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-600">AI Model</span>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                  systemHealth?.services?.ai_model?.status === "healthy" ? "bg-success-100 text-success-800" : "bg-error-100 text-error-800"
+                }`}>
                   {systemHealth?.services?.ai_model?.status === "healthy" ? "Online" : "Offline"}
                 </span>
               </div>
-              <div className="metric">
-                <span className="metric-label">File Processing</span>
-                <span className={`metric-status ${systemHealth?.services?.file_processing?.status === "healthy" ? "online" : "offline"}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-600">File Processing</span>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                  systemHealth?.services?.file_processing?.status === "healthy" ? "bg-success-100 text-success-800" : "bg-error-100 text-error-800"
+                }`}>
                   {systemHealth?.services?.file_processing?.status === "healthy" ? "Online" : "Offline"}
                 </span>
               </div>
-              <div className="metric">
-                <span className="metric-label">Authentication</span>
-                <span className={`metric-status ${systemHealth?.services?.authentication?.status === "healthy" ? "online" : "offline"}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-600">Authentication</span>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                  systemHealth?.services?.authentication?.status === "healthy" ? "bg-success-100 text-success-800" : "bg-error-100 text-error-800"
+                }`}>
                   {systemHealth?.services?.authentication?.status === "healthy" ? "Online" : "Offline"}
                 </span>
               </div>
             </div>
             <button 
-              className="refresh-health-btn"
+              className="w-full btn btn-secondary"
               onClick={loadSystemHealth}
               disabled={healthLoading}
             >
-              {healthLoading ? "🔄 Checking..." : "🔄 Refresh Health"}
+              {healthLoading ? (
+                <>
+                  <div className="spinner mr-2"></div>
+                  Checking...
+                </>
+              ) : (
+                <>
+                  <span className="mr-2">🔄</span>
+                  Refresh Health
+                </>
+              )}
             </button>
           </div>
         </div>
 
-        <div className="dashboard-card">
+        <div className="card">
           <div className="card-header">
-            <h3>📊 System Overview</h3>
-            <p>Quick access to system features</p>
+            <h3 className="card-title">📊 Quick Actions</h3>
+            <p className="card-subtitle">Quick access to system features</p>
           </div>
-          <div className="card-content">
-            <div className="quick-actions">
-              <button 
-                className="quick-action-btn"
-                onClick={() => setActiveTab("files")}
-              >
-                <span className="action-icon">📁</span>
-                <span className="action-label">Manage Files</span>
-                <span className="action-description">Upload and organize documents</span>
-              </button>
-              <button 
-                className="quick-action-btn"
-                onClick={() => setActiveTab("chat")}
-              >
-                <span className="action-icon">💬</span>
-                <span className="action-label">Start Chat</span>
-                <span className="action-description">Ask questions about your documents</span>
-              </button>
-              <button 
-                className="quick-action-btn"
-                onClick={() => setActiveTab("activity")}
-              >
-                <span className="action-icon">📋</span>
-                <span className="action-label">View Activity</span>
-                <span className="action-description">Track all system activities</span>
-              </button>
-              <button 
-                className="quick-action-btn"
-                onClick={() => setActiveTab("analytics")}
-              >
-                <span className="action-icon">📊</span>
-                <span className="action-label">Analytics</span>
-                <span className="action-description">View usage statistics</span>
-              </button>
-            </div>
+          <div className="space-y-3">
+            <button 
+              className="w-full btn btn-primary text-left justify-start"
+              onClick={() => setActiveTab("files")}
+            >
+              <span className="mr-3">📁</span>
+              <div>
+                <div className="font-medium">Manage Files</div>
+                <div className="text-xs opacity-75">Upload and organize documents</div>
+              </div>
+            </button>
+            <button 
+              className="w-full btn btn-secondary text-left justify-start"
+              onClick={() => setActiveTab("chat")}
+            >
+              <span className="mr-3">💬</span>
+              <div>
+                <div className="font-medium">Start Chat</div>
+                <div className="text-xs opacity-75">Ask questions about your documents</div>
+              </div>
+            </button>
+            <button 
+              className="w-full btn btn-secondary text-left justify-start"
+              onClick={() => setActiveTab("activity")}
+            >
+              <span className="mr-3">📋</span>
+              <div>
+                <div className="font-medium">View Activity</div>
+                <div className="text-xs opacity-75">Track all system activities</div>
+              </div>
+            </button>
+            <button 
+              className="w-full btn btn-secondary text-left justify-start"
+              onClick={() => setActiveTab("analytics")}
+            >
+              <span className="mr-3">📊</span>
+              <div>
+                <div className="font-medium">Analytics</div>
+                <div className="text-xs opacity-75">View usage statistics</div>
+              </div>
+            </button>
           </div>
-        </div>
-      </div>
-
-      <div className="quick-actions">
-        <h3>Quick Actions</h3>
-        <div className="action-buttons">
-          <button 
-            className="action-btn primary"
-            onClick={() => setActiveTab("files")}
-          >
-            <span className="btn-icon">📤</span>
-            Upload Documents
-          </button>
-          <button 
-            className="action-btn secondary"
-            onClick={() => setActiveTab("chat")}
-          >
-            <span className="btn-icon">💬</span>
-            Start Chat
-          </button>
-          <button 
-            className="action-btn tertiary"
-            onClick={() => setActiveTab("analytics")}
-          >
-            <span className="btn-icon">📊</span>
-            View Analytics
-          </button>
-          <button 
-            className="action-btn quaternary"
-            onClick={() => setActiveTab("settings")}
-          >
-            <span className="btn-icon">⚙️</span>
-            System Settings
-          </button>
         </div>
       </div>
     </div>
@@ -542,83 +566,43 @@ export default function AdminDashboard() {
     }
   };
 
-  return (
-    <div className="modern-admin-dashboard">
-      {/* Sidebar Navigation */}
-      <div className={`admin-sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
-        <div className="sidebar-header">
-          <div className="logo">
-            <span className="logo-icon">🤖</span>
-            {!sidebarCollapsed && <span className="logo-text">RAG Admin</span>}
-          </div>
-          <button 
-            className="sidebar-toggle"
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          >
-            {sidebarCollapsed ? '→' : '←'}
-          </button>
-        </div>
-        
-        <nav className="sidebar-nav">
-          {menuItems.map(item => (
-            <button
-              key={item.id}
-              className={`nav-item ${activeTab === item.id ? 'active' : ''}`}
-              onClick={() => setActiveTab(item.id)}
-              title={sidebarCollapsed ? item.label : ''}
-            >
-              <span className="nav-icon">{item.icon}</span>
-              {!sidebarCollapsed && (
-                <div className="nav-content">
-                  <span className="nav-label">{item.label}</span>
-                  <span className="nav-description">{item.description}</span>
-                </div>
-              )}
-            </button>
-          ))}
-        </nav>
-        
-        {!sidebarCollapsed && (
-          <div className="sidebar-footer">
-            <div className="user-info">
-              <div className="user-avatar">👤</div>
-              <div className="user-details">
-                <span className="user-name">Administrator</span>
-                <span className="user-role">System Admin</span>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+  const sidebarProps = {
+    isOpen: !sidebarCollapsed,
+    onClose: () => setSidebarCollapsed(true),
+    title: "RAG Admin",
+    icon: "🤖",
+    menuItems: menuItems.map(item => ({
+      ...item,
+      icon: () => <span className="text-xl">{item.icon}</span>
+    })),
+    activeTab,
+    onTabChange: (tab) => {
+      setActiveTab(tab);
+      setSidebarCollapsed(true);
+    },
+    userInfo: {
+      name: "Administrator",
+      role: "System Admin"
+    }
+  };
 
-      {/* Main Content Area */}
-      <div className="admin-main-content">
-        <div className="content-header">
-          <div className="breadcrumb">
-            <span className="breadcrumb-item">Admin</span>
-            <span className="breadcrumb-separator">/</span>
-            <span className="breadcrumb-item active">
-              {menuItems.find(item => item.id === activeTab)?.label || 'Dashboard'}
-            </span>
-          </div>
-          
-          <div className="header-actions">
-            <button className="header-btn" onClick={loadDashboardStats}>
-              <span>🔄</span>
-            </button>
-            <button className="header-btn">
-              <span>🔔</span>
-            </button>
-            <button className="header-btn">
-              <span>❓</span>
-            </button>
-          </div>
-        </div>
-        
-        <div className="content-body">
-          {renderContent()}
-        </div>
-      </div>
-    </div>
+  const headerContent = (
+    <>
+      <button className="p-2 text-gray-600 hover:text-gray-900" onClick={loadDashboardStats}>
+        <span>🔄</span>
+      </button>
+      <button className="p-2 text-gray-600 hover:text-gray-900">
+        <span>🔔</span>
+      </button>
+      <button className="p-2 text-gray-600 hover:text-gray-900">
+        <span>❓</span>
+      </button>
+    </>
+  );
+
+  return (
+    <Layout sidebarProps={sidebarProps} headerContent={headerContent}>
+      {renderContent()}
+    </Layout>
   );
 }

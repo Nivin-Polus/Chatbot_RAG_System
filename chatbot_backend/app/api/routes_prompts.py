@@ -13,7 +13,7 @@ from app.models.system_prompt import (
 )
 from app.models.vector_database import VectorDatabase
 from app.models.website import Website
-from app.models.collection import Collection
+from app.models.collection import Collection, CollectionUser
 import logging
 
 router = APIRouter()
@@ -97,6 +97,37 @@ async def list_prompts(
                 query = query.filter(SystemPrompt.vector_db_id == vector_db_id)
             if collection_id:
                 query = query.filter(SystemPrompt.collection_id == collection_id)
+        elif current_user.is_user_admin():
+            # UserAdmin can only see prompts for collections they manage
+            managed_collections = db.query(Collection.collection_id).filter(
+                Collection.admin_user_id == current_user.user_id
+            ).subquery()
+            
+            query = query.filter(SystemPrompt.collection_id.in_(managed_collections))
+            
+            # Apply additional filters if provided
+            if collection_id:
+                # Verify user manages this collection
+                user_manages_collection = db.query(Collection).filter(
+                    Collection.collection_id == collection_id,
+                    Collection.admin_user_id == current_user.user_id
+                ).first()
+                if user_manages_collection:
+                    query = query.filter(SystemPrompt.collection_id == collection_id)
+                else:
+                    # User doesn't manage this collection, return empty
+                    prompts = []
+                    return [prompt.to_dict() for prompt in prompts]
+        else:
+            # Regular users can only see prompts for collections they have access to
+            user_collections = db.query(CollectionUser.collection_id).filter(
+                CollectionUser.user_id == current_user.user_id
+            ).subquery()
+            
+            query = query.filter(SystemPrompt.collection_id.in_(user_collections))
+            
+            if collection_id:
+                query = query.filter(SystemPrompt.collection_id == collection_id)
 
         prompts = query.all()
 
@@ -158,6 +189,11 @@ async def create_prompt(
             collection = db.query(Collection).filter(Collection.collection_id == prompt_data.collection_id).first()
             if not collection:
                 raise HTTPException(status_code=404, detail="Collection not found")
+
+            # Check if collection already has a prompt (one prompt per collection rule)
+            existing_prompt = db.query(SystemPrompt).filter(SystemPrompt.collection_id == prompt_data.collection_id).first()
+            if existing_prompt:
+                raise HTTPException(status_code=400, detail="Collection already has a prompt. Each collection can have only one prompt.")
 
             if not current_user.is_super_admin():
                 if current_user.website_id != collection.website_id and collection.admin_user_id != current_user.user_id:

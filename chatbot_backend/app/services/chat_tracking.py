@@ -93,12 +93,19 @@ class ChatTrackingService:
             logger.error(f"Failed to get session history {session_id}: {str(e)}")
             return []
     
-    def get_user_sessions(self, user_id: str, db: Session, limit: int = 20) -> List[Dict]:
-        """Get all sessions for a user"""
+    def get_user_sessions(self, user_id: str, db: Session, limit: int = 20, accessible_collection_ids: List[str] = None) -> List[Dict]:
+        """Get all sessions for a user, filtered by accessible collections"""
         try:
-            sessions = db.query(ChatSession).filter(
-                ChatSession.user_id == user_id
-            ).order_by(ChatSession.updated_at.desc()).limit(limit).all()
+            query = db.query(ChatSession).filter(ChatSession.user_id == user_id)
+            
+            # Filter by accessible collections if provided
+            if accessible_collection_ids is not None:
+                if accessible_collection_ids:  # If user has access to some collections
+                    query = query.filter(ChatSession.collection_id.in_(accessible_collection_ids))
+                else:  # If user has no accessible collections, return empty
+                    return []
+            
+            sessions = query.order_by(ChatSession.updated_at.desc()).limit(limit).all()
             
             return [session.to_dict() for session in sessions]
             

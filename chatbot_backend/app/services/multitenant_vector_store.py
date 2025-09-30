@@ -2,11 +2,7 @@
 
 import logging
 from typing import List, Dict, Any, Optional, Tuple
-from qdrant_client import QdrantClient
-from qdrant_client.http import models
-from qdrant_client.http.models import Filter, FieldCondition, MatchValue, VectorParams, Distance
 import uuid
-from sentence_transformers import SentenceTransformer
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -22,13 +18,19 @@ class MultiTenantVectorStore:
         self.collection_name = "multitenant_documents"
         self.vector_size = 384  # sentence-transformers/all-MiniLM-L6-v2 default
         self.embedding_model = None
-        self._initialize_client()
-        self._initialize_embedding_model()
+        # Don't initialize immediately - do it lazily to avoid PyO3 issues
+        self._client_initialized = False
+        self._embedding_initialized = False
     
     def _initialize_client(self):
         """Initialize Qdrant client"""
+        if self._client_initialized:
+            return
+            
         try:
+            from qdrant_client import QdrantClient
             self.client = QdrantClient(url=settings.VECTOR_DB_URL)
+            self._client_initialized = True
             self._ensure_collection()
             logger.info("✅ Multi-tenant vector store initialized")
         except Exception as e:
@@ -37,8 +39,13 @@ class MultiTenantVectorStore:
     
     def _initialize_embedding_model(self):
         """Initialize sentence transformer model"""
+        if self._embedding_initialized:
+            return
+            
         try:
+            from sentence_transformers import SentenceTransformer
             self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+            self._embedding_initialized = True
             logger.info("✅ Embedding model initialized")
         except Exception as e:
             logger.error(f"❌ Failed to initialize embedding model: {e}")
@@ -46,6 +53,7 @@ class MultiTenantVectorStore:
     
     def _generate_embedding(self, text: str) -> List[float]:
         """Generate embedding for text"""
+        self._initialize_embedding_model()
         try:
             embedding = self.embedding_model.encode(text)
             return embedding.tolist()
@@ -56,6 +64,8 @@ class MultiTenantVectorStore:
     def _ensure_collection(self):
         """Ensure the main collection exists"""
         try:
+            from qdrant_client.http.models import VectorParams, Distance
+            
             # Check if collection exists
             collections = self.client.get_collections()
             collection_names = [col.name for col in collections.collections]
@@ -86,6 +96,8 @@ class MultiTenantVectorStore:
     def _create_indexes(self):
         """Create indexes for efficient metadata filtering"""
         try:
+            from qdrant_client.http import models
+            
             # Create index for website_id (most important for tenant isolation)
             self.client.create_payload_index(
                 collection_name=self.collection_name,
@@ -136,7 +148,11 @@ class MultiTenantVectorStore:
         Returns:
             List of point IDs
         """
+        self._initialize_client()
+        
         try:
+            from qdrant_client.http import models
+            
             if len(texts) != len(embeddings) != len(metadata_list):
                 raise ValueError("texts, embeddings, and metadata_list must have the same length")
             
@@ -201,7 +217,11 @@ class MultiTenantVectorStore:
             
             List of search results with metadata
         """
+        self._initialize_client()
+        
         try:
+            from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+            
             # Build filter conditions
             filter_conditions: List[FieldCondition] = []
 
@@ -280,7 +300,12 @@ class MultiTenantVectorStore:
         Returns:
             True if successful
         """
+        self._initialize_client()
+        
         try:
+            from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+            from qdrant_client.http import models
+            
             # Create filter for file deletion with tenant isolation
             conditions = [
                 FieldCondition(
@@ -321,7 +346,12 @@ class MultiTenantVectorStore:
         Returns:
             True if successful
         """
+        self._initialize_client()
+        
         try:
+            from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+            from qdrant_client.http import models
+            
             delete_filter = Filter(
                 must=[
                     FieldCondition(
@@ -345,6 +375,8 @@ class MultiTenantVectorStore:
     
     def get_collection_stats(self) -> Dict[str, Any]:
         """Get collection statistics"""
+        self._initialize_client()
+        
         try:
             collection_info = self.client.get_collection(self.collection_name)
             
@@ -362,7 +394,11 @@ class MultiTenantVectorStore:
     
     def get_website_stats(self, website_id: str) -> Dict[str, Any]:
         """Get statistics for a specific website"""
+        self._initialize_client()
+        
         try:
+            from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+            
             # Count documents for this website
             search_result = self.client.scroll(
                 collection_name=self.collection_name,

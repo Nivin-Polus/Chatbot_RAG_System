@@ -104,12 +104,41 @@ class User(Base):
                 CollectionUser.user_id == self.user_id
             ).all()
             return [c[0] for c in collections]
+    
+    def get_accessible_file_ids(self, db_session) -> List[str]:
+        """Get list of file IDs this user can access"""
+        from app.models.file_metadata import FileMetadata
+        
+        if self.is_super_admin():
+            # Super admin can access all files
+            files = db_session.query(FileMetadata.file_id).all()
+            return [f[0] for f in files]
+        
+        elif self.is_user_admin():
+            # User admin can access files in their website
+            files = db_session.query(FileMetadata.file_id).filter(
+                FileMetadata.website_id == self.website_id
+            ).all()
+            return [f[0] for f in files]
+        
+        else:
+            # Regular user can access files they have explicit access to
+            try:
+                from app.models.user_file_access import UserFileAccess
+                file_access_records = db_session.query(UserFileAccess.file_id).filter(
+                    UserFileAccess.user_id == self.user_id,
+                    UserFileAccess.can_read == True
+                ).all()
+                return [f[0] for f in file_access_records]
+            except:
+                # If UserFileAccess model doesn't exist, return empty list
+                return []
 
 class UserCreate(BaseModel):
     """Pydantic model for user creation"""
     username: str
     password: str
-    collection_id: str
+    collection_id: Optional[str] = None  # Optional for super_admin role
     email: Optional[str] = None
     full_name: Optional[str] = None
     website_id: Optional[str] = None  # Optional; derived from collection when omitted
@@ -121,6 +150,7 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     is_active: Optional[bool] = None
     role: Optional[str] = None  # Only super_admin can change roles
+    collection_id: Optional[str] = None
 
 class UserLogin(BaseModel):
     """Pydantic model for user login"""
@@ -144,7 +174,7 @@ class UserResponse(BaseModel):
 
 class UserWithPermissions(UserResponse):
     """User response with permission information"""
-    accessible_collections: List[str]
+    accessible_file_ids: List[str] = []
     can_upload_files: bool
     can_manage_users: bool
     can_manage_website: bool

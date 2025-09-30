@@ -3,7 +3,6 @@
 import uuid
 import logging
 from app.config import settings
-from app.core.embeddings import Embeddings
 
 logger = logging.getLogger("vectorstore_logger")
 logging.basicConfig(level=logging.INFO)
@@ -11,12 +10,12 @@ logging.basicConfig(level=logging.INFO)
 class VectorStore:
     def __init__(self, url=settings.VECTOR_DB_URL, collection_name="kb_docs"):
         self.collection_name = collection_name
-        self.embeddings = Embeddings()
         self.url = url
         self._init_client()
-        
+
     def _init_client(self):
         try:
+            # Import here to avoid PyO3 initialization issues during module import
             from qdrant_client import QdrantClient
             from qdrant_client.http.models import PointStruct, Distance
             self.client = QdrantClient(url=self.url)
@@ -34,6 +33,14 @@ class VectorStore:
     def _init_fallback_storage(self):
         """Initialize in-memory vector storage as fallback"""
         self.documents = {}  # id -> {vector, payload}
+
+    @property
+    def embeddings(self):
+        """Lazily initialize embeddings to avoid PyO3 issues during module import"""
+        if not hasattr(self, '_embeddings_instance'):
+            from app.core.embeddings import Embeddings
+            self._embeddings_instance = Embeddings()
+        return self._embeddings_instance
         
     def _ensure_collection(self):
         if self.client:
