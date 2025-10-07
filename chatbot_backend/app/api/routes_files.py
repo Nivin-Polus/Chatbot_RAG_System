@@ -41,9 +41,10 @@ file_metadata_db = {}
 # ------------------------
 # Upload file endpoint
 # ------------------------
-@router.post("/upload", response_model=FileMeta)
+@router.post("/upload", response_model=List[FileMeta])
 async def upload_file(
-    uploaded_file: UploadFile = File(...),
+    uploaded_files: Optional[List[UploadFile]] = File(None, alias="uploaded_files"),
+    uploaded_file: Optional[UploadFile] = File(None, alias="uploaded_file"),
     collection_id: Optional[str] = Form(None),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -105,96 +106,111 @@ async def upload_file(
     if not user_website_id:
         logger.info(f"Allowing file upload without website context for user: {current_user['username']}")
     
+    # Consolidate provided files to support both single and multiple upload form fields
+    files_to_process: List[UploadFile] = []
+    if uploaded_files:
+        files_to_process.extend(uploaded_files)
+    if uploaded_file:
+        files_to_process.append(uploaded_file)
+
+    if not files_to_process:
+        raise HTTPException(status_code=400, detail="No files provided for upload")
+
+    results: List[FileMeta] = []
+
     # Validate file type
-    ext = uploaded_file.filename.split('.')[-1].lower()
     allowed_extensions = {
         extension.strip().lower()
         for extension in settings.ALLOWED_FILE_TYPES.split(',')
         if extension.strip()
     }
 
-    if ext not in allowed_extensions:
-        raise HTTPException(status_code=400, detail="File type not allowed")
+    for uploaded_file in files_to_process:
+        ext = uploaded_file.filename.split('.')[-1].lower()
 
-    # Read file content once
-    content = await uploaded_file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+        if ext not in allowed_extensions:
+            raise HTTPException(status_code=400, detail=f"File type not allowed: {uploaded_file.filename}")
 
-    try:
-        text_chunks = parse_file(uploaded_file.filename, content)
-    except Exception as parse_error:
-        logger.error(f"[UPLOAD ERROR] Failed to parse file {uploaded_file.filename}: {str(parse_error)}")
-        raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(parse_error)}")
+        # Read file content once
+        content = await uploaded_file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail=f"Uploaded file is empty: {uploaded_file.filename}")
 
-    file_metadata = file_storage_service.save_file_with_website(
-        uploaded_file,
-        uploader_id,
-        user_website_id,
-        db,
-        collection_id=collection_id,
-        file_content=content,
-    )
-    file_id = file_metadata.file_id
+        try:
+            text_chunks = parse_file(uploaded_file.filename, content)
+        except Exception as parse_error:
+            logger.error(f"[UPLOAD ERROR] Failed to parse file {uploaded_file.filename}: {str(parse_error)}")
+            raise HTTPException(status_code=400, detail=f"Failed to parse file {uploaded_file.filename}: {str(parse_error)}")
 
-    # Get singleton vector store and store embeddings
-    # Import here to avoid PyO3 initialization issues during module import
-    from app.core.vector_singleton import get_vector_store
-    vector_store = get_vector_store()
-    logger.info(f"[UPLOAD DEBUG] Vector store type: {'Qdrant' if vector_store.client else 'In-memory fallback'}")
-    logger.info(f"[UPLOAD DEBUG] Processing {len(text_chunks)} chunks for file: {uploaded_file.filename}")
-    for i, chunk in enumerate(text_chunks):
-        chunk_metadata = {
-            "file_id": file_id,
-            "file_name": uploaded_file.filename,
-            "chunk_index": i,
-            "text": chunk,
-            "website_id": user_website_id,
-            "collection_id": collection_id,
-            "uploader_id": uploader_id
-        }
-        vector_store.add_document(chunk, chunk_metadata)
-        logger.info(f"[UPLOAD DEBUG] Added chunk {i+1}/{len(text_chunks)} to vector store for file: {uploaded_file.filename}")
-    file_storage_service.update_processing_status(file_id, "completed", len(text_chunks), db)
-    
-    # Debug: Check if documents were actually stored
-    if vector_store.client is None:
-        logger.info(f"[UPLOAD DEBUG] Total documents in fallback storage: {len(vector_store.documents)}")
-    else:
-        logger.info(f"[UPLOAD DEBUG] Documents stored in Qdrant collection: {vector_store.collection_name}")
+        file_metadata = file_storage_service.save_file_with_website(
+            uploaded_file,
+            uploader_id,
+            user_website_id,
+            db,
+            collection_id=collection_id,
+            file_content=content,
+        )
+        file_id = file_metadata.file_id
 
-    # Store metadata in in-memory store for backward compatibility
-    metadata = FileMeta(
-        file_id=file_id,
-        file_name=uploaded_file.filename,
-        uploaded_by=current_user.get('username', 'unknown'),
-        uploader_id=uploader_id,
-        upload_timestamp=file_metadata.upload_timestamp.isoformat() if file_metadata.upload_timestamp else None,
-        file_size=file_metadata.file_size,
-        processing_status="completed",
-        collection_id=collection_id,
-    )
-    logger.info(f"File uploaded: {uploaded_file.filename} by {current_user['username']}")
+        # Get singleton vector store and store embeddings
+        # Import here to avoid PyO3 initialization issues during module import
+        from app.core.vector_singleton import get_vector_store
+        vector_store = get_vector_store()
+        logger.info(f"[UPLOAD DEBUG] Vector store type: {'Qdrant' if vector_store.client else 'In-memory fallback'}")
+        logger.info(f"[UPLOAD DEBUG] Processing {len(text_chunks)} chunks for file: {uploaded_file.filename}")
+        for i, chunk in enumerate(text_chunks):
+            chunk_metadata = {
+                "file_id": file_id,
+                "file_name": uploaded_file.filename,
+                "chunk_index": i,
+                "text": chunk,
+                "website_id": user_website_id,
+                "collection_id": collection_id,
+                "uploader_id": uploader_id
+            }
+            vector_store.add_document(chunk, chunk_metadata)
+            logger.info(f"[UPLOAD DEBUG] Added chunk {i+1}/{len(text_chunks)} to vector store for file: {uploaded_file.filename}")
+        file_storage_service.update_processing_status(file_id, "completed", len(text_chunks), db)
+        
+        # Debug: Check if documents were actually stored
+        if vector_store.client is None:
+            logger.info(f"[UPLOAD DEBUG] Total documents in fallback storage: {len(vector_store.documents)}")
+        else:
+            logger.info(f"[UPLOAD DEBUG] Documents stored in Qdrant collection: {vector_store.collection_name}")
 
-    # Log activity
-    activity_tracker.log_activity(
-        activity_type="file_upload",
-        user=current_user["username"],
-        details={
-            "file_name": uploaded_file.filename,
-            "file_id": file_id,
-            "file_size": file_metadata.file_size,
-            "file_type": ext,
-            "chunk_count": len(text_chunks),
-            "collection_id": collection_id,
-        },
-        metadata={
-            "processing_time": "completed",
-            "vector_store_type": "qdrant" if vector_store.client else "in_memory",
-        },
-    )
+        # Store metadata in in-memory store for backward compatibility
+        metadata = FileMeta(
+            file_id=file_id,
+            file_name=uploaded_file.filename,
+            uploaded_by=current_user.get('username', 'unknown'),
+            uploader_id=uploader_id,
+            upload_timestamp=file_metadata.upload_timestamp.isoformat() if file_metadata.upload_timestamp else None,
+            file_size=file_metadata.file_size,
+            processing_status="completed",
+            collection_id=collection_id,
+        )
+        results.append(metadata)
+        logger.info(f"File uploaded: {uploaded_file.filename} by {current_user['username']}")
 
-    return metadata
+        # Log activity
+        activity_tracker.log_activity(
+            activity_type="file_upload",
+            user=current_user["username"],
+            details={
+                "file_name": uploaded_file.filename,
+                "file_id": file_id,
+                "file_size": file_metadata.file_size,
+                "file_type": ext,
+                "chunk_count": len(text_chunks),
+                "collection_id": collection_id,
+            },
+            metadata={
+                "processing_time": "completed",
+                "vector_store_type": "qdrant" if vector_store.client else "in_memory",
+            },
+        )
+
+    return results
 
 
 # ------------------------
@@ -348,6 +364,35 @@ async def list_files(
 # ------------------------
 # Download file endpoint
 # ------------------------
+@router.get("/download/by-name/{collection_id}/{file_name}")
+async def download_file_by_name(
+    collection_id: str,
+    file_name: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Download original file by collection and file name."""
+    from app.models.file_metadata import FileMetadata
+
+    file_record = (
+        db.query(FileMetadata)
+        .filter(
+            FileMetadata.collection_id == collection_id,
+            FileMetadata.file_name == file_name,
+        )
+        .first()
+    )
+
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return await download_file(
+        file_id=file_record.file_id,
+        current_user=current_user,
+        db=db,
+    )
+
+
 @router.get("/download/{file_id}")
 async def download_file(
     file_id: str,

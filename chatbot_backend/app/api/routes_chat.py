@@ -15,6 +15,7 @@ from app.api.routes_auth import (
 from app.utils.prompt_guard import is_safe_prompt
 from app.services.chat_tracking import ChatTrackingService
 from app.services.activity_tracker import activity_tracker
+from app.models.collection import Collection, CollectionUser
 import redis
 import logging
 import json
@@ -82,9 +83,50 @@ def _process_chat_request(
         raise HTTPException(status_code=400, detail="top_k must be between 1 and 20")
 
     identity_username = identity.get("username", "anonymous")
-    effective_collection_id = collection_id or identity.get("collection_id")
-    effective_session_id = session_id or identity.get("session_id") or str(uuid.uuid4())
+    user_role = identity.get("role", "user")
     user_id = identity.get("user_id") or identity_username
+
+    # Determine accessible collections for the requesting user (non super-admin)
+    accessible_collection_ids: set[str] = set()
+    if user_role != "super_admin" and user_id:
+        # Collections the user explicitly belongs to
+        membership_ids = (
+            db.query(CollectionUser.collection_id)
+            .filter(CollectionUser.user_id == user_id)
+            .all()
+        )
+        accessible_collection_ids.update(str(row[0]) for row in membership_ids if row[0])
+
+        # Collections the user administers
+        admin_ids = (
+            db.query(Collection.collection_id)
+            .filter(Collection.admin_user_id == user_id)
+            .all()
+        )
+        accessible_collection_ids.update(str(row[0]) for row in admin_ids if row[0])
+
+        # Include identity-provided collection hints
+        identity_collection_ids = identity.get("collection_ids") or []
+        if isinstance(identity_collection_ids, list):
+            accessible_collection_ids.update(str(cid) for cid in identity_collection_ids if cid)
+        identity_single_collection = identity.get("collection_id")
+        if identity_single_collection:
+            accessible_collection_ids.add(str(identity_single_collection))
+
+    # Resolve effective collection selection with access enforcement
+    effective_collection_id = collection_id or identity.get("collection_id")
+    if user_role != "super_admin":
+        if not accessible_collection_ids:
+            raise HTTPException(status_code=403, detail="You do not have access to any knowledge bases.")
+
+        if effective_collection_id:
+            if str(effective_collection_id) not in accessible_collection_ids:
+                raise HTTPException(status_code=403, detail="Access denied to the requested knowledge base.")
+        else:
+            # Default to the first accessible collection if none specified
+            effective_collection_id = next(iter(accessible_collection_ids))
+
+    effective_session_id = session_id or identity.get("session_id") or str(uuid.uuid4())
 
     logger.info(
         f"[CONTEXT] Session: {effective_session_id}, Maintain: {maintain_context}, "

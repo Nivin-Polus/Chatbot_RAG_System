@@ -1,7 +1,8 @@
 # app/api/routes_activity.py
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel
 from app.api.routes_auth import get_current_user
 from app.services.activity_tracker import activity_tracker
 import logging
@@ -9,6 +10,13 @@ import logging
 logger = logging.getLogger("activity_logger")
 
 router = APIRouter()
+
+
+class ActivityLogRequest(BaseModel):
+    activity_type: str
+    description: Optional[str] = None
+    collection_id: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 # ------------------------
 # Get recent activities
@@ -28,6 +36,37 @@ async def get_recent_activities(
     except Exception as e:
         logger.error(f"Failed to get recent activities: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve activities")
+
+
+# ------------------------
+# Log new activity
+# ------------------------
+@router.post("/log")
+async def log_activity(
+    request: ActivityLogRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Record a new activity entry."""
+    if not request.activity_type:
+        raise HTTPException(status_code=400, detail="Activity type is required")
+
+    try:
+        details = {}
+        if request.description:
+            details["description"] = request.description
+        if request.collection_id:
+            details["collection_id"] = request.collection_id
+
+        activity_tracker.log_activity(
+            activity_type=request.activity_type,
+            user=current_user.get("username", "unknown"),
+            details=details or None,
+            metadata=request.metadata or None,
+        )
+        return {"status": "logged"}
+    except Exception as e:
+        logger.error(f"Failed to log activity: {e}")
+        raise HTTPException(status_code=500, detail="Failed to log activity")
 
 # ------------------------
 # Get activities by type

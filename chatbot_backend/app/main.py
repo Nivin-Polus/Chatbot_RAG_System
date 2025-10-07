@@ -23,6 +23,7 @@ from app.api import (
 from app.core.database import init_database, create_database_if_not_exists, get_db
 from app.config import settings
 from app.core.auth import get_token_from_credentials
+from app.services.health_monitor import HealthMonitorService
 
 
 class TokenRequest(BaseModel):
@@ -217,7 +218,12 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Health check endpoint
 @app.get("/health", tags=["Health"])
 async def health_check():
-    return {"status": "ok", "mode": settings.APP_MODE}
+    try:
+        health_service = HealthMonitorService()
+        return health_service.get_system_overview()
+    except Exception as exc:
+        logging.error(f"Health check failed: {exc}")
+        return {"overall_status": "unhealthy", "error": str(exc)}
 
 
 # Root endpoint

@@ -156,4 +156,5 @@ chatbot_backend/__pycache__/
 chatbot_backend/app/__pycache__/
 chatbot_backend/app/*.pyc
 /venv_chatbot
-chatbot_frontend/node_modules/
+chatbot_frontend/node_modules
+/chatbot_frontend/node_modules

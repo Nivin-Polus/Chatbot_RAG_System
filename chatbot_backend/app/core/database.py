@@ -66,6 +66,8 @@ def init_database():
         from app.models.collection import Collection, CollectionUser
         from app.models.system_prompt import SystemPrompt
         from app.models.vector_database import VectorDatabase
+        from app.models.activity_log import ActivityLog
+        from app.models.activity_stats import ActivityStats
         
         # Configure mappers to ensure relationships are properly set up
         from sqlalchemy.orm import configure_mappers

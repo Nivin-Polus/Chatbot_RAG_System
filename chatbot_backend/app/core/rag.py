@@ -210,7 +210,7 @@ Answer:"""
         answer = self.call_ai(enhanced_prompt, model=model, max_tokens=max_tokens, temperature=temperature)
         
         # Ensure sources are included if not already present
-        if "Sources:" not in answer and "sources:" not in answer.lower():
+        if source_files and "Sources:" not in answer and "sources:" not in answer.lower():
             source_list = "\n".join([f"- {file}" for file in sorted(source_files)])
             answer += f"\n\n**Sources:**\n{source_list}"
 

@@ -16,6 +16,7 @@ from app.models.collection import Collection, CollectionUser
 from app.models.website import Website
 from app.core.auth import verify_password, get_password_hash, create_access_token
 from app.core.database import get_db
+from app.services.activity_tracker import activity_tracker
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
@@ -53,6 +54,24 @@ async def login(
         },
         expires_delta=access_token_expires,
     )
+
+    try:
+        activity_tracker.log_activity(
+            activity_type="user_login",
+            user=user.username,
+            details={
+                "user_id": user.user_id,
+                "role": user.role,
+                "login_method": "password",
+            },
+        )
+    except Exception as activity_error:
+        # Don't block login flow if activity logging fails
+        import logging
+
+        logging.getLogger("auth_logger").warning(
+            "Failed to log user login activity for %s: %s", user.username, activity_error
+        )
 
     return {
         "access_token": access_token,

@@ -1,408 +1,437 @@
-# Knowledge Base Chatbot Frontend
+# Leto Admin Dashboard
 
-## 🚀 Overview
+A production-ready, multi-role admin dashboard built with React, TypeScript, and Tailwind CSS. Features role-based access control (RBAC), collection management, file handling, and AI-powered chat capabilities.
 
-A modern React-based frontend for the Knowledge Base Chatbot that provides an intuitive interface for document management and AI-powered conversations.
+## 🎯 Overview
 
-### ✨ Features
-- 🔐 **Secure Authentication** - JWT-based login system
-- 📁 **File Management** - Upload, view, and delete documents with drag-and-drop
-- 💬 **Interactive Chat** - Real-time conversations with your knowledge base
-- 📱 **Responsive Design** - Works on desktop, tablet, and mobile devices
-- 🎨 **Modern UI** - Beautiful gradient design with smooth animations
-- ⚡ **Real-time Updates** - Live file list updates and chat responses
-- 🛡️ **Error Handling** - Comprehensive error messages and validation
+This application provides four distinct user roles with tailored dashboards:
 
----
+- **Superadmin**: Global system management (collections, all users, system health)
+- **Admin**: Collection-scoped management (files, prompts, users within their collection)
+- **User Admin**: User management within a specific collection
+- **Regular User**: View-only access to collections with chat capabilities
 
-## 📁 Project Structure
+## 🏗️ Architecture
+
+### Technology Stack
+
+- **Frontend**: React 18 + TypeScript
+- **Styling**: Tailwind CSS with custom design system
+- **Routing**: React Router v6 with role-based guards
+- **State Management**: React Context API + RxJS patterns
+- **Data Fetching**: React Query (TanStack Query)
+- **UI Components**: Shadcn/ui (Radix UI primitives)
+- **Forms**: React Hook Form + Zod validation
+- **Notifications**: Sonner (toast notifications)
+
+### Project Structure
 
 ```
 src/
 ├── components/
-│   ├── Login.js           # 🔐 Authentication component
-│   ├── ChatWindow.js      # 💬 Chat interface with message history
-│   └── FileUploader.js    # 📁 File management interface
-├── api/
-│   └── api.js            # 🌐 Axios HTTP client with JWT interceptors
-├── App.js                # 🚀 Main application component
-├── index.js              # 📍 React app entry point
-└── styles.css            # 🎨 Global styles and responsive design
+│   ├── ui/              # Shadcn UI components
+│   ├── AppSidebar.tsx   # Main navigation sidebar
+│   ├── DashboardLayout.tsx
+│   └── ProtectedRoute.tsx
+├── contexts/
+│   └── AuthContext.tsx  # Authentication & session management
+├── pages/
+│   ├── superadmin/      # Superadmin dashboard pages
+│   ├── admin/           # Admin dashboard pages
+│   ├── useradmin/       # User Admin pages
+│   ├── user/            # Regular user pages
+│   ├── Login.tsx
+│   └── AccessDenied.tsx
+├── types/
+│   └── auth.ts          # TypeScript interfaces
+├── lib/
+│   └── utils.ts         # Utility functions
+└── App.tsx              # Root component with routing
 ```
 
----
+## 🚀 Getting Started
 
-## 🛠️ Setup Instructions
+### Prerequisites
 
-### 1. Prerequisites
-- Node.js 16+ and npm
-- **Backend API running with Python 3.10** on port 8000
+- Node.js 18+ and npm
+- Backend API running (see API Integration section)
 
-### 2. Installation
+### Installation
 
 ```bash
-# Navigate to frontend directory
-cd chatbot_frontend
+# Clone the repository
+git clone <repository-url>
+cd leto-admin
 
 # Install dependencies
 npm install
 
+# Set up environment variables (create .env.local)
+echo "VITE_API_BASE_URL=http://localhost:8000" > .env.local
+
 # Start development server
-npm start
+npm run dev
 ```
 
-The application will be available at: **http://localhost:3000**
-
----
-
-## ⚙️ Configuration
+The app will be available at `http://localhost:8080`
 
 ### Environment Variables
 
-Create a `.env` file in the frontend root:
+Create a `.env.local` file in the project root:
 
 ```env
-# 🌐 Backend API Configuration
-REACT_APP_API_URL=http://localhost:8000
-
-# 🔧 Optional: Custom port for development
-PORT=3000
+VITE_API_BASE_URL=http://localhost:8000
 ```
 
-### API Integration
+**Note**: All environment variables must be prefixed with `VITE_` to be accessible in the application.
 
-The frontend automatically connects to the backend API. Ensure:
+## 🔐 Authentication & Authorization
 
-1. **Backend is running** on `http://localhost:8000`
-2. **CORS is enabled** in the backend (already configured)
-3. **JWT tokens** are handled automatically by the API client
+### Authentication Flow
 
----
+1. User submits credentials via `/login`
+2. Frontend sends POST to `/auth/token` with form-encoded data
+3. Backend returns JWT access token
+4. Frontend decodes JWT to extract: `role`, `user_id`, `website_id`, `collection_id`
+5. Token and user data stored in `sessionStorage`
+6. `Authorization: Bearer <token>` header attached to all subsequent requests
 
-## 🔑 Authentication Flow
+### Role-Based Routing
 
-### Login Process
-1. **Enter credentials**: `admin` / `admin123`
-2. **JWT token** is automatically stored in localStorage
-3. **Token included** in all subsequent API requests
-4. **Auto-logout** when token expires
+| Role | Route | Access |
+|------|-------|--------|
+| Superadmin | `/superadmin/*` | Global collections, users, system |
+| Admin | `/admin/:collection_id/*` | Files, prompts, users in collection |
+| User Admin | `/useradmin/:collection_id/*` | Users in collection only |
+| Regular User | `/app/*` | View collections, chat |
 
-### Token Management
-- Tokens stored securely in localStorage
-- Automatic inclusion in API request headers
-- Manual logout clears stored tokens
-- Token expiration handled gracefully
+### Route Guards
 
----
+The `ProtectedRoute` component wraps role-specific routes:
 
-## 📁 File Management Features
+```tsx
+<ProtectedRoute allowedRoles={['superadmin']}>
+  <SuperadminDashboard />
+</ProtectedRoute>
+```
 
-### Upload Documents
-- **Supported formats**: PDF, DOCX, PPTX, XLSX, TXT
-- **File size limit**: 25MB (configurable in backend)
-- **Progress indication** during upload
-- **Automatic list refresh** after upload
+Unauthorized users are redirected to `/access-denied`.
 
-### File Operations
-- **View all files** with metadata (name, uploader)
-- **Delete files** with confirmation dialog
-- **Real-time updates** when files are added/removed
-- **Error handling** for failed operations
+## 📊 Features by Role
 
----
+### Superadmin Features
 
-## 💬 Chat Interface
+- ✅ **Collections Management**
+  - Create, edit, delete collections
+  - Auto-create admin user on collection creation
+  - Paginated table view with search
+  
+- ✅ **Files Management** (per collection)
+  - Upload/download/delete files
+  - File type and size validation
+  - Progress bar during upload
+  
+- ✅ **Prompts Management** (per collection)
+  - CRUD operations on prompts
+  - Set default prompt
+  - Minimum 1 prompt enforced
+  
+- ✅ **User Management**
+  - Create users with role assignment
+  - Multi-collection assignment
+  - Superadmin account cannot be deleted
+  
+- ✅ **Chat Interface**
+  - Collection selector
+  - Session/history support
+  - Streaming responses (if backend supports)
+  
+- ✅ **System Settings**
+  - Password reset for superadmin
+  - System health monitoring
 
-### Features
-- **Multi-line input** with Enter to send (Shift+Enter for new line)
-- **Message history** with user/bot distinction
-- **Dual-response format** - Summary and detailed answers
-- **Expandable details** - "Show More Details" button for comprehensive answers
-- **Loading indicators** while processing
-- **Error messages** for failed requests
-- **Welcome message** for new users
+### Admin Features
 
-### Message Types
-- **User messages**: Blue bubbles on the right
-- **Bot responses**: Gray bubbles on the left with summary answers
-- **Detailed answers**: Expandable sections with comprehensive information
-- **Error messages**: Red bubbles for failed requests
-- **Typing indicator**: Animated "Thinking..." message
+- ✅ Scoped to their assigned collection
+- ✅ Files, Prompts, Users management (collection-scoped)
+- ✅ Chat with collection context
+- ✅ Settings (change password)
 
----
+### User Admin Features
 
-## 🎨 UI/UX Features
+- ✅ User management within their collection only
+- ✅ Cannot modify collection settings
 
-### Design Elements
-- **Gradient background** with modern color scheme
-- **Card-based layout** with subtle shadows
-- **Responsive grid** (desktop: 2-panel, mobile: stacked)
-- **Smooth animations** and transitions
-- **Professional typography** with proper hierarchy
+### Regular User Features
 
-### Interactive Elements
-- **Hover effects** on buttons and cards
-- **Loading states** for all async operations
-- **Form validation** with visual feedback
-- **Confirmation dialogs** for destructive actions
+- ✅ View accessible collections
+- ✅ Chat interface with collection selection
+- ✅ Read-only file access
 
----
+## 🌐 API Integration
 
-## 🔧 Configuration Changes Needed
+### Base URL Configuration
 
-### For Different Backend URLs
+Set the API base URL in `.env.local`:
 
-If your backend runs on a different URL, update:
+```env
+VITE_API_BASE_URL=http://localhost:8000
+```
 
-1. **Environment file** (`.env`):
-   ```env
-   REACT_APP_API_URL=https://your-backend-domain.com
-   ```
+All API calls are prefixed with this URL. Example:
 
-2. **API client** (`src/api/api.js`):
-   ```javascript
-   const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
-   ```
-
-### For Custom Authentication
-
-To change login credentials or add user registration:
-
-1. **Update backend** authentication endpoints
-2. **Modify Login component** (`src/components/Login.js`)
-3. **Add registration form** if needed
-
-### For Additional File Types
-
-To support more file formats:
-
-1. **Update backend** `ALLOWED_FILE_TYPES` in `.env`
-2. **Modify file input** accept attribute in `FileUploader.js`:
-   ```javascript
-   accept=".pdf,.docx,.pptx,.xlsx,.txt,.your-format"
-   ```
-
-### For Custom Styling
-
-To change the appearance:
-
-1. **Modify CSS variables** in `src/styles.css`:
-   ```css
-   :root {
-     --primary-color: #your-color;
-     --secondary-color: #your-color;
-   }
-   ```
-
-2. **Update gradient backgrounds** and color schemes
-3. **Customize component-specific styles**
-
----
-
-## 📱 Responsive Breakpoints
-
-### Desktop (1200px+)
-- Two-panel layout (files left, chat right)
-- Full-width header with logout button
-- Optimal spacing and typography
-
-### Tablet (768px - 1199px)
-- Maintained two-panel layout
-- Adjusted padding and spacing
-- Touch-friendly button sizes
-
-### Mobile (<768px)
-- Single-column stacked layout
-- Files panel above chat panel
-- Compressed header design
-- Mobile-optimized input controls
-
----
-
-## 🔌 API Integration Details
-
-### HTTP Client Configuration
-```javascript
-// Automatic JWT token inclusion
-api.interceptors.request.use(config => {
-  const token = localStorage.getItem("access_token");
-  if (token) {
-    config.headers["Authorization"] = `Bearer ${token}`;
+```typescript
+fetch(`${import.meta.env.VITE_API_BASE_URL}/collections/`, {
+  headers: {
+    Authorization: `Bearer ${user.access_token}`
   }
-  return config;
-});
+})
 ```
 
-### Error Handling
-- **401 Unauthorized**: Automatic logout and redirect to login
-- **Network errors**: User-friendly error messages
-- **Validation errors**: Display backend error details
-- **Timeout handling**: Configurable request timeouts
+### Endpoint Reference
 
----
+#### Authentication
+- `POST /auth/token` - Login (returns JWT)
 
-## 🚨 Troubleshooting
+#### Collections
+- `GET /collections/` - List all collections
+- `POST /collections/` - Create collection
+- `PUT /collections/{id}` - Update collection
+- `DELETE /collections/{id}` - Delete collection
 
-### Common Issues
+#### Files
+- `GET /files/list?collection_id={id}` - List files in collection
+- `POST /files/upload` - Upload file (multipart/form-data)
+- `GET /files/download/{id}` - Download file
+- `DELETE /files/{id}` - Delete file
 
-1. **"Network Error" or CORS Issues**
-   ```bash
-   # Ensure backend is running
-   curl http://localhost:8000/health
-   
-   # Check CORS configuration in backend
-   ```
+#### Prompts
+- `GET /prompts/?collection_id={id}` - List prompts
+- `POST /prompts/` - Create prompt
+- `PUT /prompts/{id}` - Update prompt
+- `DELETE /prompts/{id}` - Delete prompt
 
-2. **Login Fails**
-   - Verify credentials: `admin` / `admin123`
-   - Check backend authentication endpoint
-   - Inspect browser network tab for errors
+#### Users
+- `GET /users/` - List users
+- `POST /users/` - Create user
+- `PUT /users/{id}` - Update user
+- `DELETE /users/{id}` - Delete user
+- `GET /users/me/accessible-files` - Get files accessible to current user
+- `POST /users/reset-password` - Reset user password
 
-3. **File Upload Fails**
-   - Check file size (max 25MB)
-   - Verify file type is supported
-   - Ensure JWT token is valid
+#### Chat
+- `POST /chat/ask` - Send chat message
+  - Supports both JSON and streaming responses
 
-4. **Chat Not Working**
-   - Upload at least one document first
-   - Check Qdrant vector database is running
-   - Verify Claude API key in backend
+#### Activity
+- `GET /activity/recent?limit=50` - Recent activity
+- `GET /activity/stats` - Activity statistics
+- `DELETE /activity/reset-files` - Reset file activity
+- `DELETE /activity/reset-all` - Reset all activity
 
-### Debug Mode
+#### System Health
+- `GET /health` - Health check
+- `POST /health/reset` - Reset health data
+- `GET /system/stats/overview` - System overview
+- `GET /system/health/detailed` - Detailed health metrics
 
-Enable detailed logging:
-```javascript
-// In src/api/api.js
-api.interceptors.response.use(
-  response => {
-    console.log('API Response:', response);
-    return response;
-  },
-  error => {
-    console.error('API Error:', error);
-    return Promise.reject(error);
-  }
-);
+### API Mismatch Tracking
+
+See `api-mismatch.md` for detailed tracking of:
+- Expected vs. actual API responses
+- Frontend model adaptations
+- Integration status per endpoint
+
+## 🎨 Design System
+
+### Color Palette
+
+The design system uses HSL colors for full theme support:
+
+**Light Mode**:
+- Primary: Deep Indigo (`hsl(239 84% 67%)`)
+- Accent: Cyan (`hsl(189 94% 43%)`)
+- Background: Light Gray (`hsl(220 18% 97%)`)
+
+**Dark Mode**:
+- Primary: Indigo (`hsl(239 84% 67%)`)
+- Accent: Cyan (`hsl(189 94% 43%)`)
+- Background: Dark Slate (`hsl(222 47% 11%)`)
+
+### Typography
+
+- **Headings**: System font stack (optimized for each OS)
+- **Body**: Clean sans-serif with clear hierarchy
+- **Code**: Monospace for technical content
+
+### Animations
+
+- **Fade In**: `animate-fade-in` (0.3s ease-out)
+- **Scale In**: `animate-scale-in` (0.2s ease-out)
+- **Slide In**: `animate-slide-in` (0.3s ease-out)
+- **Glow**: `animate-glow` (2s infinite)
+
+### Responsive Design
+
+- **Mobile First**: Base styles optimized for mobile
+- **Breakpoints**:
+  - `sm`: 640px
+  - `md`: 768px (tablet)
+  - `lg`: 1024px (desktop)
+  - `xl`: 1280px
+  - `2xl`: 1400px (max container width)
+
+## 🧪 Testing
+
+### Unit Tests
+
+**Framework**: Vitest + React Testing Library
+
+**Coverage**:
+- ✅ AuthService/AuthContext
+- ✅ CollectionsService
+- ✅ ChatService
+- ✅ AuthGuard/ProtectedRoute
+
+**Run tests**:
+```bash
+npm run test
+npm run test:coverage
 ```
 
----
+### E2E Tests
 
-## 🚀 Development
+**Framework**: Playwright
 
-### Available Scripts
+**Test Scenarios**:
+1. Login flow → Dashboard navigation
+2. Collections CRUD
+3. File upload → Download
+4. Chat interaction with streaming
+
+**Run E2E tests**:
+```bash
+npm run test:e2e
+npm run test:e2e:ui  # Interactive mode
+```
+
+### Test Report
+
+See `test-report.md` for detailed test results and coverage metrics.
+
+## 📋 Code Quality
+
+### ESLint Configuration
 
 ```bash
-# Start development server
-npm start
+# Run linter
+npm run lint
 
-# Build for production
-npm run build
-
-# Run tests
-npm test
-
-# Eject from Create React App (irreversible)
-npm run eject
+# Auto-fix issues
+npm run lint:fix
 ```
 
-### Code Structure
+**Rules**:
+- TypeScript strict mode enabled
+- React Hooks rules enforced
+- Unused variables flagged (warnings)
 
-- **Components**: Functional components with React hooks
-- **State management**: Local state with useState and useEffect
-- **API calls**: Centralized in api.js with error handling
-- **Styling**: CSS modules with responsive design
+### Type Safety
 
-### Adding New Features
+- All components use TypeScript
+- Strict null checks enabled
+- No implicit `any` types
+- Zod schemas for runtime validation
 
-1. **Create component** in `src/components/`
-2. **Add API endpoints** in `src/api/api.js`
-3. **Update routing** in `App.js` if needed
-4. **Add styles** in `styles.css`
+## 🔧 Build & Deployment
 
----
+### Development
 
-## 📦 Dependencies
-
-### Core Dependencies
-```json
-{
-  "react": "^18.2.0",
-  "react-dom": "^18.2.0",
-  "axios": "^1.6.0"
-}
+```bash
+npm run dev  # Start dev server at :8080
 ```
-
-### Development Dependencies
-```json
-{
-  "react-scripts": "5.0.1",
-  "@testing-library/react": "^13.4.0",
-  "@testing-library/jest-dom": "^5.16.4"
-}
-```
-
----
-
-## 🔐 Security Considerations
-
-### JWT Token Storage
-- Tokens stored in localStorage (consider httpOnly cookies for production)
-- Automatic token cleanup on logout
-- Token expiration handling
-
-### Input Validation
-- File type validation on frontend and backend
-- File size limits enforced
-- XSS protection through React's built-in escaping
-
-### HTTPS in Production
-- Always use HTTPS in production
-- Update API_URL to use https://
-- Configure proper CORS origins
-
----
-
-## 📝 Default Login
-
-**Username**: `admin`  
-**Password**: `admin123`
-
-⚠️ **Change these credentials in production!**
-
----
-
-## 🤝 Integration with Backend
-
-### Required Backend Endpoints
-- `POST /auth/token` - Authentication
-- `POST /files/upload` - File upload
-- `GET /files/list` - List files
-- `DELETE /files/{id}` - Delete file
-- `POST /chat/ask` - Chat with documents (returns summary + detailed answers)
-
-### Backend Requirements
-- CORS enabled for frontend domain
-- JWT authentication configured
-- File upload limits set appropriately
-- Qdrant vector database running
-- Claude API key configured
-
----
-
-## 📈 Performance Optimization
 
 ### Production Build
+
 ```bash
-npm run build
+npm run build       # Build to /dist
+npm run preview     # Preview production build
 ```
 
-### Optimization Features
-- Code splitting with React.lazy (can be added)
-- Image optimization for assets
-- CSS minification and bundling
-- Service worker for caching (can be added)
+### Build Output
 
-### Monitoring
-- Add error tracking (Sentry, LogRocket)
-- Performance monitoring
-- User analytics integration
+```
+dist/
+├── assets/
+│   ├── index-[hash].js    # Main bundle
+│   ├── index-[hash].css   # Styles
+│   └── vendor-[hash].js   # Dependencies
+├── index.html
+└── robots.txt
+```
+
+### Deployment Options
+
+- **Static Hosting**: Vercel, Netlify, Cloudflare Pages
+- **Docker**: See `Dockerfile` (if included)
+- **CDN**: Upload `dist/` to S3 + CloudFront
+
+**Environment Variables**: Remember to set `VITE_API_BASE_URL` in your hosting provider's environment settings.
+
+## 🛡️ Security Considerations
+
+### Current Implementation
+
+- ✅ JWT tokens stored in `sessionStorage` (cleared on logout)
+- ✅ Authorization header on all API requests
+- ✅ Role-based route guards
+- ✅ Input validation with Zod
+- ✅ XSS protection via React (JSX escaping)
+
+### Production Recommendations
+
+- 🔒 **Token Refresh**: Implement refresh token flow
+- 🔒 **HTTPS Only**: Enforce HTTPS in production
+- 🔒 **CSP Headers**: Add Content-Security-Policy
+- 🔒 **Rate Limiting**: Implement on backend
+- 🔒 **JWT Verification**: Verify signature server-side (don't trust decoded payload)
+- 🔒 **HttpOnly Cookies**: Consider using HttpOnly cookies instead of sessionStorage
+
+## 📖 Additional Resources
+
+- **Tailwind CSS**: https://tailwindcss.com/docs
+- **Shadcn/ui**: https://ui.shadcn.com/
+- **React Router**: https://reactrouter.com/
+- **React Query**: https://tanstack.com/query/latest
+- **Radix UI**: https://www.radix-ui.com/
+
+## 🤝 Contributing
+
+1. Create a feature branch: `git checkout -b feature/my-feature`
+2. Make changes and commit: `git commit -am 'Add feature'`
+3. Push to branch: `git push origin feature/my-feature`
+4. Open a Pull Request
+
+### Branch Strategy
+
+- `main`: Production-ready code
+- `dev`: Development branch (default)
+- `feature/*`: Feature branches
+- `fix/*`: Bug fix branches
+
+## 📝 License
+
+[Specify your license here]
+
+## 👥 Support
+
+For issues or questions:
+- GitHub Issues: [Your repo URL]
+- Email: support@yourapp.com
+- Documentation: [Docs URL]
+
+---
+
+**Last Updated**: 2025-01-02  
+**Version**: 1.0.0  
+**Status**: ✅ Production Ready (pending backend integration)

@@ -216,6 +216,8 @@ async def delete_user(
     try:
         from app.models.file_metadata import FileMetadata
         from app.models.collection import Collection
+        from app.models.chat_tracking import ChatSession, ChatQuery
+        from app.models.query_log import QueryLog
         
         # Check if user is admin of any collections that still exist
         admin_collections = db.query(Collection).filter(Collection.admin_user_id == user_id).all()
@@ -239,14 +241,14 @@ async def delete_user(
         except Exception:
             logger.debug("UserFileAccess model not available or cleanup failed", exc_info=True)
 
-        # Remove chat sessions and query logs if they exist (with synchronize_session=False)
-        try:
-            from app.models.chat_tracking import ChatSession
-            from app.models.query_log import QueryLog
-            db.query(ChatSession).filter(ChatSession.user_id == user_id).delete(synchronize_session=False)
-            db.query(QueryLog).filter(QueryLog.user_id == user_id).delete(synchronize_session=False)
-        except Exception:
-            logger.debug("Chat tracking cleanup failed", exc_info=True)
+        # Remove chat queries and sessions for this user
+        session_ids = [session.session_id for session in db.query(ChatSession.session_id).filter(ChatSession.user_id == user_id).all()]
+        if session_ids:
+            db.query(ChatQuery).filter(ChatQuery.session_id.in_(session_ids)).delete(synchronize_session=False)
+        db.query(ChatSession).filter(ChatSession.user_id == user_id).delete(synchronize_session=False)
+
+        # Remove query logs associated with this user
+        db.query(QueryLog).filter(QueryLog.user_id == user_id).delete(synchronize_session=False)
 
         # Hard delete: actually remove user from database
         db.delete(target_user)
@@ -269,25 +271,39 @@ async def create_new_user(
 ):
     """Create a new user"""
     try:
-        # Validate and resolve target collection
-        collection = None
-        # Normalize empty string to None
-        collection_id = user_data.collection_id if user_data.collection_id else None
-        
-        if user_data.role != "super_admin":
-            if not collection_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="collection_id is required for non super-admin users"
-                )
+        # Normalize collection identifiers
+        incoming_collection_ids = set(filter(None, (user_data.collection_ids or [])))
+        if user_data.collection_id:
+            incoming_collection_ids.add(user_data.collection_id)
 
-        if collection_id:
+        if user_data.role != "super_admin" and not incoming_collection_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="At least one collection must be provided for non super-admin users"
+            )
+
+        # Validate collections and gather metadata
+        managed_collections: List[Collection] = []
+        for collection_id in incoming_collection_ids:
             collection = _get_managed_collection(db, current_user, collection_id)
+            managed_collections.append(collection)
+
+        # Ensure all selected collections belong to the same website (when defined)
+        collection_website_ids = {
+            collection.website_id for collection in managed_collections if collection.website_id
+        }
+        if user_data.website_id:
+            collection_website_ids.add(user_data.website_id)
+        if len(collection_website_ids) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Selected collections span multiple websites. Choose collections from a single website or specify a matching website_id."
+            )
 
         # Determine target website for permission checks
         target_website_id = user_data.website_id
-        if collection:
-            target_website_id = collection.website_id or target_website_id or current_user.website_id
+        if managed_collections:
+            target_website_id = managed_collections[0].website_id or target_website_id or current_user.website_id
 
         # Validate permissions with detailed error messages
         if not PermissionChecker.can_create_user(current_user, target_website_id):
@@ -338,8 +354,10 @@ async def create_new_user(
                 detail="Only super admins can create super admin users"
             )
 
-        # Determine website from collection if needed
+        # Determine website from collections if needed
         effective_website_id = target_website_id
+        if not effective_website_id and managed_collections:
+            effective_website_id = managed_collections[0].website_id
 
         reactivated = False
         target_user: Optional[User] = None
@@ -376,7 +394,7 @@ async def create_new_user(
             target_user.is_active = True
             target_user.website_id = effective_website_id
 
-            # Remove old collection memberships (single-assignment model)
+            # Clear memberships; will be re-added below
             db.query(CollectionUser).filter(
                 CollectionUser.user_id == target_user.user_id
             ).delete(synchronize_session=False)
@@ -396,25 +414,42 @@ async def create_new_user(
             db.add(new_user)
             db.flush()
 
-        # Ensure collection assignment exists
-        if collection_id:
+        # Ensure collection assignments exist
+        membership_role = "admin" if new_user.role == "user_admin" else "user"
+        persisted_collection_ids: set[str] = set()
+
+        for collection in managed_collections:
             assignment = db.query(CollectionUser).filter(
-                CollectionUser.collection_id == collection_id,
+                CollectionUser.collection_id == collection.collection_id,
                 CollectionUser.user_id == new_user.user_id
             ).first()
             if not assignment:
                 assignment = CollectionUser(
-                    collection_id=collection_id,
+                    collection_id=collection.collection_id,
                     user_id=new_user.user_id,
-                    role="admin" if new_user.role == "user_admin" else "user",
+                    role=membership_role,
                     can_upload=True,
                     can_download=True,
                     can_delete=new_user.role == "user_admin",
                     assigned_by=current_user.user_id
                 )
                 db.add(assignment)
-        elif reactivated:
-            # If no collection supplied, ensure user has no lingering memberships
+            else:
+                assignment.role = membership_role
+                assignment.can_delete = new_user.role == "user_admin"
+            persisted_collection_ids.add(collection.collection_id)
+
+        if incoming_collection_ids:
+            if persisted_collection_ids:
+                db.query(CollectionUser).filter(
+                    CollectionUser.user_id == new_user.user_id,
+                    CollectionUser.collection_id.notin_(persisted_collection_ids)
+                ).delete(synchronize_session=False)
+            else:
+                db.query(CollectionUser).filter(
+                    CollectionUser.user_id == new_user.user_id
+                ).delete(synchronize_session=False)
+        else:
             db.query(CollectionUser).filter(
                 CollectionUser.user_id == new_user.user_id
             ).delete(synchronize_session=False)
@@ -489,7 +524,18 @@ async def update_user(
 
     try:
         has_changes = False
-        new_collection_id = user_update.collection_id if user_update.collection_id is not None else None
+        collections_provided = (
+            user_update.collection_ids is not None or user_update.collection_id is not None
+        )
+
+        incoming_collection_ids = set()
+        if user_update.collection_ids is not None:
+            has_changes = True
+            incoming_collection_ids.update(filter(None, user_update.collection_ids))
+        if user_update.collection_id is not None:
+            has_changes = True
+            if user_update.collection_id:
+                incoming_collection_ids.add(user_update.collection_id)
 
         if user_update.full_name is not None:
             user.full_name = user_update.full_name
@@ -533,28 +579,33 @@ async def update_user(
             user.role = user_update.role
             has_changes = True
 
-        if new_collection_id is not None:
-            has_changes = True
+        if collections_provided:
+            managed_collections: List[Collection] = []
+            for collection_id in incoming_collection_ids:
+                collection = _get_managed_collection(db, current_user, collection_id)
+                managed_collections.append(collection)
 
-            # Normalize empty string to removal request
-            if not new_collection_id:
-                db.query(CollectionUser).filter(CollectionUser.user_id == user.user_id).delete()
-                if not user.is_super_admin():
-                    user.website_id = None
-            else:
-                collection = _get_managed_collection(db, current_user, new_collection_id)
+            collection_website_ids = {
+                collection.website_id for collection in managed_collections if collection.website_id
+            }
 
-                # Ensure membership exists and reflects desired role
+            if len(collection_website_ids) > 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Selected collections span multiple websites. Choose collections from a single website."
+                )
+
+            membership_role = "admin" if user.role == "user_admin" else "user"
+            persisted_collection_ids: set[str] = set()
+
+            for collection in managed_collections:
                 membership = db.query(CollectionUser).filter(
-                    CollectionUser.collection_id == new_collection_id,
+                    CollectionUser.collection_id == collection.collection_id,
                     CollectionUser.user_id == user.user_id
                 ).first()
-
-                membership_role = "admin" if user.role == "user_admin" else "user"
-
                 if not membership:
                     membership = CollectionUser(
-                        collection_id=new_collection_id,
+                        collection_id=collection.collection_id,
                         user_id=user.user_id,
                         role=membership_role,
                         can_upload=True,
@@ -566,16 +617,29 @@ async def update_user(
                 else:
                     membership.role = membership_role
                     membership.can_delete = user.role == "user_admin"
+                persisted_collection_ids.add(collection.collection_id)
 
-                # Remove stale memberships in other collections (single-assignment model)
+            if incoming_collection_ids:
+                if persisted_collection_ids:
+                    db.query(CollectionUser).filter(
+                        CollectionUser.user_id == user.user_id,
+                        CollectionUser.collection_id.notin_(persisted_collection_ids)
+                    ).delete(synchronize_session=False)
+                else:
+                    db.query(CollectionUser).filter(
+                        CollectionUser.user_id == user.user_id
+                    ).delete(synchronize_session=False)
+            else:
                 db.query(CollectionUser).filter(
-                    CollectionUser.user_id == user.user_id,
-                    CollectionUser.collection_id != new_collection_id
+                    CollectionUser.user_id == user.user_id
                 ).delete(synchronize_session=False)
 
-                # Align website with collection website when available
-                if collection.website_id and not user.is_super_admin():
-                    user.website_id = collection.website_id
+            if managed_collections and not user.is_super_admin():
+                primary_collection = managed_collections[0]
+                if primary_collection.website_id:
+                    user.website_id = primary_collection.website_id
+            elif not incoming_collection_ids and not user.is_super_admin():
+                user.website_id = None
 
         if not has_changes:
             return UserResponse(**user.to_dict())

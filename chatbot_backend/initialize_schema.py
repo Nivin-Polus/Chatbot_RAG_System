@@ -48,6 +48,7 @@ from app.models.collection import (  # noqa: E402  pylint: disable=wrong-import-
     CollectionUser,
 )
 from app.models.system_prompt import SystemPrompt  # noqa: E402  pylint: disable=wrong-import-position
+from app.models.activity_stats import ActivityStats  # noqa: E402  pylint: disable=wrong-import-position
 
 
 LOGGER = logging.getLogger("initialize_schema")
@@ -293,6 +294,13 @@ def main() -> None:
         )
 
         collection = _ensure_default_collection(db, website, admin_user)
+
+        # Ensure activity stats row exists
+        stats = db.query(ActivityStats).first()
+        if not stats:
+            stats = ActivityStats()
+            db.add(stats)
+            LOGGER.info("Created default activity statistics row")
 
         db.commit()
         LOGGER.info("Schema initialization complete")

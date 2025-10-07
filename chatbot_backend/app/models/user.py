@@ -35,6 +35,7 @@ class User(Base):
     file_accesses = relationship("UserFileAccess", foreign_keys="UserFileAccess.user_id", back_populates="user")
     chat_sessions = relationship("ChatSession", foreign_keys="ChatSession.user_id", back_populates="user")
     query_logs = relationship("QueryLog", back_populates="user")
+    activity_logs = relationship("ActivityLog", back_populates="user")
     
     # Collection relationships
     administered_collections = relationship("Collection", foreign_keys="Collection.admin_user_id", back_populates="admin")
@@ -138,7 +139,8 @@ class UserCreate(BaseModel):
     """Pydantic model for user creation"""
     username: str
     password: str
-    collection_id: Optional[str] = None  # Optional for super_admin role
+    collection_id: Optional[str] = None  # Backwards compatibility for single assignment
+    collection_ids: Optional[List[str]] = None
     email: Optional[str] = None
     full_name: Optional[str] = None
     website_id: Optional[str] = None  # Optional; derived from collection when omitted
@@ -150,7 +152,8 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     is_active: Optional[bool] = None
     role: Optional[str] = None  # Only super_admin can change roles
-    collection_id: Optional[str] = None
+    collection_id: Optional[str] = None  # Backwards compatibility for legacy clients
+    collection_ids: Optional[List[str]] = None
 
 class UserLogin(BaseModel):
     """Pydantic model for user login"""

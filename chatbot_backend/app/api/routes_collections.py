@@ -58,6 +58,13 @@ class CollectionWebsiteResponse(BaseModel):
         from_attributes = True
 
 
+class CollectionSummary(BaseModel):
+    collection_id: str
+    name: str
+    description: Optional[str]
+    is_active: bool
+
+
 class CollectionResponse(BaseModel):
     collection_id: str
     name: str
@@ -84,6 +91,26 @@ class UserAssignment(BaseModel):
     can_delete: bool = False
 
 
+def _get_accessible_collections(current_user: User, db: Session):
+    if current_user.role == "super_admin":
+        return db.query(Collection).all()
+
+    if current_user.role == "user_admin":
+        return db.query(Collection).filter(
+            Collection.admin_user_id == current_user.user_id
+        ).all()
+
+    user_collections = db.query(CollectionUser).filter(
+        CollectionUser.user_id == current_user.user_id
+    ).all()
+    collection_ids = [uc.collection_id for uc in user_collections]
+    if not collection_ids:
+        return []
+    return db.query(Collection).filter(
+        Collection.collection_id.in_(collection_ids)
+    ).all()
+
+
 @router.get("/", response_model=List[CollectionResponse])
 async def get_collections(
     current_user: User = Depends(get_current_user),
@@ -91,31 +118,33 @@ async def get_collections(
 ):
     """Get all collections (super admin) or user's collections (admin/user)"""
     try:
-        if current_user.role == "super_admin":
-            # Super admin can see all collections
-            collections = db.query(Collection).all()
-        elif current_user.role == "user_admin":
-            # Admin can see collections they administer
-            collections = db.query(Collection).filter(
-                Collection.admin_user_id == current_user.user_id
-            ).all()
-        else:
-            # Regular users can see collections they're assigned to
-            user_collections = db.query(CollectionUser).filter(
-                CollectionUser.user_id == current_user.user_id
-            ).all()
-            collection_ids = [uc.collection_id for uc in user_collections]
-            if not collection_ids:
-                collections = []
-            else:
-                collections = db.query(Collection).filter(
-                    Collection.collection_id.in_(collection_ids)
-                ).all()
-        
+        collections = _get_accessible_collections(current_user, db)
         return [_collection_to_response(c) for c in collections]
     except Exception as e:
         logger.error(f"Error getting collections: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve collections")
+
+
+@router.get("/summary", response_model=List[CollectionSummary])
+async def get_collection_summary(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Lightweight list of collections available to the current user."""
+    try:
+        collections = _get_accessible_collections(current_user, db)
+        return [
+            CollectionSummary(
+                collection_id=collection.collection_id,
+                name=collection.name,
+                description=collection.description,
+                is_active=collection.is_active,
+            )
+            for collection in collections
+        ]
+    except Exception as e:
+        logger.error(f"Error getting collection summary: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve collection summary")
 
 
 @router.post("/", response_model=CollectionResponse)

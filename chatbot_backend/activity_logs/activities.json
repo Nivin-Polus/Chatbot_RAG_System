@@ -5484,5 +5484,78 @@
       "cache_hit": false,
       "vector_db_type": "qdrant"
     }
+  },
+  {
+    "id": "1759224276.34447_chat_session_start",
+    "type": "chat_session_start",
+    "user": "hr124",
+    "timestamp": "2025-09-30T09:24:36.344470+00:00",
+    "details": {
+      "session_id": "session_1759224259990_ek22kl",
+      "first_question": "leave policy"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "1759224276.354474_chat_query",
+    "type": "chat_query",
+    "user": "hr124",
+    "timestamp": "2025-09-30T09:24:36.354474+00:00",
+    "details": {
+      "question": "leave policy",
+      "session_id": "session_1759224259990_ek22kl",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 11787,
+      "has_context": false
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1759224314.461862_chat_query",
+    "type": "chat_query",
+    "user": "hr124",
+    "timestamp": "2025-09-30T09:25:14.461862+00:00",
+    "details": {
+      "question": "What are my leave options",
+      "session_id": "session_1759224259990_ek22kl",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 7889,
+      "has_context": true
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
+  },
+  {
+    "id": "1759224415.309805_chat_session_start",
+    "type": "chat_session_start",
+    "user": "hr124",
+    "timestamp": "2025-09-30T09:26:55.309805+00:00",
+    "details": {
+      "session_id": "session_1759224398229_62rtmf",
+      "first_question": "leave policy"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "1759224415.321569_chat_query",
+    "type": "chat_query",
+    "user": "hr124",
+    "timestamp": "2025-09-30T09:26:55.321569+00:00",
+    "details": {
+      "question": "leave policy",
+      "session_id": "session_1759224398229_62rtmf",
+      "chunks_retrieved": 8,
+      "processing_time_ms": 6841,
+      "has_context": false
+    },
+    "metadata": {
+      "cache_hit": false,
+      "vector_db_type": "qdrant"
+    }
   }
 ]

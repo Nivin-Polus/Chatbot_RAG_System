@@ -70,7 +70,9 @@ This **collection-based** RAG chatbot system uses a single vector database intel
 - Conversation context maintenance with session tracking
 - Session-based chat history with unique session IDs
 - Message management (delete individual messages or segments)
-- Auto-scrolling and responsive design
+- Auto-scroll that smartly pauses on manual scroll and resumes when new responses are sent
+- Taller, full-height layouts for super admin, admin, and user chat panels with consistent input bar sizing
+- Loader bubbles that show “Leto is thinking...” until streaming output begins
 - **Modern Tabbed Interface**: File Management, Chat, Settings
 
 ### 📊 **Multi-Tenant Analytics & Monitoring**
@@ -159,13 +161,22 @@ The system implements a **collection-based approach** using:
 
 ### 🗄️ **Database Schema**
 
-#### Core Collection Tables
-- **`collections`** - Collection definitions with unique IDs and website URLs
-- **`users`** - Enhanced with collection_id and role-based permissions
-- **`prompts`** - AI prompts scoped to collections with model configurations
-- **`file_metadata`** - Files scoped to collections with access control
-- **`collection_users`** - User assignments to collections with role management
-- **`query_logs`** - Usage tracking and analytics per collection
+#### Core Entities
+- **`collections`** – Logical knowledge bases with admin assignment, website linkage, and vector database routing.
+- **`collection_users`** – Many-to-many join tracking user membership, per-collection roles, and granular upload/download/delete permissions.
+- **`users`** – Role-aware account records (super_admin, collection_admin, collection_user) with tenant scoping metadata.
+- **`websites`** & **`collection_websites`** – Primary website profile plus optional mapped URLs per collection.
+- **`vector_databases`** – Registry of external vector backends connected to collections and prompts.
+- **`system_prompts`** – Database-driven prompt templates per collection/vector DB with model configuration fields.
+
+#### Knowledge & Access Control
+- **`file_metadata`** / **`file_binary`** – Structured document metadata and binary payload storage per collection.
+- **`user_file_access`** – Time-bound file permission grants with read/download/delete flags.
+- **`query_logs`** – Conversation analytics scoped by collection, session, and user.
+- **`chat_sessions`** / **`chat_queries`** – Streaming chat transcripts, session lifecycle tracking, and message attribution.
+
+#### Observability
+- **`activity_logs`** / **`activity_stats`** – Administrative audit trail and roll-up statistics for multi-tenant monitoring.
 
 ### 🔍 **Vector Database Strategy**
 
@@ -715,6 +726,11 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - **`requirements-minimal.txt`**: Minimal setup with only core dependencies (FastAPI, Claude AI, etc.)
 - **Automatic Detection**: System automatically detects missing packages and provides fallbacks
 - **Progressive Enhancement**: Start minimal, add features as needed
+
+#### **October 2025 Chat UX Refresh**
+- Super admin, admin, and user chats (`chatbot_frontend/src/pages/superadmin/SuperadminChat.tsx`, `chatbot_frontend/src/pages/useradmin/UserAdminChat.tsx`, `chatbot_frontend/src/pages/user/UserChat.tsx`) now keep the conversation view anchored to the start of new answers while still allowing manual scrolling during streaming.
+- All chat layouts stretch to the viewport height with unified 44px input, send, and stop controls for consistent ergonomics.
+- Loader bubbles retain the “Leto is thinking...” caption before streaming and automatically hide the text once tokens stream, providing clearer feedback.
 
 ---
 
