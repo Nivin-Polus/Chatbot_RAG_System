@@ -15,15 +15,23 @@ logger = logging.getLogger(__name__)
 # Password hashing context (using bcrypt for MySQL compatibility)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+_BCRYPT_MAX_LENGTH = 72
+
+
+def _prepare_password(password: str | bytes) -> str:
+    if isinstance(password, bytes):
+        password = password.decode("utf-8", errors="ignore")
+    return (password or "")[:_BCRYPT_MAX_LENGTH]
+
 
 # Hash a plain password
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    return pwd_context.hash(_prepare_password(password))
 
 
 # Verify a plain password against hashed password
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    return pwd_context.verify(_prepare_password(plain_password), hashed_password)
 
 
 # Create a JWT access token

@@ -147,7 +147,10 @@ export default function SuperadminUsers() {
           username: formData.username,
           email: formData.email,
           full_name: formData.full_name,
-          password: formData.password || undefined, // Only include if provided
+          password:
+            formData.password && editingUser.user_id !== user?.user_id
+              ? formData.password
+              : undefined,
           role: formData.role,
           collection_ids: formData.collection_ids,
         }),
@@ -340,7 +343,12 @@ export default function SuperadminUsers() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="password">
-                      Password {editingUser ? '(leave blank to keep current)' : '*'}
+                      Password
+                      {editingUser
+                        ? editingUser.user_id === user?.user_id
+                          ? ' (manage from Settings)'
+                          : ' (optional — retain existing if left blank)'
+                        : ' *'}
                     </Label>
                     <Input
                       id="password"
@@ -348,7 +356,13 @@ export default function SuperadminUsers() {
                       value={formData.password}
                       onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                       required={!editingUser}
+                      disabled={editingUser?.user_id === user?.user_id}
                     />
+                    {editingUser?.user_id === user?.user_id && (
+                      <p className="text-xs text-muted-foreground">
+                        Update your password from the Settings page.
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="role">

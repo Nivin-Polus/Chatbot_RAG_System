@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from sqlalchemy import (
@@ -39,11 +39,15 @@ class ActivityLog(Base):
     user = relationship("User", back_populates="activity_logs", lazy="joined", join_depth=1)
 
     def to_dict(self) -> Dict[str, Any]:
+        timestamp = self.created_at
+        if timestamp is not None and timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+
         return {
             "id": self.activity_id,
             "type": self.activity_type,
             "user": self.username,
-            "timestamp": self.created_at.isoformat() if self.created_at else None,
+            "timestamp": timestamp.astimezone(timezone.utc).isoformat() if timestamp else None,
             "details": self._safe_json_load(self.details) or {},
             "metadata": self._safe_json_load(self.metadata_json) or {},
         }
@@ -85,6 +89,10 @@ class ActivityLog(Base):
         metadata: Optional[Dict[str, Any]] = None,
         created_at: Optional[datetime] = None,
     ) -> "ActivityLog":
+        safe_timestamp = created_at
+        if safe_timestamp is not None and safe_timestamp.tzinfo is None:
+            safe_timestamp = safe_timestamp.replace(tzinfo=timezone.utc)
+
         return cls(
             activity_id=activity_id,
             activity_type=activity_type,
@@ -92,5 +100,5 @@ class ActivityLog(Base):
             user_id=user_id,
             details=cls._safe_json_dump(details),
             metadata_json=cls._safe_json_dump(metadata),
-            created_at=created_at,
+            created_at=safe_timestamp,
         )

@@ -480,7 +480,7 @@ export default function KnowledgeBaseDetails() {
           <p className="text-muted-foreground">Knowledge base not found</p>
           <Button onClick={() => navigate('/superadmin')} className="mt-4">
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Knowledge Bases
+            Back to Knowledge Base
           </Button>
         </div>
       </DashboardLayout>

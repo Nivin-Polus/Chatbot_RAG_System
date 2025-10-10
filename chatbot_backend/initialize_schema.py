@@ -2,59 +2,54 @@
 """
 Initializes the chatbot multi-tenant schema and inserts default data.
 
-Run this script the first time you point the application at a fresh database
-schema. It will:
-  1. Create the database (MySQL) if it does not exist yet.
-  2. Create all ORM tables using the current SQLAlchemy metadata.
-  3. Ensure default website, users, collection, and prompt records exist.
+Run this script once on a fresh database.
 
 Usage:
     python initialize_schema.py
-
-Environment:
-    Reads configuration from the existing .env file via `app.config.settings`.
 """
 
 from __future__ import annotations
-
 import logging
 import sys
 import uuid
 from pathlib import Path
-
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from passlib.context import CryptContext
 
-# Ensure we can import from the `app` package when script executed from repo root
+# Ensure import path
 BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.append(str(BASE_DIR))
 
-# Load environment variables before importing settings
 load_dotenv()
 
-from app.config import settings  # noqa: E402  pylint: disable=wrong-import-position
-from app.core.database import (  # noqa: E402  pylint: disable=wrong-import-position
-    create_database_if_not_exists,
-    init_database,
-)
-from app.models.website import Website  # noqa: E402  pylint: disable=wrong-import-position
-from app.models.user import User  # noqa: E402  pylint: disable=wrong-import-position
-from app.models.collection import (  # noqa: E402  pylint: disable=wrong-import-position
-    Collection,
-    CollectionUser,
-)
-from app.models.system_prompt import SystemPrompt  # noqa: E402  pylint: disable=wrong-import-position
-from app.models.activity_stats import ActivityStats  # noqa: E402  pylint: disable=wrong-import-position
-
+from app.config import settings
+from app.core.database import create_database_if_not_exists, init_database
+from app.models.website import Website
+from app.models.user import User
+from app.models.collection import Collection, CollectionUser
+from app.models.system_prompt import SystemPrompt
+from app.models.activity_stats import ActivityStats
 
 LOGGER = logging.getLogger("initialize_schema")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 PASSWORD_CONTEXT = CryptContext(schemes=["bcrypt"], deprecated="auto")
+_BCRYPT_MAX_LENGTH = 72
+
+
+def _prepare_password(password: str | bytes) -> str:
+    if isinstance(password, bytes):
+        password = password.decode("utf-8", errors="ignore")
+    return (password or "")[:_BCRYPT_MAX_LENGTH]
+
+
+def _hash_password(password: str) -> str:
+    return PASSWORD_CONTEXT.hash(_prepare_password(password))
+
 
 DEFAULT_WEBSITE_DOMAIN = "localhost"
 DEFAULT_WEBSITE_NAME = "Default Organization"
@@ -75,53 +70,67 @@ def _get_db_session():
 
 
 def _perform_schema_migrations(engine) -> None:
-    """Apply lightweight schema tweaks required for the latest application code."""
     inspector = inspect(engine)
 
+    # Ensure essential tables expose the expected primary key columns before proceeding.
+    if inspector.has_table("users"):
+        user_columns = {col["name"] for col in inspector.get_columns("users")}
+        if "user_id" not in user_columns:
+            LOGGER.critical(
+                "Detected incompatible schema: existing 'users' table lacks the 'user_id' primary key column. "
+                "The current ORM models (see `app/models/user.py`) require this column for foreign-key relationships. "
+                "Please migrate the table (e.g., add a VARCHAR(36) 'user_id' primary key and update foreign keys) "
+                "or drop/recreate the database before rerunning initialize_schema.py."
+            )
+            raise RuntimeError(
+                "Incompatible schema detected: missing 'users.user_id' column. "
+                "Apply a migration or recreate the database to align with the latest models."
+            )
     try:
         if not inspector.has_table("file_metadata"):
-            LOGGER.info("Table 'file_metadata' not present yet; skipping column checks")
+            LOGGER.info("No 'file_metadata' table yet, skipping migrations")
             return
     except SQLAlchemyError as exc:
-        LOGGER.warning("Unable to inspect existing tables: %s", exc)
+        LOGGER.warning("Could not inspect database: %s", exc)
         return
 
-    columns = {column["name"]: column for column in inspector.get_columns("file_metadata")}
-
-    # Ensure file_content column exists for database-backed storage
+    columns = {col["name"]: col for col in inspector.get_columns("file_metadata")}
     if "file_content" not in columns:
-        LOGGER.info("Adding 'file_content' column to 'file_metadata' table")
-        try:
-            with engine.connect() as connection:
-                connection.execute(text("ALTER TABLE file_metadata ADD COLUMN file_content LONGBLOB NULL"))
-            LOGGER.info("'file_content' column created successfully")
-        except SQLAlchemyError as exc:
-            LOGGER.error("Failed to add 'file_content' column: %s", exc)
-            raise
-    else:
-        LOGGER.info("'file_content' column already present")
+        LOGGER.info("Adding 'file_content' column to 'file_metadata'")
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE file_metadata ADD COLUMN file_content LONGBLOB NULL"))
 
-    # Ensure file_path allows NULL now that content can live in the database
-    file_path_meta = columns.get("file_path")
-    if file_path_meta and not file_path_meta.get("nullable", False):
-        LOGGER.info("Making 'file_path' column nullable to support DB-backed storage")
-        try:
-            with engine.connect() as connection:
-                connection.execute(text("ALTER TABLE file_metadata MODIFY COLUMN file_path VARCHAR(500) NULL"))
-            LOGGER.info("'file_path' column updated to allow NULL values")
-        except SQLAlchemyError as exc:
-            LOGGER.error("Failed to alter 'file_path' column nullability: %s", exc)
-            raise
+    # Make 'file_path' nullable
+    if "file_path" in columns and not columns["file_path"].get("nullable", False):
+        LOGGER.info("Making 'file_path' column nullable")
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE file_metadata MODIFY COLUMN file_path VARCHAR(500) NULL"))
+
+    # Add optional prompt columns
+    if inspector.has_table("system_prompts"):
+        prompt_columns = {col["name"] for col in inspector.get_columns("system_prompts")}
+        additions = {
+            "user_prompt_template": "TEXT NULL DEFAULT ''",
+            "context_template": "TEXT NULL DEFAULT ''",
+            "vector_db_id": "VARCHAR(36) NULL DEFAULT NULL",
+            "website_id": "VARCHAR(36) NULL DEFAULT NULL",
+            "model_name": "VARCHAR(100) NOT NULL DEFAULT 'claude-3-haiku-20240307'",
+            "max_tokens": "INT NOT NULL DEFAULT 1000",
+            "temperature": "FLOAT NOT NULL DEFAULT 0",
+            "usage_count": "INT NOT NULL DEFAULT 0",
+            "last_used": "DATETIME NULL DEFAULT NULL",
+        }
+        for name, ddl in additions.items():
+            if name not in prompt_columns:
+                with engine.connect() as conn:
+                    conn.execute(text(f"ALTER TABLE system_prompts ADD COLUMN {name} {ddl}"))
+                LOGGER.info("Added column '%s' to system_prompts", name)
 
 
 def _ensure_default_website(db) -> Website:
-    website = (
-        db.query(Website)
-        .filter(Website.domain == DEFAULT_WEBSITE_DOMAIN)
-        .first()
-    )
+    website = db.query(Website).filter_by(domain=DEFAULT_WEBSITE_DOMAIN).first()
     if website:
-        LOGGER.info("Website '%s' already present (id=%s)", website.name, website.website_id)
+        LOGGER.info("Website '%s' already exists", website.name)
         return website
 
     website = Website(
@@ -136,23 +145,26 @@ def _ensure_default_website(db) -> Website:
     )
     db.add(website)
     db.flush()
-    LOGGER.info("Created default website '%s' (id=%s)", website.name, website.website_id)
+    LOGGER.info("Created default website '%s'", website.name)
     return website
 
 
-def _ensure_user(db, *, username: str, email: str, password: str, full_name: str,
-                 role: str, website_id: str | None) -> User:
-    user = db.query(User).filter(User.username == username).first()
+def _ensure_user(
+    db,
+    *,
+    username: str,
+    email: str,
+    password: str,
+    full_name: str,
+    role: str,
+    website_id: str | None,
+) -> User:
+    user = db.query(User).filter_by(username=username).first()
     if user:
-        updated = False
-        if user.role != role:
+        if user.role != role or user.website_id != website_id:
             user.role = role
-            updated = True
-        if user.website_id != website_id:
             user.website_id = website_id
-            updated = True
-        if updated:
-            LOGGER.info("Updated existing user '%s' to role '%s'", username, role)
+            LOGGER.info("Updated user '%s' role or website", username)
         else:
             LOGGER.info("User '%s' already exists", username)
         return user
@@ -160,10 +172,10 @@ def _ensure_user(db, *, username: str, email: str, password: str, full_name: str
     user = User(
         username=username,
         email=email,
-        password_hash=PASSWORD_CONTEXT.hash(password),
+        password_hash=_hash_password(password),
         full_name=full_name,
         role=role,
-        website_id=website_id,
+        website_id=website_id,  # <-- FIXED: passing value, not Column
         is_active=True,
     )
     db.add(user)
@@ -173,22 +185,12 @@ def _ensure_user(db, *, username: str, email: str, password: str, full_name: str
 
 
 def _ensure_default_collection(db, website: Website, admin_user: User) -> Collection:
-    collection = (
-        db.query(Collection)
-        .filter(Collection.collection_id == DEFAULT_COLLECTION_ID)
-        .first()
-    )
-    if collection:
-        LOGGER.info(
-            "Collection '%s' already exists (id=%s)",
-            collection.name,
-            collection.collection_id,
-        )
-    else:
+    collection = db.query(Collection).filter_by(collection_id=DEFAULT_COLLECTION_ID).first()
+    if not collection:
         collection = Collection(
             collection_id=DEFAULT_COLLECTION_ID,
             name=DEFAULT_COLLECTION_NAME,
-            description="Default collection automatically created during setup",
+            description="Default collection created during setup",
             website_id=website.website_id,
             website_url="https://localhost/",
             admin_user_id=admin_user.user_id,
@@ -197,69 +199,60 @@ def _ensure_default_collection(db, website: Website, admin_user: User) -> Collec
         )
         db.add(collection)
         db.flush()
-        LOGGER.info(
-            "Created default collection '%s' (id=%s)",
-            collection.name,
-            collection.collection_id,
-        )
+        LOGGER.info("Created default collection '%s'", collection.name)
 
-    assignment = (
+    link = (
         db.query(CollectionUser)
-        .filter(
-            CollectionUser.collection_id == collection.collection_id,
-            CollectionUser.user_id == admin_user.user_id,
-        )
+        .filter_by(collection_id=collection.collection_id, user_id=admin_user.user_id)
         .first()
     )
-    if not assignment:
-        assignment = CollectionUser(
-            collection_id=collection.collection_id,
-            user_id=admin_user.user_id,
-            role="admin",
-            can_upload=True,
-            can_download=True,
-            can_delete=True,
-            assigned_by=admin_user.user_id,
+    if not link:
+        db.add(
+            CollectionUser(
+                collection_id=collection.collection_id,
+                user_id=admin_user.user_id,
+                role="admin",
+                can_upload=True,
+                can_download=True,
+                can_delete=True,
+                assigned_by=admin_user.user_id,
+            )
         )
-        db.add(assignment)
         LOGGER.info("Linked admin '%s' to collection '%s'", admin_user.username, collection.name)
 
     prompt = (
         db.query(SystemPrompt)
-        .filter(
-            SystemPrompt.collection_id == collection.collection_id,
-            SystemPrompt.is_default.is_(True),
-        )
+        .filter_by(collection_id=collection.collection_id, is_default=True)
         .first()
     )
     if not prompt:
-        prompt = SystemPrompt(
-            prompt_id=str(uuid.uuid4()),
-            name=f"Default Prompt - {collection.name}",
-            description="Default AI prompt for the initial collection",
-            system_prompt=(
-                "You are a helpful AI assistant. Answer questions based on the provided context."
-            ),
-            collection_id=collection.collection_id,
-            website_id=website.website_id,
-            is_default=True,
-            is_active=True,
-            model_name="claude-3-haiku-20240307",
-            max_tokens=4000,
-            temperature=0.7,
+        db.add(
+            SystemPrompt(
+                prompt_id=str(uuid.uuid4()),
+                name=f"Default Prompt - {collection.name}",
+                description="Default AI prompt for initial collection",
+                system_prompt="You are a helpful AI assistant. Answer questions based on the provided context.",
+                collection_id=collection.collection_id,
+                website_id=website.website_id,
+                is_default=True,
+                is_active=True,
+                model_name="claude-3-haiku-20240307",
+                max_tokens=4000,
+                temperature=0.7,
+            )
         )
-        db.add(prompt)
         LOGGER.info("Created default prompt for collection '%s'", collection.name)
 
     return collection
 
 
 def main() -> None:
-    LOGGER.info("Starting schema initialization")
+    LOGGER.info("Starting schema initialization...")
     _ensure_database()
 
     engine, db = _get_db_session()
     _perform_schema_migrations(engine)
+
     try:
         website = _ensure_default_website(db)
 
@@ -293,20 +286,14 @@ def main() -> None:
             website_id=website.website_id,
         )
 
-        collection = _ensure_default_collection(db, website, admin_user)
+        _ensure_default_collection(db, website, admin_user)
 
-        # Ensure activity stats row exists
-        stats = db.query(ActivityStats).first()
-        if not stats:
-            stats = ActivityStats()
-            db.add(stats)
-            LOGGER.info("Created default activity statistics row")
+        if not db.query(ActivityStats).first():
+            db.add(ActivityStats())
+            LOGGER.info("Created default ActivityStats record")
 
         db.commit()
-        LOGGER.info("Schema initialization complete")
-        LOGGER.info("Default website: %s (id=%s)", website.name, website.website_id)
-        LOGGER.info("Default collection: %s (id=%s)", collection.name, collection.collection_id)
-        LOGGER.info("Default accounts: superadmin/superadmin123, admin/admin123, user/user123")
+        LOGGER.info("✅ Schema initialization complete!")
     except Exception:
         db.rollback()
         LOGGER.exception("Schema initialization failed")

@@ -23,10 +23,11 @@ import {
   Activity
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { getAssetUrl } from '@/utils/assets';
 
 // Navigation definitions
 const superadminNav = [
-  { title: 'Knowledge Bases', url: '/superadmin', icon: Layers },
+  { title: 'Knowledge Base', url: '/superadmin', icon: Layers },
   { title: 'Users', url: '/superadmin/users', icon: Users },
   { title: 'Chat', url: '/superadmin/chat', icon: MessageSquare },
   { title: 'Activity', url: '/superadmin/activity', icon: Activity },
@@ -113,7 +114,7 @@ export function AppSidebar() {
           <div className="flex items-center gap-3 mb-2">
             <div className="h-10 w-10 rounded-lg border border-logo flex items-center justify-center p-1">
               <img
-                src="/leto.svg"
+                src={getAssetUrl('leto.svg')}
                 alt="Leto Logo"
                 className="h-8 w-8 object-contain"
               />

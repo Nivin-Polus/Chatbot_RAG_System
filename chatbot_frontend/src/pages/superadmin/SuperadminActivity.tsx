@@ -40,6 +40,44 @@ export default function SuperadminActivity() {
   const [isLoading, setIsLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<'all' | '24h' | '7d' | '30d'>('24h');
 
+  const normalizeTimestamp = (rawTimestamp: any): string => {
+    if (!rawTimestamp) {
+      return new Date().toISOString();
+    }
+
+    if (rawTimestamp instanceof Date) {
+      return rawTimestamp.toISOString();
+    }
+
+    if (typeof rawTimestamp === 'number') {
+      return new Date(rawTimestamp).toISOString();
+    }
+
+    if (typeof rawTimestamp === 'string') {
+      const trimmed = rawTimestamp.trim();
+      if (!trimmed) {
+        return new Date().toISOString();
+      }
+
+      const hasOffset = /([zZ]|[+-]\d{2}:?\d{2})$/.test(trimmed);
+      const normalizedString = hasOffset
+        ? trimmed
+        : `${trimmed.replace(/\s+/g, 'T').replace(/T{2,}/g, 'T')}Z`;
+
+      const parsed = new Date(normalizedString);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toISOString();
+      }
+    }
+
+    try {
+      return new Date(rawTimestamp).toISOString();
+    } catch (error) {
+      console.warn('Failed to normalize activity timestamp', rawTimestamp, error);
+      return new Date().toISOString();
+    }
+  };
+
   const fetchActivityData = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -113,7 +151,7 @@ export default function SuperadminActivity() {
   const normalizeActivityItem = (raw: any): ActivityItem => {
     const id = raw?.id || raw?.activity_id || crypto.randomUUID();
     const type = (raw?.type || raw?.activity_type || 'unknown').toString();
-    const timestamp = raw?.timestamp || raw?.created_at || new Date().toISOString();
+    const timestamp = normalizeTimestamp(raw?.timestamp || raw?.created_at || new Date().toISOString());
     const userValue = raw?.user || raw?.username;
     const details = (raw?.details && typeof raw.details === 'object') ? raw.details : null;
     const metadata = (raw?.metadata && typeof raw.metadata === 'object') ? raw.metadata : null;

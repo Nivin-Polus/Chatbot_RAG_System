@@ -202,7 +202,7 @@ export default function SuperadminPrompts() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">Prompts Management</h1>
-            <p className="text-muted-foreground">Manage prompts for knowledge bases</p>
+            <p className="text-muted-foreground">Manage prompts for knowledge base</p>
           </div>
         </div>
 

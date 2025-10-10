@@ -370,7 +370,7 @@ export default function UserAdminDashboard() {
         collection_ids: selectedCollectionId ? [selectedCollectionId] : [],
       };
 
-      if (userFormData.password) {
+      if (userFormData.password && (!editingUser || editingUser.user_id !== user?.user_id)) {
         payload.password = userFormData.password;
       }
 
@@ -680,6 +680,8 @@ export default function UserAdminDashboard() {
     );
   });
 
+  const isEditingSelf = editingUser?.user_id === user?.user_id;
+
   const filteredFiles = files.filter((file) =>
     file.file_name?.toLowerCase().includes(fileSearchTerm.toLowerCase())
   );
@@ -733,8 +735,9 @@ export default function UserAdminDashboard() {
         {collection ? (
           <Card>
             <CardHeader>
-              <CardTitle>Knowledge Base</CardTitle>
-             
+              <CardTitle>
+              {collection.name ? `  ${collection.name}` : ''} Knowledge Base
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-1 text-sm text-muted-foreground">
@@ -897,7 +900,12 @@ export default function UserAdminDashboard() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="password">
-                        Password {editingUser ? '(optional – leave blank to keep current)' : '*'}
+                        Password
+                        {editingUser
+                          ? isEditingSelf
+                            ? ' (manage from Settings)'
+                            : ' (optional — retain existing if left blank)'
+                          : ' *'}
                       </Label>
                       <Input
                         id="password"
@@ -905,7 +913,13 @@ export default function UserAdminDashboard() {
                         value={userFormData.password}
                         onChange={(e) => setUserFormData({ ...userFormData, password: e.target.value })}
                         required={!editingUser}
+                        disabled={isEditingSelf}
                       />
+                      {isEditingSelf && (
+                        <p className="text-xs text-muted-foreground">
+                          Update your password from the Settings page.
+                        </p>
+                      )}
                     </div>
                   </div>
                   <DialogFooter>
@@ -936,7 +950,7 @@ export default function UserAdminDashboard() {
                         <Database className="h-5 w-5" />
                         Files
                       </CardTitle>
-                      <CardDescription>View and manage files available to this knowledge base.</CardDescription>
+                      
                     </div>
                     <Button onClick={() => setIsFileDialogOpen(true)}>
                       <Upload className="mr-2 h-4 w-4" />

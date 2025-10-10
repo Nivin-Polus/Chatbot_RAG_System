@@ -10,10 +10,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { MessageSquare, Send, Loader2, Bot, User } from 'lucide-react';
+import { User, Send, Loader2, MessageSquare } from 'lucide-react';
 import { ChatMessage } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost } from '@/utils/api';
+import { getAssetUrl } from '@/utils/assets';
 
 type CollectionSummary = {
   collection_id: string;
@@ -37,6 +38,7 @@ export default function SuperadminChat() {
   const stopStreamingRef = useRef<(() => void) | null>(null);
   const [isAutoScroll, setIsAutoScroll] = useState(true);
   const isAutoScrollRef = useRef(true);
+  const hasMessages = messages.length > 0;
 
   const disableAutoScroll = useCallback(() => {
     if (!isAutoScrollRef.current) {
@@ -465,43 +467,58 @@ export default function SuperadminChat() {
 
       const nextKey = () => `${messageId}-node-${keyCounter++}`;
 
+      const looksLikeFileName = (value: string | null | undefined) =>
+        value ? /\.(pdf|docx?|xlsx?|pptx?|txt|csv|json|md)$/i.test(value) : false;
+
       const extractSourceInfo = (raw: string) => {
         let displayText = raw.trim();
         let downloadName: string | null = null;
+        let sourceRef: string | null = null;
+
+        const linkMatch = raw.match(/\[([^\]]+)\]\(([^)]+)\)/);
+        if (linkMatch) {
+          displayText = linkMatch[1].trim() || displayText;
+          sourceRef = linkMatch[2].trim();
+        }
 
         const fromMatch = raw.match(/\(from\s+(.+?)\)$/i);
         if (fromMatch) {
-          downloadName = fromMatch[1].trim();
-        }
-
-        if (!downloadName) {
-          const withoutPrefix = raw.replace(/^source\s*\d+[:\-]?\s*/i, '').trim();
-          if (withoutPrefix && withoutPrefix !== raw.trim()) {
-            downloadName = withoutPrefix;
+          const reference = fromMatch[1].trim();
+          if (looksLikeFileName(reference)) {
+            downloadName = reference;
+          } else if (!sourceRef) {
+            sourceRef = reference;
           }
         }
 
         if (!downloadName) {
-          downloadName = raw.trim();
+          const withoutPrefix = raw.replace(/^source\s*\d+[:\-]?\s*/i, '').trim();
+          if (withoutPrefix && withoutPrefix !== raw.trim() && looksLikeFileName(withoutPrefix)) {
+            downloadName = withoutPrefix;
+          }
+        }
+
+        if (!downloadName && !sourceRef) {
+          const quoted = raw.replace(/^"|"$/g, '').replace(/^'|'$/g, '').trim();
+          if (looksLikeFileName(quoted)) {
+            downloadName = quoted;
+          }
         }
 
         if (downloadName) {
           downloadName = downloadName.replace(/^"|"$/g, '').replace(/^'|'$/g, '').trim();
+          displayText = downloadName || displayText;
         }
 
-        const hasKnownExtension = downloadName
-          ? /\.(pdf|docx?|xlsx?|pptx?|txt|csv|json|md)$/i.test(downloadName)
-          : false;
-
-        if (!hasKnownExtension) {
-          downloadName = null;
+        if (!displayText) {
+          displayText = raw.trim();
         }
 
-        if (downloadName) {
-          displayText = downloadName;
-        }
-
-        return { displayText, downloadName };
+        return {
+          displayText,
+          downloadName,
+          sourceRef,
+        };
       };
 
       const createInlineElements = (line: string, block: boolean = true): ReactNode[] => {
@@ -523,14 +540,15 @@ export default function SuperadminChat() {
             pushText(line.slice(lastIndex, match.index));
           }
 
-          const [, label, sourceRef] = match;
-          const { displayText, downloadName } = extractSourceInfo(label);
+          const [, label, linkTarget] = match;
+          const { displayText, downloadName, sourceRef: inlineReference } = extractSourceInfo(label);
+          const reference = inlineReference ?? linkTarget ?? downloadName ?? label;
           elements.push(
             <button
               key={nextKey()}
               type="button"
               className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2`}
-              onClick={() => handleDownloadSource(sourceRef, downloadName ?? label)}
+              onClick={() => handleDownloadSource(reference, downloadName ?? displayText ?? label)}
             >
               {displayText.trim() || 'Download source'}
             </button>
@@ -653,14 +671,15 @@ export default function SuperadminChat() {
 
         if (inSourcesSection && /^-\s*(.+)$/.test(trimmed)) {
           const label = trimmed.replace(/^-\s*/, '');
-          const { displayText, downloadName } = extractSourceInfo(label);
-          if (downloadName) {
+          const { displayText, downloadName, sourceRef } = extractSourceInfo(label);
+          const reference = sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
+          if (reference) {
             nodes.push(
               <button
                 key={nextKey()}
                 type="button"
                 className="block text-left text-primary underline underline-offset-2"
-                onClick={() => handleDownloadSource(downloadName, displayText)}
+                onClick={() => handleDownloadSource(reference, downloadName ?? displayText)}
               >
                 {displayText}
               </button>
@@ -735,7 +754,7 @@ export default function SuperadminChat() {
       <div className="flex flex-col space-y-6 min-h-[calc(100vh-140px)]">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-foreground dark:text-white">Leto</h1>
+            <h1 className="text-3xl font-bold text-foreground dark:text-white">Leto Chat</h1>
             
           </div>
           <div className="flex items-center space-x-4">
@@ -761,25 +780,25 @@ export default function SuperadminChat() {
 
         <Card className="flex flex-col min-h-[calc(100vh-220px)] bg-card dark:bg-gray-900">
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-foreground dark:text-white">
-                <MessageSquare className="h-5 w-5" />
-              
-              </CardTitle>
-              <Button variant="outline" onClick={clearChat} size="sm">
-                Clear Chat
-              </Button>
+            <div className="flex items-center justify-end">
+              {hasMessages && (
+                <Button variant="outline" onClick={clearChat} size="sm">
+                  Clear Chat
+                </Button>
+              )}
             </div>
           </CardHeader>
-          <CardContent className="flex-1 flex flex-col min-h-0">
+          <CardContent className="relative flex-1 flex flex-col min-h-0 overflow-hidden p-0 max-h-[calc(85vh-10rem)]">
+
             {!selectedCollection ? (
               <div className="flex-1 flex items-center justify-center text-muted-foreground dark:text-gray-300">
+
                 Please select a knowledge base to start chatting
               </div>
             ) : (
-              <>
+              <div className="flex flex-1 flex-col min-h-0">
                 <div
-                  className="flex-1 overflow-y-auto space-y-4 mb-4 pr-2"
+                  className="flex-1 overflow-y-auto space-y-4 px-4 pt-4"
                   ref={messagesContainerRef}
                   onScroll={handleMessageScroll}
                   onWheel={handleWheel}
@@ -787,54 +806,73 @@ export default function SuperadminChat() {
                   onTouchMove={handleTouchMove}
                 >
                   {messages.length === 0 ? (
-                    <div className="flex items-center justify-center h-full text-muted-foreground dark:text-gray-300">
-                      <div className="text-center">
-                        <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                        <p>Start a conversation by typing a message below</p>
+                    <div className="flex items-center justify-center h-full text-muted-foreground dark:text-gray-300 h-[50vh]">
+                      <div className="flex flex-col items-center gap-3 text-center">
+                        <MessageSquare className="h-12 w-12 opacity-50" />
+                        <p className="text-base font-medium">You can start the conversation by sending a message below.</p>
                       </div>
                     </div>
                   ) : (
-                    messages.map((message) => (
-                      <div
-                        key={message.id}
-                        className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                      >
+                    messages.map((message) => {
+                      const isUser = message.role === 'user';
+                      return (
                         <div
-                          className={`rounded-lg px-4 py-3 ${
-                            message.role === 'user'
-                              ? 'bg-primary text-primary-foreground max-w-[70%] dark:text-white'
-                              : 'bg-muted border text-muted-foreground max-w-[85%] dark:bg-gray-800 dark:text-gray-300'
-                          }`}
+                          key={message.id}
+                          className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
                         >
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              {message.role === 'user' ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
-                              <span className="text-xs font-medium opacity-70">
-                                {message.role === 'user' ? 'You ' : 'AI Assistant'}
-                              </span>
+                          <div
+                            className={`rounded-xl px-4 py-3 shadow-sm ${
+                              isUser
+                                ? 'bg-primary text-primary-foreground max-w-[65%] dark:text-white'
+                                : 'bg-muted border border-border/60 text-foreground max-w-[80%] dark:bg-gray-800 dark:text-gray-100'
+                            }`}
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                              <div className="flex items-center gap-2.5">
+                                <div
+                                  className={`flex h-8 w-8 items-center justify-center rounded-full ${
+                                    isUser
+                                      ? 'bg-primary-foreground/20 text-primary-foreground'
+                                      : 'bg-white text-foreground shadow-sm dark:bg-gray-900/80 dark:text-gray-100'
+                                  }`}
+                                >
+                                  {isUser ? (
+                                    <User className="h-4 w-4" />
+                                  ) : (
+                                    <img src={getAssetUrl('leto.svg')} alt="Leto logo" className="h-4 w-4" />
+                                  )}
+                                </div>
+                                <span
+                                  className={`text-sm font-semibold leading-none ${
+                                    isUser ? 'text-primary-foreground dark:text-white' : 'text-foreground dark:text-gray-100'
+                                  }`}
+                                >
+                                  {isUser ? 'You' : 'Leto Assistant'}
+                                </span>
+                              </div>
+                              <p
+                                className={`text-xs ${
+                                  isUser
+                                    ? 'text-primary-foreground/70 dark:text-white/70'
+                                    : 'text-muted-foreground dark:text-gray-400'
+                                }`}
+                              >
+                                {formatTime(message.timestamp)}
+                              </p>
                             </div>
-                            <p
-                              className={`text-xs ${
-                                message.role === 'user'
-                                  ? 'text-primary-foreground/70 dark:text-white/70'
-                                  : 'text-muted-foreground dark:text-gray-300'
-                              }`}
-                            >
-                              {formatTime(message.timestamp)}
-                            </p>
-                          </div>
-                          <div className="space-y-2 text-sm">
-                            {renderMessageContent(message.content, message.id)}
+                            <div className="space-y-2 text-sm leading-relaxed">
+                              {renderMessageContent(message.content, message.id)}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                   {isLoading && !isStreaming && (
                     <div className="flex justify-start">
                       <div className="bg-muted border rounded-lg px-4 py-3 dark:bg-gray-800 dark:text-gray-300">
                         <div className="flex items-center space-x-2">
-                          <Bot className="h-4 w-4" />
+                          <img src={getAssetUrl('leto.svg')} alt="Leto logo" className="h-4 w-4" />
                           <div className="flex items-center space-x-2">
                             <Loader2 className="h-4 w-4 animate-spin" />
                             <span className="text-sm text-muted-foreground dark:text-gray-300">
@@ -848,7 +886,10 @@ export default function SuperadminChat() {
                   <div ref={messagesEndRef} />
                 </div>
 
-                <form onSubmit={sendMessage} className="flex space-x-2">
+                <form
+                  onSubmit={sendMessage}
+                  className="sticky bottom-0 left-0 right-0 z-10 flex items-center gap-2 bg-card p-3 border-t border-border/60 dark:bg-gray-900"
+                >
                   <input
                     type="text"
                     value={inputMessage}
@@ -870,7 +911,7 @@ export default function SuperadminChat() {
                     <Send className="h-4 w-4" />
                   </Button>
                 </form>
-              </>
+              </div>
             )}
           </CardContent>
         </Card>

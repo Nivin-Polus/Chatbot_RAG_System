@@ -33,70 +33,79 @@ const App = () => (
       <TooltipProvider>
         <Toaster />
         <Sonner />
-        <BrowserRouter>
+        <BrowserRouter basename="/chatbot">
           <AuthProvider>
             <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/access-denied" element={<AccessDenied />} />
-            
-            {/* Superadmin Routes */}
-            <Route
-              path="/superadmin/*"
-              element={
-                <ProtectedRoute allowedRoles={['super_admin', 'superadmin']}>
-                  <Routes>
-                    <Route index element={<SuperadminDashboard />} />
-                    <Route path="knowledge-base/:id" element={<KnowledgeBaseDetails />} />
-                    <Route path="files" element={<SuperadminFiles />} />
-                    <Route path="prompts" element={<SuperadminPrompts />} />
-                    <Route path="users" element={<SuperadminUsers />} />
-                    <Route path="chat" element={<SuperadminChat />} />
-                    <Route path="activity" element={<SuperadminActivity />} />
-                    <Route path="settings" element={<SuperadminSettings />} />
-                  </Routes>
-                </ProtectedRoute>
-              }
-            />
+              {/* Public Routes */}
+              <Route path="/login" element={<Login />} />
+              <Route path="/access-denied" element={<AccessDenied />} />
 
-            {/* User Admin Routes */}
-            <Route
-              path="/useradmin/*"
-              element={
-                <ProtectedRoute allowedRoles={['useradmin', 'user_admin']}>
-                  <Routes>
-                    <Route index element={<Navigate to="knowledge-base" replace />} />
-*** End Patch
-                    <Route path="users" element={<UserAdminDashboard />} />
-                    <Route path="knowledge-base" element={<UserAdminDashboard />} />
-                    <Route path="chat" element={<UserAdminChat />} />
-                    <Route path="settings" element={<UserAdminSettings />} />
-                  </Routes>
-                </ProtectedRoute>
-              }
-            />
+              {/* Superadmin Routes */}
+              <Route
+                path="/superadmin/*"
+                element={
+                  <ProtectedRoute allowedRoles={["super_admin", "superadmin"]}>
+                    <Routes>
+                      <Route index element={<SuperadminDashboard />} />
+                      <Route
+                        path="knowledge-base/:id"
+                        element={<KnowledgeBaseDetails />}
+                      />
+                      <Route path="files" element={<SuperadminFiles />} />
+                      <Route path="prompts" element={<SuperadminPrompts />} />
+                      <Route path="users" element={<SuperadminUsers />} />
+                      <Route path="chat" element={<SuperadminChat />} />
+                      <Route path="activity" element={<SuperadminActivity />} />
+                      <Route path="settings" element={<SuperadminSettings />} />
+                    </Routes>
+                  </ProtectedRoute>
+                }
+              />
 
-            {/* Regular User Routes */}
-            <Route
-              path="/app/*"
-              element={
-                <ProtectedRoute allowedRoles={['user']}>
-                  <Routes>
-                    <Route index element={<Navigate to="/app/chat" replace />} />
-                    <Route path="chat" element={<UserChat />} />
-                  </Routes>
-                </ProtectedRoute>
-              }
-            />
+              {/* User Admin Routes */}
+              <Route
+                path="/useradmin/*"
+                element={
+                  <ProtectedRoute allowedRoles={["useradmin", "user_admin"]}>
+                    <Routes>
+                      <Route
+                        index
+                        element={<Navigate to="knowledge-base" replace />}
+                      />
+                      <Route path="users" element={<UserAdminDashboard />} />
+                      <Route path="knowledge-base" element={<UserAdminDashboard />} />
+                      <Route path="chat" element={<UserAdminChat />} />
+                      <Route path="settings" element={<UserAdminSettings />} />
+                    </Routes>
+                  </ProtectedRoute>
+                }
+              />
 
-            {/* Default redirect */}
-            <Route path="/" element={<Navigate to="/login" replace />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </AuthProvider>
-      </BrowserRouter>
-    </TooltipProvider>
+              {/* Regular User Routes */}
+              <Route
+                path="/app/*"
+                element={
+                  <ProtectedRoute allowedRoles={["user"]}>
+                    <Routes>
+                      <Route index element={<Navigate to="chat" replace />} />
+                      <Route path="chat" element={<UserChat />} />
+                    </Routes>
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Default redirects */}
+              <Route path="/" element={<Navigate to="/login" replace />} />
+
+              {/* Catch all */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </AuthProvider>
+        </BrowserRouter>
+      </TooltipProvider>
     </ThemeProvider>
   </QueryClientProvider>
 );
 
 export default App;
+ 

@@ -22,7 +22,7 @@ from app.api import (
 )
 from app.core.database import init_database, create_database_if_not_exists, get_db
 from app.config import settings
-from app.core.auth import get_token_from_credentials
+from app.core.auth import get_token_from_credentials, get_password_hash
 from app.services.health_monitor import HealthMonitorService
 
 
@@ -103,7 +103,6 @@ async def _initialize_default_users():
         from app.models.user import User
         from app.models.collection import Collection, CollectionUser
         from app.models.system_prompt import SystemPrompt
-        from passlib.context import CryptContext
 
         # Get database session
         db_gen = get_db()
@@ -114,9 +113,6 @@ async def _initialize_default_users():
             existing_super_admin = db.query(User).filter(User.role == "super_admin").first()
             existing_user_admin = db.query(User).filter(User.username == "admin").first()
             existing_regular_user = db.query(User).filter(User.username == "user").first()
-
-            # Create password context
-            pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
             # Check if default website already exists
             existing_website = db.query(Website).filter(Website.domain == "localhost").first()
@@ -142,7 +138,7 @@ async def _initialize_default_users():
                 super_admin = User(
                     username="superadmin",
                     email="superadmin@chatbot.local",
-                    password_hash=pwd_context.hash("superadmin123"),
+                    password_hash=get_password_hash("superadmin123"),
                     full_name="Super Administrator",
                     role="super_admin",
                     website_id=None,
@@ -160,7 +156,7 @@ async def _initialize_default_users():
                 user_admin = User(
                     username="admin",
                     email="admin@chatbot.local",
-                    password_hash=pwd_context.hash("admin123"),
+                    password_hash=get_password_hash("admin123"),
                     full_name="Administrator",
                     role="user_admin",
                     website_id=default_website.website_id,
@@ -178,7 +174,7 @@ async def _initialize_default_users():
                 regular_user = User(
                     username="user",
                     email="user@chatbot.local",
-                    password_hash=pwd_context.hash("user123"),
+                    password_hash=get_password_hash("user123"),
                     full_name="Regular User",
                     role="user",
                     website_id=default_website.website_id,

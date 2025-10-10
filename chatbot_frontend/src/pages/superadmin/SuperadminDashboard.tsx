@@ -51,6 +51,7 @@ export default function SuperadminDashboard() {
     name: '',
     description: '',
     website_url: '',
+    admin_email: '',
     is_active: true,
   });
 
@@ -150,6 +151,7 @@ export default function SuperadminDashboard() {
       name: collection.name,
       description: collection.description || '',
       website_url: collection.website_url || '',
+      admin_email: collection.admin_email || '',
       is_active: collection.is_active,
     });
     setIsEditDialogOpen(true);
@@ -166,6 +168,7 @@ export default function SuperadminDashboard() {
           name: editFormData.name,
           description: editFormData.description,
           website_url: editFormData.website_url || null,
+          admin_email: editFormData.admin_email || null,
           is_active: editFormData.is_active,
         },
         user?.access_token
@@ -332,6 +335,16 @@ export default function SuperadminDashboard() {
                       placeholder="https://example.com"
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-admin-email">Admin Email</Label>
+                    <Input
+                      id="edit-admin-email"
+                      type="email"
+                      value={editFormData.admin_email}
+                      onChange={(e) => setEditFormData({ ...editFormData, admin_email: e.target.value })}
+                      placeholder="admin@example.com"
+                    />
+                  </div>
                   <div className="flex items-center space-x-2">
                     <Switch
                       id="edit-is-active"
@@ -351,10 +364,7 @@ export default function SuperadminDashboard() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Database className="h-5 w-5" />
-              
-            </CardTitle>
+           
             <CardDescription>
               {collections.length} knowledge base(s) total
             </CardDescription>

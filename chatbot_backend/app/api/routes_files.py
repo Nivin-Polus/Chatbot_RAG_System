@@ -1,6 +1,6 @@
 # app/api/routes_files.py
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Form, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Form, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -41,14 +41,42 @@ file_metadata_db = {}
 # ------------------------
 # Upload file endpoint
 # ------------------------
-@router.post("/upload", response_model=List[FileMeta])
+@router.post("/upload")
 async def upload_file(
-    uploaded_files: Optional[List[UploadFile]] = File(None, alias="uploaded_files"),
-    uploaded_file: Optional[UploadFile] = File(None, alias="uploaded_file"),
-    collection_id: Optional[str] = Form(None),
+    request: Request,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    """Handle file upload with manual form parsing to work through Apache proxy"""
+    
+    logger.info("[UPLOAD] Endpoint called")
+    
+    # Parse form data manually to avoid Pydantic validation issues
+    try:
+        form_data = await request.form()
+        logger.info(f"[UPLOAD] Form fields received: {list(form_data.keys())}")
+    except Exception as e:
+        logger.error(f"[UPLOAD ERROR] Failed to parse form data: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid form data: {str(e)}")
+    
+    # Extract collection_id
+    collection_id = form_data.get("collection_id")
+    logger.info(f"[UPLOAD] collection_id: {collection_id}")
+    
+    # Extract files from ANY field name (uploaded_files, uploaded_file, file, files, etc.)
+    files_to_process: List[UploadFile] = []
+    
+    for key, value in form_data.items():
+        if hasattr(value, 'filename'):  # It's a file
+            files_to_process.append(value)
+            logger.info(f"[UPLOAD] Found file in field '{key}': {value.filename}")
+    
+    if not files_to_process:
+        logger.error(f"[UPLOAD ERROR] No files found. Form fields: {list(form_data.keys())}")
+        raise HTTPException(status_code=400, detail="No files provided for upload")
+    
+    logger.info(f"[UPLOAD] Processing {len(files_to_process)} files")
+    
     # Check if user has admin role
     if current_user.get("role") not in ["admin", "user_admin", "super_admin"]:
         raise HTTPException(status_code=403, detail="Only admin users can upload files")
@@ -106,16 +134,6 @@ async def upload_file(
     if not user_website_id:
         logger.info(f"Allowing file upload without website context for user: {current_user['username']}")
     
-    # Consolidate provided files to support both single and multiple upload form fields
-    files_to_process: List[UploadFile] = []
-    if uploaded_files:
-        files_to_process.extend(uploaded_files)
-    if uploaded_file:
-        files_to_process.append(uploaded_file)
-
-    if not files_to_process:
-        raise HTTPException(status_code=400, detail="No files provided for upload")
-
     results: List[FileMeta] = []
 
     # Validate file type
@@ -286,7 +304,6 @@ async def list_files(
         if DATABASE_AVAILABLE and db:
             # Get files from database
             from app.models.file_metadata import FileMetadata
-
             from app.models.user import User
             from app.models.collection import Collection, CollectionUser
 

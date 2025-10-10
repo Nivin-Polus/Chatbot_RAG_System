@@ -136,6 +136,11 @@ export default function SuperadminSettings() {
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (!user?.user_id) {
+      toast.error('Missing user identifier. Please re-login and try again.');
+      return;
+    }
+
     if (passwordData.newPassword !== passwordData.confirmPassword) {
       toast.error('New passwords do not match');
       return;
@@ -152,7 +157,7 @@ export default function SuperadminSettings() {
       const response = await apiPost(
         `${import.meta.env.VITE_API_BASE_URL}/users/reset-password`,
         {
-          current_password: passwordData.currentPassword,
+          user_id: user.user_id,
           new_password: passwordData.newPassword,
         },
         user?.access_token

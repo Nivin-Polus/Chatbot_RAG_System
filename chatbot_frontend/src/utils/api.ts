@@ -7,6 +7,38 @@ export const setGlobalLogout = (logoutFn: () => void) => {
   globalLogout = logoutFn;
 };
 
+const formatErrorMessage = (payload: unknown, response: Response): string => {
+  if (!payload) {
+    return `Error ${response.status}: ${response.statusText}`;
+  }
+
+  if (typeof payload === 'string') {
+    return payload;
+  }
+
+  if (Array.isArray(payload)) {
+    const messages = payload
+      .map((item) =>
+        typeof item === 'object' && item && 'msg' in item ? String(item.msg) : JSON.stringify(item)
+      )
+      .filter(Boolean);
+    if (messages.length) {
+      return messages.join(', ');
+    }
+  }
+
+  if (typeof payload === 'object' && payload) {
+    if ('detail' in payload && typeof (payload as { detail?: unknown }).detail === 'string') {
+      return String((payload as { detail: string }).detail);
+    }
+    if ('message' in payload && typeof (payload as { message?: unknown }).message === 'string') {
+      return String((payload as { message: string }).message);
+    }
+  }
+
+  return `Error ${response.status}: ${response.statusText}`;
+};
+
 // API utility function that automatically handles 401 responses
 export const apiRequest = async (
   url: string,
@@ -35,15 +67,16 @@ export const apiRequest = async (
       return response;
     }
 
-    // Handle other error status codes
-    if (!response.ok && response.status !== 401) {
+    if (!response.ok) {
+      let errorPayload: unknown = null;
+      try {
+        errorPayload = await response.clone().json();
+      } catch {
+        // Ignore JSON parse errors
+      }
+
       if (showErrorToast) {
-        try {
-          const errorData = await response.json();
-          toast.error(errorData.detail || errorData.message || 'An error occurred');
-        } catch {
-          toast.error(`Error ${response.status}: ${response.statusText}`);
-        }
+        toast.error(formatErrorMessage(errorPayload, response));
       }
     }
 
@@ -53,33 +86,13 @@ export const apiRequest = async (
       // Re-throw 401 errors without additional handling
       throw error;
     }
-    
+
     // Handle network errors
     if (showErrorToast) {
       toast.error('Network error. Please check your connection.');
     }
     throw error;
   }
-};
-
-// Convenience function for authenticated requests
-export const authenticatedRequest = async (
-  url: string,
-  options: RequestInit = {},
-  token: string,
-  showErrorToast: boolean = true,
-  logoutOn401: boolean = true
-): Promise<Response> => {
-  const headers = {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
-    ...options.headers,
-  };
-
-  return apiRequest(url, {
-    ...options,
-    headers,
-  }, showErrorToast, logoutOn401);
 };
 
 // Convenience function for GET requests
