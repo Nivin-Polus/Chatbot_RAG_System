@@ -12,7 +12,7 @@ export default function AccessDenied() {
         <div className="space-y-2">
           <h1 className="text-4xl font-bold">Access Denied</h1>
           <p className="text-xl text-muted-foreground">
-            You don't have permission to access this resource
+            You don't have permission to access this resources
           </p>
         </div>
         <Button onClick={() => navigate(-1)} variant="outline">
