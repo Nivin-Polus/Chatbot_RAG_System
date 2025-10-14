@@ -13,6 +13,7 @@ from app.services.file_storage import FileStorageService
 from app.config import settings
 from app.core.cache import get_cache
 from app.services.activity_tracker import activity_tracker
+from app.utils.file_sanitizer import sanitize_filename, validate_file_size, validate_file_extension
 from pydantic import BaseModel
 import logging
 from uuid import uuid4
@@ -140,6 +141,7 @@ def _user_can_download_file(user: dict, file_id: Optional[str], collection_id: O
 # ------------------------
 @router.post("/upload", response_model=List[FileMeta])
 async def upload_file(
+    request: Request,
     uploaded_files: Optional[List[UploadFile]] = File(None, alias="uploaded_files"),
     uploaded_file: Optional[UploadFile] = File(None, alias="uploaded_file"),
     collection_id: Optional[str] = Form(None),
@@ -211,13 +213,16 @@ async def upload_file(
 
     # --- Fallback: scan form manually for extra files ---
     if len(files_to_process) <= 1:
-        form_data = await Request.form(Request)
-        for key in form_data.keys():
-            values = form_data.getlist(key)
-            for item in values:
-                if hasattr(item, "filename") and item.filename and item not in files_to_process:
-                    files_to_process.append(item)
-                    logger.info(f"[UPLOAD Fallback] Found extra file in '{key}': {item.filename}")
+        try:
+            form_data = await request.form()
+            for key in form_data.keys():
+                values = form_data.getlist(key)
+                for item in values:
+                    if hasattr(item, "filename") and item.filename and item not in files_to_process:
+                        files_to_process.append(item)
+                        logger.info(f"[UPLOAD Fallback] Found extra file in '{key}': {item.filename}")
+        except Exception as e:
+            logger.warning(f"[UPLOAD] Failed to parse form data for fallback: {e}")
 
     if not files_to_process:
         raise HTTPException(status_code=400, detail="No files provided for upload")
@@ -228,23 +233,35 @@ async def upload_file(
 
     allowed_extensions = {ext.strip().lower() for ext in settings.ALLOWED_FILE_TYPES.split(',') if ext.strip()}
 
-    for file_obj in files_to_process:
-        filename = file_obj.filename
-        ext = filename.split('.')[-1].lower()
+    for uploaded_file in files_to_process:
+        original_filename = uploaded_file.filename
+        
+        # Sanitize filename to prevent path traversal
+        safe_filename = sanitize_filename(original_filename)
+        logger.info(f"[UPLOAD] Sanitized filename: {original_filename} -> {safe_filename}")
+        
+        # Validate file extension
+        if not validate_file_extension(safe_filename, allowed_extensions):
+            raise HTTPException(status_code=400, detail=f"File type not allowed: {original_filename}")
 
-        if ext not in allowed_extensions:
-            raise HTTPException(status_code=400, detail=f"File type not allowed: {filename}")
-
-        # ✅ Read file once and reuse
-        content = await file_obj.read()
+        # Read file content once
+        content = await uploaded_file.read()
         if not content:
-            raise HTTPException(status_code=400, detail=f"Uploaded file is empty: {filename}")
+            raise HTTPException(status_code=400, detail=f"Uploaded file is empty: {original_filename}")
+        
+        # Validate file size
+        file_size = len(content)
+        if not validate_file_size(file_size, settings.MAX_FILE_SIZE_MB):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"File too large: {original_filename}. Maximum size is {settings.MAX_FILE_SIZE_MB}MB"
+            )
 
         try:
-            text_chunks = parse_file(filename, content)
-        except Exception as e:
-            logger.error(f"[UPLOAD ERROR] Failed to parse {filename}: {str(e)}")
-            raise HTTPException(status_code=400, detail=f"Failed to parse {filename}: {str(e)}")
+            text_chunks = parse_file(safe_filename, content)
+        except Exception as parse_error:
+            logger.error(f"[UPLOAD ERROR] Failed to parse file {safe_filename}: {str(parse_error)}")
+            raise HTTPException(status_code=400, detail=f"Failed to parse file {safe_filename}: {str(parse_error)}")
 
         # --- Save file using content only ---
         file_metadata = file_storage_service.save_file_with_website(
@@ -252,8 +269,8 @@ async def upload_file(
             website_id=user_website_id,
             db=db,
             collection_id=collection_id,
-            filename=filename,
-            file_content=content
+            filename=safe_filename,
+            file_content=content,
         )
         file_id = file_metadata.file_id
 
@@ -263,7 +280,7 @@ async def upload_file(
         for i, chunk in enumerate(text_chunks):
             chunk_metadata = {
                 "file_id": file_id,
-                "file_name": filename,
+                "file_name": safe_filename,
                 "chunk_index": i,
                 "text": chunk,
                 "website_id": user_website_id,
@@ -277,7 +294,7 @@ async def upload_file(
         # --- Store metadata for response ---
         metadata = FileMeta(
             file_id=file_id,
-            file_name=filename,
+            file_name=safe_filename,
             uploaded_by=current_user.get("username", "unknown"),
             uploader_id=uploader_id,
             upload_timestamp=file_metadata.upload_timestamp.isoformat() if file_metadata.upload_timestamp else None,
@@ -288,11 +305,12 @@ async def upload_file(
         results.append(metadata)
 
         # --- Log activity ---
+        ext = safe_filename.split('.')[-1].lower() if '.' in safe_filename else 'unknown'
         activity_tracker.log_activity(
             activity_type="file_upload",
             user=current_user["username"],
             details={
-                "file_name": filename,
+                "file_name": safe_filename,
                 "file_id": file_id,
                 "file_size": file_metadata.file_size,
                 "file_type": ext,

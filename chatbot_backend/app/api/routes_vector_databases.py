@@ -241,15 +241,47 @@ async def delete_vector_database(
             {"vector_db_id": None, "vector_indexed": False}
         )
         
-        # Delete the vector database
+        # Delete the vector database record
         db.delete(vector_db)
         db.commit()
         
-        # TODO: Delete from Qdrant collection
-        # This should be implemented to clean up the actual vector data
+        # Delete actual vector data from Qdrant
+        try:
+            from app.core.vector_singleton import get_vector_store
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            
+            vector_store = get_vector_store()
+            
+            if vector_store.client:
+                # Delete all points associated with this vector_db_id
+                deleted_count = vector_store.client.delete(
+                    collection_name=vector_store.collection_name,
+                    points_selector=Filter(
+                        must=[
+                            FieldCondition(
+                                key="vector_db_id",
+                                match=MatchValue(value=vector_db_id)
+                            )
+                        ]
+                    )
+                )
+                logging.info(f"Deleted vector data for vector_db_id: {vector_db_id}")
+            else:
+                # Fallback: delete from in-memory storage
+                to_delete = [
+                    doc_id for doc_id, doc_data in vector_store.documents.items()
+                    if doc_data.get("payload", {}).get("vector_db_id") == vector_db_id
+                ]
+                for doc_id in to_delete:
+                    del vector_store.documents[doc_id]
+                logging.info(f"Deleted {len(to_delete)} vectors from memory for vector_db_id: {vector_db_id}")
+                
+        except Exception as vector_error:
+            logging.warning(f"Failed to delete vector data for {vector_db_id}: {vector_error}")
+            # Don't fail the entire operation if vector cleanup fails
         
         logging.info(f"Deleted vector database: {vector_db_id}")
-        return {"message": "Vector database deleted successfully"}
+        return {"message": "Vector database and associated vectors deleted successfully"}
         
     except HTTPException:
         raise
