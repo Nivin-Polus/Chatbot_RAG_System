@@ -367,7 +367,7 @@ async def list_files(
 # ------------------------
 # Download file endpoint
 # ------------------------
-@router.get("/download/by-name/{collection_id}/{file_name}")
+@router.get("/download/by-name/{collection_id}/{file_name:path}")
 async def download_file_by_name(
     collection_id: str,
     file_name: str,
@@ -376,15 +376,33 @@ async def download_file_by_name(
 ):
     """Download original file by collection and file name."""
     from app.models.file_metadata import FileMetadata
+    from urllib.parse import unquote
+    from sqlalchemy import or_, func
 
-    file_record = (
-        db.query(FileMetadata)
-        .filter(
-            FileMetadata.collection_id == collection_id,
-            FileMetadata.file_name == file_name,
+    decoded_name = unquote(file_name)
+    sanitized_name = None
+    try:
+        sanitized_name = sanitize_filename(decoded_name)
+    except Exception:
+        sanitized_name = None
+
+    lookup_names = [decoded_name]
+    if sanitized_name and sanitized_name != decoded_name:
+        lookup_names.append(sanitized_name)
+
+    conditions = [FileMetadata.file_name == name for name in lookup_names if name]
+    if decoded_name:
+        conditions.append(func.lower(FileMetadata.file_name) == decoded_name.lower())
+
+    file_record = None
+    if conditions:
+        file_record = (
+            db.query(FileMetadata)
+            .filter(FileMetadata.collection_id == collection_id)
+            .filter(or_(*conditions))
+            .order_by(FileMetadata.upload_timestamp.desc())
+            .first()
         )
-        .first()
-    )
 
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
