@@ -438,6 +438,9 @@ async def download_file(
         user_id = current_user.get("user_id")
         user_website_id = current_user.get("website_id")
 
+        requested_identifier = file_id
+        resolved_file_id = file_id
+
         db_metadata = None
         if DATABASE_AVAILABLE and db:
             from app.models.file_metadata import FileMetadata
@@ -446,7 +449,37 @@ async def download_file(
         cached_metadata = file_metadata_db.get(file_id)
 
         if not db_metadata and not cached_metadata:
-            raise HTTPException(status_code=404, detail="File metadata not found")
+            fallback_db_metadata = None
+            fallback_cached_metadata = None
+
+            if DATABASE_AVAILABLE and db:
+                fallback_db_metadata = (
+                    db.query(FileMetadata)
+                    .filter(FileMetadata.file_name == requested_identifier)
+                    .order_by(FileMetadata.upload_timestamp.desc())
+                    .first()
+                )
+
+            if not fallback_db_metadata:
+                fallback_cached_metadata = next(
+                    (meta for meta in file_metadata_db.values() if meta.file_name == requested_identifier),
+                    None,
+                )
+
+            if fallback_db_metadata:
+                db_metadata = fallback_db_metadata
+                resolved_file_id = fallback_db_metadata.file_id
+            elif fallback_cached_metadata:
+                cached_metadata = fallback_cached_metadata
+                resolved_file_id = fallback_cached_metadata.file_id
+            else:
+                raise HTTPException(status_code=404, detail="File metadata not found")
+
+        if db_metadata is None and DATABASE_AVAILABLE and db and resolved_file_id != requested_identifier:
+            from app.models.file_metadata import FileMetadata
+            db_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == resolved_file_id).first()
+
+        file_id = resolved_file_id
 
         filename = None
         uploader_id = None
