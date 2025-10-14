@@ -464,45 +464,36 @@ export default function UserAdminChat() {
         return;
       }
 
-      const normalizedLabel = sourceName?.replace(/^Source:\s*/i, '').trim();
-      const inferredFileName = normalizedLabel && normalizedLabel.length > 0 ? normalizedLabel : sourceRef;
-      const encodedFileName = encodeURIComponent(inferredFileName ?? 'source-file');
-      const headers: Record<string, string> = {
-        Authorization: `Bearer ${user.access_token}`,
-      };
-
-      const triggerBrowserDownload = async (response: Response, fallbackName?: string) => {
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = fallbackName || inferredFileName || 'download';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      };
-
-      const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
-
       try {
-        // Direct download by file_id (most reliable method)
-        const response = await fetch(`${baseUrl}/files/download/${sourceRef}`, {
-          method: 'GET',
-          headers,
+        // Use the exact same approach as the working files section
+        console.log('Downloading source:', { sourceRef, sourceName, url: `${import.meta.env.VITE_API_BASE_URL}/files/download/${sourceRef}` });
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/files/download/${sourceRef}`, {
+          headers: {
+            Authorization: `Bearer ${user.access_token}`,
+          },
         });
 
         if (response.ok) {
-          await triggerBrowserDownload(response, sourceName);
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = sourceName || 'download';
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
           toast.success('Source downloaded successfully');
-        } else if (response.status === 404) {
-          toast.error('Source file not found');
-        } else if (response.status === 403) {
-          toast.error('You do not have permission to download this file');
         } else {
           const errorText = await response.text();
-          console.error('Download failed:', errorText);
-          toast.error('Failed to download source file');
+          console.error('Download failed:', { status: response.status, statusText: response.statusText, errorText });
+          if (response.status === 404) {
+            toast.error('Source file not found');
+          } else if (response.status === 403) {
+            toast.error('You do not have permission to download this file');
+          } else {
+            toast.error(`Download failed: ${response.status} ${response.statusText}`);
+          }
         }
       } catch (error) {
         console.error('Download error:', error);

@@ -211,8 +211,25 @@ export const apiUpload = async (
 
   // Optional: handle status codes
   if (!response.ok && showErrorToast) {
-    const errorText = await response.text();
-    toast.error(`Upload failed: ${errorText}`);
+    let errorMessage = 'Upload failed';
+    try {
+      const errorData = await response.json();
+      if (typeof errorData?.detail === 'string') {
+        errorMessage = errorData.detail;
+      } else if (Array.isArray(errorData?.detail)) {
+        errorMessage = errorData.detail
+          .map((item) => (typeof item?.msg === 'string' ? item.msg : ''))
+          .filter(Boolean)
+          .join('; ') || errorMessage;
+      }
+    } catch (parseError) {
+      const errorText = await response.text();
+      errorMessage = errorText || `HTTP ${response.status}: ${response.statusText}`;
+    }
+    
+    console.error('Upload failed:', { status: response.status, statusText: response.statusText, errorMessage });
+    toast.error(`Upload failed: ${errorMessage}`);
+    
     if (response.status === 401 && logoutOn401) {
       // handle logout
     }

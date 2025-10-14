@@ -317,42 +317,36 @@ export default function UserChat() {
         return;
       }
 
-      const headers: Record<string, string> = {
-        Authorization: `Bearer ${user.access_token}`,
-      };
-
-      const triggerBrowserDownload = async (response: Response, fallbackName?: string) => {
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = fallbackName || fileName || 'download';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      };
-
-      const baseUrl = import.meta.env.VITE_API_BASE_URL;
-
       try {
-        // Direct download by file_id (most reliable method)
-        const response = await fetch(`${baseUrl}/files/download/${fileIdOrRef}`, {
-          method: 'GET',
-          headers,
+        // Use the exact same approach as the working files section
+        console.log('Downloading source:', { fileIdOrRef, fileName, url: `${import.meta.env.VITE_API_BASE_URL}/files/download/${fileIdOrRef}` });
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/files/download/${fileIdOrRef}`, {
+          headers: {
+            Authorization: `Bearer ${user.access_token}`,
+          },
         });
 
         if (response.ok) {
-          await triggerBrowserDownload(response, fileName);
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = fileName || 'download';
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
           toast.success('Source downloaded successfully');
-        } else if (response.status === 404) {
-          toast.error('Source file not found');
-        } else if (response.status === 403) {
-          toast.error('You do not have permission to download this file');
         } else {
           const errorText = await response.text();
-          console.error('Download failed:', errorText);
-          toast.error('Failed to download source file');
+          console.error('Download failed:', { status: response.status, statusText: response.statusText, errorText });
+          if (response.status === 404) {
+            toast.error('Source file not found');
+          } else if (response.status === 403) {
+            toast.error('You do not have permission to download this file');
+          } else {
+            toast.error(`Download failed: ${response.status} ${response.statusText}`);
+          }
         }
       } catch (error) {
         console.error('Download error:', error);
