@@ -188,11 +188,13 @@ class RAG:
 
         # Build context with source information
         context_parts = []
-        source_files = set()
+        source_files = {}  # Changed to dict to store file_id with file_name
         
         for i, chunk in enumerate(chunks_with_sources):
             context_parts.append(f"Source {i+1} (from {chunk['file_name']}):\n{chunk['text']}")
-            source_files.add(chunk['file_name'])
+            # Store file_id with file_name for download links
+            if chunk['file_name'] not in source_files:
+                source_files[chunk['file_name']] = chunk.get('file_id', '')
         
         context = "\n\n---\n\n".join(context_parts)
         
@@ -210,8 +212,9 @@ Answer:"""
         answer = self.call_ai(enhanced_prompt, model=model, max_tokens=max_tokens, temperature=temperature)
         
         # Ensure sources are included if not already present
-        if source_files and "Sources:" not in answer and "sources:" not in answer.lower():
-            source_list = "\n".join([f"- {file}" for file in sorted(source_files)])
+        # Format: [file_name](file_id) for easy parsing in frontend
+        if "Sources:" not in answer and "sources:" not in answer.lower():
+            source_list = "\n".join([f"- [{file_name}]({file_id})" for file_name, file_id in sorted(source_files.items())])
             answer += f"\n\n**Sources:**\n{source_list}"
 
         return answer
@@ -252,11 +255,13 @@ Answer:"""
 
         # Build context with source information
         context_parts = []
-        source_files = set()
+        source_files = {}  # Changed to dict to store file_id with file_name
         
         for i, chunk in enumerate(chunks_with_sources):
             context_parts.append(f"Source {i+1} (from {chunk['file_name']}):\n{chunk['text']}")
-            source_files.add(chunk['file_name'])
+            # Store file_id with file_name for download links
+            if chunk['file_name'] not in source_files:
+                source_files[chunk['file_name']] = chunk.get('file_id', '')
         
         context = "\n\n---\n\n".join(context_parts)
         
@@ -277,8 +282,9 @@ Answer:"""
         answer = self.call_ai(enhanced_prompt, model=model, max_tokens=max_tokens, temperature=temperature)
         
         # Ensure sources are included if not already present
+        # Format: [file_name](file_id) for easy parsing in frontend
         if "Sources:" not in answer and "sources:" not in answer.lower():
-            source_list = "\n".join([f"- {file}" for file in sorted(source_files)])
+            source_list = "\n".join([f"- [{file_name}]({file_id})" for file_name, file_id in sorted(source_files.items())])
             answer += f"\n\n**Sources:**\n{source_list}"
 
         return answer
