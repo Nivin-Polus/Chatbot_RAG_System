@@ -429,17 +429,37 @@ async def download_file(
         requested_identifier = file_id
         resolved_file_id = file_id
 
-        sanitized_identifier = None
         name_candidates = []
+
+        def append_candidate(value: str | None):
+            if value and value not in name_candidates:
+                name_candidates.append(value)
+
+        append_candidate(requested_identifier)
+
+        decoded_identifier = None
         try:
-            sanitized_identifier = sanitize_filename(requested_identifier)
+            from urllib.parse import unquote
+
+            decoded_candidate = unquote(requested_identifier) if requested_identifier else None
+            if decoded_candidate and decoded_candidate != requested_identifier:
+                decoded_identifier = decoded_candidate
+                append_candidate(decoded_identifier)
+        except Exception:
+            decoded_identifier = None
+
+        try:
+            sanitized_identifier = sanitize_filename(requested_identifier) if requested_identifier else None
+            append_candidate(sanitized_identifier)
         except Exception:
             sanitized_identifier = None
 
-        if requested_identifier:
-            name_candidates.append(requested_identifier)
-        if sanitized_identifier and sanitized_identifier not in name_candidates:
-            name_candidates.append(sanitized_identifier)
+        try:
+            if decoded_identifier:
+                sanitized_decoded = sanitize_filename(decoded_identifier)
+                append_candidate(sanitized_decoded)
+        except Exception:
+            pass
 
         db_metadata = None
         if DATABASE_AVAILABLE and db:
@@ -452,21 +472,7 @@ async def download_file(
             fallback_db_metadata = None
             fallback_cached_metadata = None
 
-            if DATABASE_AVAILABLE and db:
-                fallback_db_metadata = (
-                    db.query(FileMetadata)
-                    .filter(FileMetadata.file_name == requested_identifier)
-                    .order_by(FileMetadata.upload_timestamp.desc())
-                    .first()
-                )
-
-            if not fallback_db_metadata:
-                fallback_cached_metadata = next(
-                    (meta for meta in file_metadata_db.values() if meta.file_name == requested_identifier),
-                    None,
-                )
-
-            if not fallback_db_metadata and name_candidates:
+            if DATABASE_AVAILABLE and db and name_candidates:
                 try:
                     from sqlalchemy import or_, func
 
@@ -491,17 +497,30 @@ async def download_file(
                 except Exception:
                     fallback_db_metadata = fallback_db_metadata
 
-            if not fallback_db_metadata and not fallback_cached_metadata and name_candidates:
+            if not fallback_db_metadata and name_candidates:
                 fallback_cached_metadata = next(
                     (
                         meta
                         for meta in file_metadata_db.values()
                         if any(
-                            (meta.file_name == candidate) or (
-                                meta.file_name and candidate and meta.file_name.lower() == candidate.lower()
+                            (meta.file_name == candidate)
+                            or (
+                                meta.file_name
+                                and candidate
+                                and meta.file_name.lower() == candidate.lower()
                             )
                             for candidate in name_candidates
                         )
+                    ),
+                    None,
+                )
+
+            if not fallback_db_metadata and not fallback_cached_metadata:
+                fallback_cached_metadata = next(
+                    (
+                        meta
+                        for meta in file_metadata_db.values()
+                        if meta.file_name == requested_identifier
                     ),
                     None,
                 )
