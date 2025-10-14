@@ -429,6 +429,18 @@ async def download_file(
         requested_identifier = file_id
         resolved_file_id = file_id
 
+        sanitized_identifier = None
+        name_candidates = []
+        try:
+            sanitized_identifier = sanitize_filename(requested_identifier)
+        except Exception:
+            sanitized_identifier = None
+
+        if requested_identifier:
+            name_candidates.append(requested_identifier)
+        if sanitized_identifier and sanitized_identifier not in name_candidates:
+            name_candidates.append(sanitized_identifier)
+
         db_metadata = None
         if DATABASE_AVAILABLE and db:
             from app.models.file_metadata import FileMetadata
@@ -451,6 +463,46 @@ async def download_file(
             if not fallback_db_metadata:
                 fallback_cached_metadata = next(
                     (meta for meta in file_metadata_db.values() if meta.file_name == requested_identifier),
+                    None,
+                )
+
+            if not fallback_db_metadata and name_candidates:
+                try:
+                    from sqlalchemy import or_, func
+
+                    name_filters = []
+                    seen_lowers = set()
+                    for candidate in name_candidates:
+                        if not candidate:
+                            continue
+                        name_filters.append(FileMetadata.file_name == candidate)
+                        lowered = candidate.lower()
+                        if lowered not in seen_lowers:
+                            seen_lowers.add(lowered)
+                            name_filters.append(func.lower(FileMetadata.file_name) == lowered)
+
+                    if name_filters:
+                        fallback_db_metadata = (
+                            db.query(FileMetadata)
+                            .filter(or_(*name_filters))
+                            .order_by(FileMetadata.upload_timestamp.desc())
+                            .first()
+                        )
+                except Exception:
+                    fallback_db_metadata = fallback_db_metadata
+
+            if not fallback_db_metadata and not fallback_cached_metadata and name_candidates:
+                fallback_cached_metadata = next(
+                    (
+                        meta
+                        for meta in file_metadata_db.values()
+                        if any(
+                            (meta.file_name == candidate) or (
+                                meta.file_name and candidate and meta.file_name.lower() == candidate.lower()
+                            )
+                            for candidate in name_candidates
+                        )
+                    ),
                     None,
                 )
 
