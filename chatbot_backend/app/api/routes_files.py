@@ -15,6 +15,7 @@ from app.services.activity_tracker import activity_tracker
 from pydantic import BaseModel
 import logging
 from uuid import uuid4
+from app.utils.file_sanitizer import sanitize_filename, validate_file_extension, validate_file_size
 
 logger = logging.getLogger("files_logger")
 logging.basicConfig(level=logging.INFO)
@@ -65,11 +66,13 @@ async def upload_file(
     
     # Extract files from ANY field name (uploaded_files, uploaded_file, file, files, etc.)
     files_to_process: List[UploadFile] = []
-    
-    for key, value in form_data.items():
-        if hasattr(value, 'filename'):  # It's a file
-            files_to_process.append(value)
-            logger.info(f"[UPLOAD] Found file in field '{key}': {value.filename}")
+
+    for key in form_data.keys():
+        values = form_data.getlist(key)
+        for value in values:
+            if hasattr(value, "filename") and getattr(value, "filename", None):
+                files_to_process.append(value)
+                logger.info(f"[UPLOAD] Found file in field '{key}': {value.filename}")
     
     if not files_to_process:
         logger.error(f"[UPLOAD ERROR] No files found. Form fields: {list(form_data.keys())}")
@@ -144,28 +147,37 @@ async def upload_file(
     }
 
     for uploaded_file in files_to_process:
-        ext = uploaded_file.filename.split('.')[-1].lower()
+        original_filename = uploaded_file.filename
+        safe_filename = sanitize_filename(original_filename)
+        ext = safe_filename.split('.')[-1].lower() if '.' in safe_filename else ''
 
-        if ext not in allowed_extensions:
-            raise HTTPException(status_code=400, detail=f"File type not allowed: {uploaded_file.filename}")
+        if not validate_file_extension(safe_filename, allowed_extensions):
+            raise HTTPException(status_code=400, detail=f"File type not allowed: {original_filename}")
 
         # Read file content once
         content = await uploaded_file.read()
         if not content:
-            raise HTTPException(status_code=400, detail=f"Uploaded file is empty: {uploaded_file.filename}")
+            raise HTTPException(status_code=400, detail=f"Uploaded file is empty: {original_filename}")
+
+        file_size = len(content)
+        if not validate_file_size(file_size, settings.MAX_FILE_SIZE_MB):
+            raise HTTPException(
+                status_code=400,
+                detail=f"File too large: {original_filename}. Maximum size is {settings.MAX_FILE_SIZE_MB}MB"
+            )
 
         try:
-            text_chunks = parse_file(uploaded_file.filename, content)
+            text_chunks = parse_file(safe_filename, content)
         except Exception as parse_error:
-            logger.error(f"[UPLOAD ERROR] Failed to parse file {uploaded_file.filename}: {str(parse_error)}")
-            raise HTTPException(status_code=400, detail=f"Failed to parse file {uploaded_file.filename}: {str(parse_error)}")
+            logger.error(f"[UPLOAD ERROR] Failed to parse file {safe_filename}: {str(parse_error)}")
+            raise HTTPException(status_code=400, detail=f"Failed to parse file {safe_filename}: {str(parse_error)}")
 
         file_metadata = file_storage_service.save_file_with_website(
             user_id=uploader_id,
             website_id=user_website_id,
             db=db,
             collection_id=collection_id,
-            filename=uploaded_file.filename,
+            filename=safe_filename,
             file_content=content,
         )
         file_id = file_metadata.file_id
@@ -175,11 +187,11 @@ async def upload_file(
         from app.core.vector_singleton import get_vector_store
         vector_store = get_vector_store()
         logger.info(f"[UPLOAD DEBUG] Vector store type: {'Qdrant' if vector_store.client else 'In-memory fallback'}")
-        logger.info(f"[UPLOAD DEBUG] Processing {len(text_chunks)} chunks for file: {uploaded_file.filename}")
+        logger.info(f"[UPLOAD DEBUG] Processing {len(text_chunks)} chunks for file: {safe_filename}")
         for i, chunk in enumerate(text_chunks):
             chunk_metadata = {
                 "file_id": file_id,
-                "file_name": uploaded_file.filename,
+                "file_name": safe_filename,
                 "chunk_index": i,
                 "text": chunk,
                 "website_id": user_website_id,
@@ -187,7 +199,7 @@ async def upload_file(
                 "uploader_id": uploader_id
             }
             vector_store.add_document(chunk, chunk_metadata)
-            logger.info(f"[UPLOAD DEBUG] Added chunk {i+1}/{len(text_chunks)} to vector store for file: {uploaded_file.filename}")
+            logger.info(f"[UPLOAD DEBUG] Added chunk {i+1}/{len(text_chunks)} to vector store for file: {safe_filename}")
         file_storage_service.update_processing_status(file_id, "completed", len(text_chunks), db)
         
         # Debug: Check if documents were actually stored
@@ -199,7 +211,7 @@ async def upload_file(
         # Store metadata in in-memory store for backward compatibility
         metadata = FileMeta(
             file_id=file_id,
-            file_name=uploaded_file.filename,
+            file_name=safe_filename,
             uploaded_by=current_user.get('username', 'unknown'),
             uploader_id=uploader_id,
             upload_timestamp=file_metadata.upload_timestamp.isoformat() if file_metadata.upload_timestamp else None,
@@ -212,14 +224,14 @@ async def upload_file(
         # Add to in-memory cache for quick access
         file_metadata_db[file_id] = metadata
         
-        logger.info(f"File uploaded: {uploaded_file.filename} by {current_user['username']}")
+        logger.info(f"File uploaded: {safe_filename} by {current_user['username']}")
 
         # Log activity
         activity_tracker.log_activity(
             activity_type="file_upload",
             user=current_user["username"],
             details={
-                "file_name": uploaded_file.filename,
+                "file_name": safe_filename,
                 "file_id": file_id,
                 "file_size": file_metadata.file_size,
                 "file_type": ext,
