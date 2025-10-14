@@ -136,81 +136,83 @@ async def upload_file(
         if not validate_file_extension(safe_filename, allowed_extensions):
             raise HTTPException(status_code=400, detail=f"File type not allowed: {original_filename}")
 
-        content = await uploaded_file.read()
-        if not content:
-            raise HTTPException(status_code=400, detail=f"Uploaded file is empty: {original_filename}")
-
-        file_size = len(content)
-        if not validate_file_size(file_size, settings.MAX_FILE_SIZE_MB):
-            raise HTTPException(
-                status_code=400,
-                detail=f"File too large: {original_filename}. Maximum size is {settings.MAX_FILE_SIZE_MB}MB"
-            )
-
         try:
-            text_chunks = parse_file(safe_filename, content)
+            content = await uploaded_file.read()
+            if not content:
+                raise HTTPException(status_code=400, detail=f"Uploaded file is empty: {original_filename}")
+
+            file_size = len(content)
+            if not validate_file_size(file_size, settings.MAX_FILE_SIZE_MB):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"File too large: {original_filename}. Maximum size is {settings.MAX_FILE_SIZE_MB}MB"
+                )
+
+            try:
+                text_chunks = parse_file(safe_filename, content)
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Failed to parse file {safe_filename}: {str(e)}")
+
+            file_metadata = file_storage_service.save_file_with_website(
+                user_id=uploader_id,
+                website_id=user_website_id,
+                db=db,
+                collection_id=collection_id,
+                filename=safe_filename,
+                file_content=content,
+            )
+            file_id = file_metadata.file_id
+
+            from app.core.vector_singleton import get_vector_store
+            vector_store = get_vector_store()
+            for i, chunk in enumerate(text_chunks):
+                chunk_metadata = {
+                    "file_id": file_id,
+                    "file_name": safe_filename,
+                    "chunk_index": i,
+                    "text": chunk,
+                    "website_id": user_website_id,
+                    "collection_id": collection_id,
+                    "uploader_id": uploader_id
+                }
+                vector_store.add_document(chunk, chunk_metadata)
+
+            file_storage_service.update_processing_status(file_id, "completed", len(text_chunks), db)
+
+            metadata = FileMeta(
+                file_id=file_id,
+                file_name=safe_filename,
+                uploaded_by=current_user.get("username", "unknown"),
+                uploader_id=uploader_id,
+                upload_timestamp=file_metadata.upload_timestamp.isoformat() if file_metadata.upload_timestamp else None,
+                file_size=file_metadata.file_size,
+                processing_status="completed",
+                collection_id=collection_id,
+            )
+            results.append(metadata)
+            file_metadata_db[file_id] = metadata
+
+            activity_tracker.log_activity(
+                activity_type="file_upload",
+                user=current_user["username"],
+                details={
+                    "file_name": safe_filename,
+                    "file_id": file_id,
+                    "file_size": file_metadata.file_size,
+                    "file_type": ext,
+                    "chunk_count": len(text_chunks),
+                    "collection_id": collection_id,
+                },
+                metadata={
+                    "processing_time": "completed",
+                    "vector_store_type": "qdrant" if vector_store.client else "in_memory",
+                },
+            )
+        except HTTPException:
+            raise
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to parse file {safe_filename}: {str(e)}")
-
-        # Save file
-        file_metadata = file_storage_service.save_file_with_website(
-            user_id=uploader_id,
-            website_id=user_website_id,
-            db=db,
-            collection_id=collection_id,
-            filename=safe_filename,
-            file_content=content,
-        )
-        file_id = file_metadata.file_id
-
-        # Store embeddings
-        from app.core.vector_singleton import get_vector_store
-        vector_store = get_vector_store()
-        for i, chunk in enumerate(text_chunks):
-            chunk_metadata = {
-                "file_id": file_id,
-                "file_name": safe_filename,
-                "chunk_index": i,
-                "text": chunk,
-                "website_id": user_website_id,
-                "collection_id": collection_id,
-                "uploader_id": uploader_id
-            }
-            vector_store.add_document(chunk, chunk_metadata)
-
-        file_storage_service.update_processing_status(file_id, "completed", len(text_chunks), db)
-
-        # Store metadata
-        metadata = FileMeta(
-            file_id=file_id,
-            file_name=safe_filename,
-            uploaded_by=current_user.get("username", "unknown"),
-            uploader_id=uploader_id,
-            upload_timestamp=file_metadata.upload_timestamp.isoformat() if file_metadata.upload_timestamp else None,
-            file_size=file_metadata.file_size,
-            processing_status="completed",
-            collection_id=collection_id,
-        )
-        results.append(metadata)
-        file_metadata_db[file_id] = metadata
-
-        # Activity log
-        activity_tracker.log_activity(
-            activity_type="file_upload",
-            user=current_user["username"],
-            details={
-                "file_name": safe_filename,
-                "file_id": file_id,
-                "file_size": file_metadata.file_size,
-                "file_type": ext,
-                "chunk_count": len(text_chunks),
-                "collection_id": collection_id,
-            },
-            metadata={
-                "processing_time": "completed",
-                "vector_store_type": "qdrant" if vector_store.client else "in_memory",
-            },
-        )
+            logger.error(f"[UPLOAD ERROR] Failed to upload {safe_filename}: {e}")
+            raise HTTPException(status_code=500, detail=f"File upload failed for {safe_filename}: {str(e)}")
 
     return results
 
