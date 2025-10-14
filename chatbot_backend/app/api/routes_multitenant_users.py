@@ -340,12 +340,22 @@ async def create_new_user(
         existing_user = db.query(User).filter(
             User.username == user_data.username
         ).first()
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username already exists"
+            )
 
         existing_email_user = None
         if user_data.email:
             existing_email_user = db.query(User).filter(
                 User.email == user_data.email
             ).first()
+            if existing_email_user:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Email already exists"
+                )
 
         # Validate role permissions
         if user_data.role == "super_admin" and not current_user.is_super_admin():
@@ -359,60 +369,17 @@ async def create_new_user(
         if not effective_website_id and managed_collections:
             effective_website_id = managed_collections[0].website_id
 
-        reactivated = False
-        target_user: Optional[User] = None
-
-        if existing_user:
-            if existing_user.is_active:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Username already exists"
-                )
-            target_user = existing_user
-
-        if existing_email_user and (not target_user or existing_email_user.user_id != target_user.user_id):
-            if existing_email_user.is_active:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Email already exists"
-                )
-            target_user = existing_email_user
-
-        if target_user:
-            if target_user.is_super_admin() and not current_user.is_super_admin():
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Only super admins can reactivate super admin accounts"
-                )
-
-            # Reactivate and update existing user
-            target_user.username = user_data.username
-            target_user.email = user_data.email
-            target_user.full_name = user_data.full_name
-            target_user.password_hash = get_password_hash(user_data.password)
-            target_user.role = user_data.role
-            target_user.is_active = True
-            target_user.website_id = effective_website_id
-
-            # Clear memberships; will be re-added below
-            db.query(CollectionUser).filter(
-                CollectionUser.user_id == target_user.user_id
-            ).delete(synchronize_session=False)
-
-            new_user = target_user
-            reactivated = True
-        else:
-            new_user = User(
-                username=user_data.username,
-                email=user_data.email,
-                password_hash=get_password_hash(user_data.password),
-                full_name=user_data.full_name,
-                website_id=effective_website_id,
-                role=user_data.role,
-                is_active=True
-            )
-            db.add(new_user)
-            db.flush()
+        new_user = User(
+            username=user_data.username,
+            email=user_data.email,
+            password_hash=get_password_hash(user_data.password),
+            full_name=user_data.full_name,
+            website_id=effective_website_id,
+            role=user_data.role,
+            is_active=True
+        )
+        db.add(new_user)
+        db.flush()
 
         # Ensure collection assignments exist
         membership_role = "admin" if new_user.role == "user_admin" else "user"
@@ -540,6 +507,26 @@ async def update_user(
         if user_update.full_name is not None:
             user.full_name = user_update.full_name
             has_changes = True
+
+        if user_update.username is not None:
+            new_username = user_update.username.strip() if user_update.username else user_update.username
+            if new_username != user.username:
+                if not new_username:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Username cannot be empty"
+                    )
+                existing_username = db.query(User).filter(
+                    User.username == new_username,
+                    User.user_id != user.user_id
+                ).first()
+                if existing_username:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Username is already in use"
+                    )
+                user.username = new_username
+                has_changes = True
 
         if user_update.email is not None:
             existing_email = db.query(User).filter(

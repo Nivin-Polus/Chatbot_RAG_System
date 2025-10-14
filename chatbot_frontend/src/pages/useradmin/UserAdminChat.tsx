@@ -31,10 +31,18 @@ export default function UserAdminChat() {
   const [isAutoScroll, setIsAutoScroll] = useState(true);
   const isAutoScrollRef = useRef(true);
   const hasMessages = messages.length > 0;
+  const [accessibleFileIds, setAccessibleFileIds] = useState<string[]>([]);
+  const [accessibleFileNames, setAccessibleFileNames] = useState<string[]>([]);
 
   const selectedCollectionDetails = useMemo(
     () => collections.find((collection) => collection.collection_id === selectedCollection) ?? null,
     [collections, selectedCollection]
+  );
+
+  const accessibleIdsSet = useMemo(() => new Set(accessibleFileIds.filter(Boolean)), [accessibleFileIds]);
+  const accessibleNamesSet = useMemo(
+    () => new Set(accessibleFileNames.filter(Boolean).map((name) => name.toLowerCase())),
+    [accessibleFileNames]
   );
 
   const knowledgeBaseLabel = useMemo(() => {
@@ -131,20 +139,16 @@ export default function UserAdminChat() {
           return data.length > 0 ? data[0].collection_id : '';
         });
       } else {
-        // Fallback: use user's website_id as collection
-        if (user?.website_id) {
-          setSelectedCollection(user.website_id);
-        }
+        console.error('Failed to fetch collections, status:', response.status);
+        setCollections([]);
+        setSelectedCollection('');
       }
     } catch (error) {
       console.error('Error fetching collections:', error);
-      // Fallback: use user's website_id as collection
-      if (user?.website_id) {
-        console.log('Using website_id as fallback collection:', user.website_id);
-        setSelectedCollection(user.website_id);
-      }
+      setCollections([]);
+      setSelectedCollection('');
     }
-  }, [user?.access_token, user?.website_id]);
+  }, [user?.access_token]);
 
   useEffect(() => {
     if (user?.access_token) {
@@ -155,11 +159,48 @@ export default function UserAdminChat() {
     }
   }, [user?.access_token, fetchCollections]);
 
+  // Removed fallback to website_id - always use proper collection_id
+
   useEffect(() => {
-    if (user?.website_id && !selectedCollection) {
-      setSelectedCollection(user.website_id);
-    }
-  }, [user?.website_id, selectedCollection]);
+    const loadAccessibleFiles = async () => {
+      if (!selectedCollection || !user?.access_token) {
+        setAccessibleFileIds([]);
+        setAccessibleFileNames([]);
+        return;
+      }
+
+      try {
+        const response = await apiGet(
+          `${import.meta.env.VITE_API_BASE_URL}/files/list?collection_id=${selectedCollection}`,
+          user.access_token
+        );
+
+        if (!response.ok) {
+          setAccessibleFileIds([]);
+          setAccessibleFileNames([]);
+          return;
+        }
+
+        const data = await response.json();
+        const ids: string[] = [];
+        const names: string[] = [];
+        if (Array.isArray(data)) {
+          data.forEach((item) => {
+            if (item?.file_id) ids.push(String(item.file_id));
+            if (item?.file_name) names.push(String(item.file_name));
+          });
+        }
+        setAccessibleFileIds(ids);
+        setAccessibleFileNames(names);
+      } catch (error) {
+        console.error('Failed to load accessible files', error);
+        setAccessibleFileIds([]);
+        setAccessibleFileNames([]);
+      }
+    };
+
+    loadAccessibleFiles();
+  }, [selectedCollection, user?.access_token]);
 
   const streamAssistantResponse = useCallback(
     (rawContent: string) => {
@@ -394,6 +435,30 @@ export default function UserAdminChat() {
 
   const handleDownloadSource = useCallback(
     async (sourceRef: string, sourceName?: string) => {
+      if (!sourceRef && !sourceName) {
+        return;
+      }
+
+      const normalizedSourceName = sourceName?.trim();
+      const normalizedRef = sourceRef?.trim();
+
+      const isAccessible = () => {
+        if (normalizedRef) {
+          if (accessibleIdsSet.has(normalizedRef)) return true;
+          if (accessibleNamesSet.has(normalizedRef.toLowerCase())) return true;
+        }
+        if (normalizedSourceName) {
+          if (accessibleIdsSet.has(normalizedSourceName)) return true;
+          if (accessibleNamesSet.has(normalizedSourceName.toLowerCase())) return true;
+        }
+        return false;
+      };
+
+      if (!isAccessible()) {
+        toast.error('You do not have access to download this source.');
+        return;
+      }
+
       if (!user?.access_token) {
         toast.error('Unable to download source.');
         return;
@@ -464,7 +529,7 @@ export default function UserAdminChat() {
         toast.error('Failed to download source.');
       }
     },
-    [selectedCollection, user?.access_token]
+    [selectedCollection, user?.access_token, accessibleIdsSet, accessibleNamesSet]
   );
 
   const renderMessageContent = useCallback(
@@ -530,6 +595,23 @@ export default function UserAdminChat() {
         };
       };
 
+      const canDownloadSource = (reference: string | null | undefined, downloadName?: string | null) => {
+        const normalizedReference = reference?.trim();
+        const normalizedDownload = downloadName?.trim();
+
+        if (normalizedReference) {
+          if (accessibleIdsSet.has(normalizedReference)) return true;
+          if (accessibleNamesSet.has(normalizedReference.toLowerCase())) return true;
+        }
+
+        if (normalizedDownload) {
+          if (accessibleIdsSet.has(normalizedDownload)) return true;
+          if (accessibleNamesSet.has(normalizedDownload.toLowerCase())) return true;
+        }
+
+        return false;
+      };
+
       const createInlineElements = (line: string, block: boolean = true): ReactNode[] => {
         const elements: ReactNode[] = [];
         const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
@@ -552,16 +634,20 @@ export default function UserAdminChat() {
           const [, label, linkTarget] = match;
           const { displayText, downloadName, sourceRef: inlineReference } = extractSourceInfo(label);
           const reference = inlineReference ?? linkTarget ?? downloadName ?? label;
-          elements.push(
-            <button
-              key={nextKey()}
-              type="button"
-              className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2`}
-              onClick={() => handleDownloadSource(reference, downloadName ?? displayText ?? label)}
-            >
-              {displayText.trim() || 'Download source'}
-            </button>
-          );
+          if (canDownloadSource(reference, downloadName ?? displayText ?? label)) {
+            elements.push(
+              <button
+                key={nextKey()}
+                type="button"
+                className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2`}
+                onClick={() => handleDownloadSource(reference, downloadName ?? displayText ?? label)}
+              >
+                {displayText.trim() || 'Download source'}
+              </button>
+            );
+          } else {
+            pushText(displayText.trim() || label);
+          }
 
           lastIndex = match.index + match[0].length;
         }
@@ -678,11 +764,23 @@ export default function UserAdminChat() {
           continue;
         }
 
-        if (inSourcesSection && /^-\s*(.+)$/.test(trimmed)) {
-          const label = trimmed.replace(/^-\s*/, '');
+        if (inSourcesSection) {
+          if (trimmed.length === 0) {
+            nodes.push(
+              <span key={nextKey()} className="block whitespace-pre-wrap">
+                {' '}
+              </span>
+            );
+            continue;
+          }
+
+          const bulletPattern = /^[-•\u2022]\s*/;
+          const normalizedLabel = trimmed.replace(bulletPattern, '').trim();
+          const label = normalizedLabel.length > 0 ? normalizedLabel : trimmed;
+
           const { displayText, downloadName, sourceRef } = extractSourceInfo(label);
           const reference = sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
-          if (reference) {
+          if (reference && canDownloadSource(reference, downloadName)) {
             nodes.push(
               <button
                 key={nextKey()}
@@ -701,19 +799,6 @@ export default function UserAdminChat() {
             );
           }
           continue;
-        }
-
-        if (inSourcesSection && trimmed.length === 0) {
-          nodes.push(
-            <span key={nextKey()} className="block whitespace-pre-wrap">
-              {' '}
-            </span>
-          );
-          continue;
-        }
-
-        if (inSourcesSection && trimmed.length > 0 && !trimmed.startsWith('-')) {
-          inSourcesSection = false;
         }
 
         if (!inSourcesSection && isTableLine(rawLine)) {
@@ -738,7 +823,7 @@ export default function UserAdminChat() {
 
       return nodes;
     },
-    [handleDownloadSource]
+    [handleDownloadSource, accessibleIdsSet, accessibleNamesSet]
   );
 
   const handleMessageScroll = useCallback(() => {
@@ -803,7 +888,7 @@ export default function UserAdminChat() {
             ) : (
               <div className="flex flex-1 flex-col min-h-0">
                 <div
-                  className="flex-1 space-y-4 px-4 pt-4 "
+                  className="flex-1 overflow-y-auto space-y-4 px-4 pt-4"
                   ref={messagesContainerRef}
                   onScroll={handleMessageScroll}
                   onWheel={handleWheel}
@@ -811,7 +896,7 @@ export default function UserAdminChat() {
                   onTouchMove={handleTouchMove}
                 >
                   {messages.length === 0 ? (
-                    <div className="flex items-center justify-center h-full text-muted-foreground dark:text-gray-300 h-[50vh]">
+                    <div className="flex items-center justify-center text-muted-foreground dark:text-gray-300 h-[50vh]">
                       <div className="flex flex-col items-center gap-3 text-center">
                         <MessageSquare className="h-12 w-12 opacity-50" />
                         <p className="text-base font-medium">You can start the conversation by sending a message below.</p>

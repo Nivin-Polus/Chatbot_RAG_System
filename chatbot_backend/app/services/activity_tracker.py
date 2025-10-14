@@ -167,8 +167,13 @@ class ActivityTracker:
         session = self._get_session()
         try:
             stats = self._get_or_create_stats(session, sync=True)
+            current_files = session.query(func.count(FileMetadata.file_id)).scalar() or 0
+            stats.total_files_uploaded = current_files
             session.commit()
-            return stats.to_dict()
+            data = stats.to_dict()
+            data["total_files"] = current_files
+            data["total_files_current"] = current_files
+            return data
         finally:
             session.close()
 

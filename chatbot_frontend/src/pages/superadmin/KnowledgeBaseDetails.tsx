@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import {
   Select,
   SelectContent,
@@ -61,6 +62,14 @@ export default function KnowledgeBaseDetails() {
   const [filesLoading, setFilesLoading] = useState(false);
   const [promptsLoading, setPromptsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editFormData, setEditFormData] = useState({
+    name: '',
+    description: '',
+    website_url: '',
+    admin_email: '',
+    is_active: true,
+  });
   const getInitialTab = () => {
     const tabParam = searchParams.get('tab');
     if (tabParam === 'files' || tabParam === 'prompts') {
@@ -463,6 +472,46 @@ export default function KnowledgeBaseDetails() {
     setSearchParams(nextParams, { replace: true });
   };
 
+  const handleOpenEditDialog = () => {
+    if (!collection) return;
+    setEditFormData({
+      name: collection.name ?? '',
+      description: collection.description ?? '',
+      website_url: collection.website_url ?? '',
+      admin_email: collection.admin_email ?? '',
+      is_active: collection.is_active ?? true,
+    });
+    setIsEditDialogOpen(true);
+  };
+
+  const handleUpdateCollection = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!collection) return;
+
+    try {
+      const response = await apiPut(
+        `${import.meta.env.VITE_API_BASE_URL}/collections/${collection.collection_id}`,
+        {
+          name: editFormData.name,
+          description: editFormData.description,
+          website_url: editFormData.website_url || null,
+          admin_email: editFormData.admin_email || null,
+          is_active: editFormData.is_active,
+        },
+        user?.access_token
+      );
+
+      if (!response.ok) throw new Error('Failed to update knowledge base');
+
+      toast.success('Knowledge base updated successfully');
+      setIsEditDialogOpen(false);
+      await fetchCollection();
+    } catch (error) {
+      console.error('Failed to update knowledge base', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to update knowledge base');
+    }
+  };
+
   if (isLoading) {
     return (
       <DashboardLayout>
@@ -507,6 +556,10 @@ export default function KnowledgeBaseDetails() {
               >
                 {collection.is_active ? 'Active' : 'Inactive'}
               </span>
+              <Button size="sm" variant="outline" onClick={handleOpenEditDialog}>
+                <Pencil className="mr-1 h-4 w-4" />
+                Edit
+              </Button>
             </div>
           </div>
           <div>
@@ -516,6 +569,72 @@ export default function KnowledgeBaseDetails() {
             </Button>
           </div>
         </div>
+
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent className="max-w-2xl sm:max-h-[85vh] overflow-y-auto">
+            <form onSubmit={handleUpdateCollection}>
+              <DialogHeader>
+                <DialogTitle>Edit Knowledge Base</DialogTitle>
+                <DialogDescription>Update the knowledge base details</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-name">Knowledge Base Name *</Label>
+                  <Input
+                    id="edit-name"
+                    maxLength={50}
+                    value={editFormData.name}
+                    onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-description">Description</Label>
+                  <Textarea
+                    id="edit-description"
+                    maxLength={200}
+                    value={editFormData.description}
+                    onChange={(e) => setEditFormData({ ...editFormData, description: e.target.value })}
+                    rows={3}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-website-url">Website URL</Label>
+                  <Input
+                    id="edit-website-url"
+                    value={editFormData.website_url}
+                    onChange={(e) => setEditFormData({ ...editFormData, website_url: e.target.value })}
+                    placeholder="https://example.com"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-admin-email">Admin Email</Label>
+                  <Input
+                    id="edit-admin-email"
+                    type="email"
+                    value={editFormData.admin_email}
+                    onChange={(e) => setEditFormData({ ...editFormData, admin_email: e.target.value })}
+                    placeholder="admin@example.com"
+                  />
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="edit-is-active"
+                    checked={editFormData.is_active}
+                    onCheckedChange={(checked) => setEditFormData({ ...editFormData, is_active: checked })}
+                  />
+                  <Label htmlFor="edit-is-active">Active</Label>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit">Save Changes</Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">

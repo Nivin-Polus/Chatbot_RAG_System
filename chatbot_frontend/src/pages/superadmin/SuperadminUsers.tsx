@@ -51,6 +51,7 @@ export default function SuperadminUsers() {
     role: 'user' as UserRole,
     collection_ids: [] as string[],
   });
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     fetchCollections();
@@ -205,6 +206,7 @@ export default function SuperadminUsers() {
       role: user.role,
       collection_ids: user.collection_ids || [],
     });
+    setShowPassword(false);
     setIsDialogOpen(true);
   };
 
@@ -212,6 +214,7 @@ export default function SuperadminUsers() {
     setIsDialogOpen(false);
     setEditingUser(null);
     setFormData({ username: '', email: '', full_name: '', password: '', role: 'user', collection_ids: [] });
+    setShowPassword(false);
   };
 
   const toggleCollection = (collectionId: string) => {
@@ -320,7 +323,11 @@ export default function SuperadminUsers() {
                       value={formData.username}
                       onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                       required
+                      disabled={Boolean(editingUser)}
                     />
+                    {editingUser && (
+                      <p className="text-xs text-muted-foreground">Username cannot be changed.</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="email">Email *</Label>
@@ -350,14 +357,25 @@ export default function SuperadminUsers() {
                           : ' (optional — retain existing if left blank)'
                         : ' *'}
                     </Label>
-                    <Input
-                      id="password"
-                      type="password"
-                      value={formData.password}
-                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                      required={!editingUser}
-                      disabled={editingUser?.user_id === user?.user_id}
-                    />
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="password"
+                        type={showPassword ? 'text' : 'password'}
+                        value={formData.password}
+                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                        required={!editingUser}
+                        disabled={editingUser?.user_id === user?.user_id}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowPassword((prev) => !prev)}
+                        disabled={editingUser?.user_id === user?.user_id}
+                      >
+                        {showPassword ? 'Hide' : 'Show'}
+                      </Button>
+                    </div>
                     {editingUser?.user_id === user?.user_id && (
                       <p className="text-xs text-muted-foreground">
                         Update your password from the Settings page.

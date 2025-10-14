@@ -13,7 +13,7 @@ class FileMetadata(Base):
     file_name = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=True)
     file_size = Column(Integer, nullable=False)
-    file_type = Column(String(50), nullable=False)
+    file_type = Column(String(255), nullable=False)
     
     # Multi-tenant fields
     website_id = Column(String(36), ForeignKey("websites.website_id"), nullable=True, index=True)
@@ -29,7 +29,7 @@ class FileMetadata(Base):
     description = Column(Text, nullable=True)
     tags = Column(String(500), nullable=True)  # Comma-separated tags
     is_public = Column(Boolean, default=False, nullable=False)  # Public within website
-    mime_type = Column(String(100), nullable=True)
+    mime_type = Column(String(255), nullable=True)
     # Vector DB metadata
     vector_collection = Column(String(100), nullable=True)  # Qdrant collection name
     vector_indexed = Column(Boolean, default=False, nullable=False)

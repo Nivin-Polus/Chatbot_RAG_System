@@ -88,7 +88,6 @@ const normalizeHealthResponse = (data: any): HealthOverview => {
 export default function SuperadminSettings() {
   const { user } = useAuth();
   const [passwordData, setPasswordData] = useState({
-    currentPassword: '',
     newPassword: '',
     confirmPassword: '',
   });
@@ -166,7 +165,6 @@ export default function SuperadminSettings() {
       if (response.ok) {
         toast.success('Password changed successfully');
         setPasswordData({
-          currentPassword: '',
           newPassword: '',
           confirmPassword: '',
         });
@@ -382,16 +380,7 @@ export default function SuperadminSettings() {
             </CardHeader>
             <CardContent>
               <form onSubmit={handlePasswordChange} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="currentPassword">Current Password</Label>
-                  <Input
-                    id="currentPassword"
-                    type="password"
-                    value={passwordData.currentPassword}
-                    onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
-                    required
-                  />
-                </div>
+                
                 <div className="space-y-2">
                   <Label htmlFor="newPassword">New Password</Label>
                   <Input

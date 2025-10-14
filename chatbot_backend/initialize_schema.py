@@ -106,6 +106,16 @@ def _perform_schema_migrations(engine) -> None:
         with engine.connect() as conn:
             conn.execute(text("ALTER TABLE file_metadata MODIFY COLUMN file_path VARCHAR(500) NULL"))
 
+    if "file_type" in columns:
+        LOGGER.info("Ensuring 'file_type' column supports full MIME types")
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE file_metadata MODIFY COLUMN file_type VARCHAR(255) NOT NULL"))
+
+    if "mime_type" in columns:
+        LOGGER.info("Ensuring 'mime_type' column supports full MIME types")
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE file_metadata MODIFY COLUMN mime_type VARCHAR(255) NULL"))
+
     # Add optional prompt columns
     if inspector.has_table("system_prompts"):
         prompt_columns = {col["name"] for col in inspector.get_columns("system_prompts")}

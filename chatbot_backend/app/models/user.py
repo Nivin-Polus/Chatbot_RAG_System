@@ -148,6 +148,7 @@ class UserCreate(BaseModel):
 
 class UserUpdate(BaseModel):
     """Pydantic model for user updates"""
+    username: Optional[str] = None
     email: Optional[str] = None
     full_name: Optional[str] = None
     is_active: Optional[bool] = None

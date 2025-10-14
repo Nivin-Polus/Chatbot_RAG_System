@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Button } from '@/components/ui/button';
@@ -204,16 +204,13 @@ export default function SuperadminChat() {
       const data: CollectionSummary[] = await response.json();
       setCollections(data);
 
-      if (data.length > 0) {
-        setSelectedCollection((current) => {
-          if (current && data.some((c: CollectionSummary) => c.collection_id === current)) {
-            return current;
-          }
-          return data[0].collection_id;
-        });
-      } else {
-        setSelectedCollection('');
-      }
+      const activeData = data.filter((collection) => collection.is_active);
+      setSelectedCollection((current) => {
+        if (current && activeData.some((c) => c.collection_id === current)) {
+          return current;
+        }
+        return activeData.length > 0 ? activeData[0].collection_id : '';
+      });
     } catch (error) {
       console.error('Failed to load knowledge bases', error);
       toast.error('Unable to load knowledge bases for chat');
@@ -227,6 +224,25 @@ export default function SuperadminChat() {
       fetchCollections();
     }
   }, [user?.access_token, fetchCollections]);
+
+  const activeCollections = useMemo(
+    () => collections.filter((collection) => collection.is_active),
+    [collections]
+  );
+
+  useEffect(() => {
+    if (activeCollections.length === 0) {
+      setSelectedCollection('');
+      return;
+    }
+
+    setSelectedCollection((current) => {
+      if (current && activeCollections.some((collection) => collection.collection_id === current)) {
+        return current;
+      }
+      return activeCollections[0].collection_id;
+    });
+  }, [activeCollections]);
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -767,7 +783,7 @@ export default function SuperadminChat() {
                   <SelectValue placeholder="Select a knowledge base" />
                 </SelectTrigger>
                 <SelectContent className="bg-background dark:bg-gray-800 text-foreground dark:text-white">
-                  {collections.map((collection) => (
+                  {activeCollections.map((collection) => (
                     <SelectItem key={collection.collection_id} value={collection.collection_id}>
                       {collection.name}
                     </SelectItem>
@@ -806,7 +822,7 @@ export default function SuperadminChat() {
                   onTouchMove={handleTouchMove}
                 >
                   {messages.length === 0 ? (
-                    <div className="flex items-center justify-center h-full text-muted-foreground dark:text-gray-300 h-[50vh]">
+                    <div className="flex items-center justify-center text-muted-foreground dark:text-gray-300 h-[50vh]">
                       <div className="flex flex-col items-center gap-3 text-center">
                         <MessageSquare className="h-12 w-12 opacity-50" />
                         <p className="text-base font-medium">You can start the conversation by sending a message below.</p>

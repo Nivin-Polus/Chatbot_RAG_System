@@ -17,6 +17,7 @@ from ..models.user import User
 from ..models.system_prompt import SystemPrompt
 from ..models.website import Website
 from ..models.vector_database import VectorDatabase
+from ..models.file_metadata import FileMetadata
 from ..core.permissions import get_current_user, require_super_admin
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class CollectionCreate(BaseModel):
     admin_password: str
     description: Optional[str] = None
     admin_email: Optional[str] = None
+    admin_full_name: Optional[str] = None
     website_id: Optional[str] = None
     website_url: Optional[str] = None
 
@@ -90,6 +92,36 @@ class UserAssignment(BaseModel):
     can_download: bool = True
     can_delete: bool = False
 
+
+def _permanently_delete_user(db: Session, user: User):
+    """Remove a user and all related data from the database."""
+    from app.models.file_metadata import FileMetadata
+    from app.models.collection import CollectionUser
+
+    try:
+        db.query(FileMetadata).filter(FileMetadata.uploader_id == user.user_id).delete(synchronize_session=False)
+        db.query(CollectionUser).filter(CollectionUser.user_id == user.user_id).delete(synchronize_session=False)
+
+        try:
+            from app.models.user_file_access import UserFileAccess
+            db.query(UserFileAccess).filter(UserFileAccess.user_id == user.user_id).delete(synchronize_session=False)
+        except Exception:
+            logger.debug("UserFileAccess cleanup skipped", exc_info=True)
+
+        from app.models.chat_tracking import ChatSession, ChatQuery
+        from app.models.query_log import QueryLog
+
+        session_ids = [row[0] for row in db.query(ChatSession.session_id).filter(ChatSession.user_id == user.user_id).all()]
+        if session_ids:
+            db.query(ChatQuery).filter(ChatQuery.session_id.in_(session_ids)).delete(synchronize_session=False)
+        db.query(ChatSession).filter(ChatSession.user_id == user.user_id).delete(synchronize_session=False)
+
+        db.query(QueryLog).filter(QueryLog.user_id == user.user_id).delete(synchronize_session=False)
+
+        db.delete(user)
+    except Exception as exc:
+        logger.error("Failed to permanently delete user %s: %s", user.user_id, exc)
+        raise
 
 def _get_accessible_collections(current_user: User, db: Session):
     if current_user.role == "super_admin":
@@ -201,7 +233,7 @@ async def create_collection(
                 username=collection_data.admin_username,
                 email=collection_data.admin_email,
                 password_hash=get_password_hash(collection_data.admin_password),
-                full_name=collection_data.admin_username,
+                full_name=collection_data.admin_full_name or collection_data.admin_username,
                 role="user_admin",
                 is_active=True,
                 website_id=target_website_id
@@ -213,6 +245,9 @@ async def create_collection(
             if collection_data.admin_password:
                 from ..core.auth import get_password_hash
                 admin_user.password_hash = get_password_hash(collection_data.admin_password)
+                updated = True
+            if collection_data.admin_full_name and admin_user.full_name != collection_data.admin_full_name:
+                admin_user.full_name = collection_data.admin_full_name
                 updated = True
             if target_website_id and admin_user.website_id != target_website_id:
                 admin_user.website_id = target_website_id
@@ -544,12 +579,60 @@ async def delete_collection(
         raise HTTPException(status_code=404, detail="Collection not found")
     
     try:
+        users_to_remove: list[User] = []
+
+        def enqueue_user_for_removal(target_user: Optional[User]):
+            if not target_user:
+                return
+            if target_user.is_super_admin():
+                return
+            if target_user in users_to_remove:
+                return
+            users_to_remove.append(target_user)
+
+        # Gather users assigned solely to this collection
+        memberships = db.query(CollectionUser).filter(CollectionUser.collection_id == collection_id).all()
+        for membership in memberships:
+            member = db.query(User).filter(User.user_id == membership.user_id).first()
+            if not member or member.is_super_admin():
+                continue
+            other_memberships = db.query(CollectionUser).filter(
+                CollectionUser.user_id == member.user_id,
+                CollectionUser.collection_id != collection_id
+            ).count()
+            other_admin_roles = db.query(Collection).filter(
+                Collection.admin_user_id == member.user_id,
+                Collection.collection_id != collection_id
+            ).count()
+            if other_memberships == 0 and other_admin_roles == 0:
+                enqueue_user_for_removal(member)
+
+        # Ensure collection admin is removed if not used elsewhere
+        admin_user = db.query(User).filter(User.user_id == collection.admin_user_id).first()
+        if admin_user and not admin_user.is_super_admin():
+            other_admin_roles = db.query(Collection).filter(
+                Collection.admin_user_id == admin_user.user_id,
+                Collection.collection_id != collection_id
+            ).count()
+            other_memberships = db.query(CollectionUser).filter(
+                CollectionUser.user_id == admin_user.user_id,
+                CollectionUser.collection_id != collection_id
+            ).count()
+            if other_admin_roles == 0 and other_memberships == 0:
+                enqueue_user_for_removal(admin_user)
+
         # Delete related records
         db.query(CollectionUser).filter(CollectionUser.collection_id == collection_id).delete()
         db.query(SystemPrompt).filter(SystemPrompt.collection_id == collection_id).delete()
+        db.query(FileMetadata).filter(FileMetadata.collection_id == collection_id).delete()
         
         # Delete collection
         db.delete(collection)
+
+        # Remove queued users permanently
+        for user in users_to_remove:
+            _permanently_delete_user(db, user)
+
         db.commit()
         
         logger.info(f"Deleted collection {collection_id}")

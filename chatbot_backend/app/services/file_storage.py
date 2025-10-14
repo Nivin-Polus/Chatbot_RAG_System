@@ -1,5 +1,6 @@
 from typing import Optional
 from fastapi import UploadFile, HTTPException
+import mimetypes
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.models.file_metadata import FileMetadata
@@ -17,37 +18,58 @@ class FileStorageService:
         from app.models.website import Website
         default_website = db.query(Website).first()
         website_id = default_website.website_id if default_website else None
-        return self.save_file_with_website(file, user_id, website_id, db)
+        return self.save_file_with_website(
+            user_id=user_id,
+            website_id=website_id,
+            db=db,
+            file=file
+        )
     
     def save_file_with_website(
         self,
-        file: UploadFile,
         user_id: str,
         website_id: Optional[str],
         db: Session,
         collection_id: Optional[str] = None,
+        file: Optional[UploadFile] = None,
+        filename: Optional[str] = None,
         file_content: Optional[bytes] = None,
     ) -> FileMetadata:
         """Save uploaded file to database and create metadata record with website_id"""
         try:
             # Generate unique file ID
             file_id = str(uuid.uuid4())
-            
-            if file_content is None:
-                # Ensure pointer at start before reading
-                file.file.seek(0)
-                file_content = file.file.read()
+            original_filename: Optional[str] = None
+
+            if file is not None:
+                original_filename = file.filename
+                if file_content is None:
+                    # Ensure pointer at start before reading
+                    file.file.seek(0)
+                    file_content = file.file.read()
+
+                if filename is None:
+                    filename = original_filename
+                mime_type = file.content_type or "application/octet-stream"
+            else:
+                mime_type = None
+
+            if filename is None:
+                raise HTTPException(status_code=400, detail="Filename is required for file upload")
 
             if file_content is None:
                 raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
+            if mime_type is None:
+                guessed_type, _ = mimetypes.guess_type(filename)
+                mime_type = guessed_type or "application/octet-stream"
+
             file_size = len(file_content)
-            mime_type = file.content_type or "application/octet-stream"
 
             # Create metadata record with website_id
             file_metadata = FileMetadata(
                 file_id=file_id,
-                file_name=file.filename,
+                file_name=filename,
                 file_path=None,
                 file_size=file_size,
                 file_type=mime_type,
@@ -70,7 +92,7 @@ class FileStorageService:
             db.refresh(file_metadata)
             
             logger.info(
-                f"File saved: {file_id} - {file.filename} ({file_size} bytes) "
+                f"File saved: {file_id} - {filename} ({file_size} bytes) "
                 f"to website {website_id} collection {collection_id}"
             )
             return file_metadata
@@ -91,9 +113,13 @@ class FileStorageService:
             if not file_metadata:
                 return False
 
+            file_binary = db.query(FileBinary).filter(FileBinary.file_id == file_id).first()
+
             db.delete(file_metadata)
+            if file_binary:
+                db.delete(file_binary)
             db.commit()
-            
+
             logger.info(f"File metadata deleted: {file_id}")
             return True
             

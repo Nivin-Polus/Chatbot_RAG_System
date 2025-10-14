@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Upload, Download, Trash2, Search, Loader2 } from 'lucide-react';
+import { apiUpload } from '@/utils/api';
 import { Collection, FileItem } from '@/types/auth';
 import { toast } from 'sonner';
 
@@ -32,6 +33,7 @@ export default function SuperadminFiles() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<Record<string, 'pending' | 'success' | 'error'>>({});
 
   useEffect(() => {
     fetchCollections();
@@ -78,48 +80,88 @@ export default function SuperadminFiles() {
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file || !selectedCollection) return;
+    const selectedFiles = event.target.files;
+    if (!selectedFiles || selectedFiles.length === 0 || !selectedCollection) return;
 
-    // Validate file type and size
-    const allowedTypes = ['application/pdf', 'text/plain', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    const filesArray = Array.from(selectedFiles);
+    const allowedTypes = [
+      'application/pdf',
+      'text/plain',
+      'text/csv',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    ];
+    const allowedExtensions = ['pdf', 'txt', 'csv', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'];
     const maxSize = 10 * 1024 * 1024; // 10MB
 
-    if (!allowedTypes.includes(file.type)) {
-      toast.error('Invalid file type. Allowed types: PDF, TXT, DOC, DOCX');
-      return;
-    }
+    for (const file of filesArray) {
+      const fileExtension = file.name.split('.').pop()?.toLowerCase();
+      const isAllowedType = file.type ? allowedTypes.includes(file.type) : false;
+      const isAllowedExtension = fileExtension ? allowedExtensions.includes(fileExtension) : false;
 
-    if (file.size > maxSize) {
-      toast.error('File size too large. Maximum size: 10MB');
-      return;
+      if (!isAllowedType && !isAllowedExtension) {
+        toast.error(`Invalid file type for ${file.name}. Allowed types: PDF, TXT, CSV, DOC/DOCX, PPT/PPTX, XLS/XLSX`);
+        return;
+      }
+      if (file.size > maxSize) {
+        toast.error(`File ${file.name} is too large. Maximum size: 10MB`);
+        return;
+      }
     }
 
     setUploading(true);
+    const initialProgress: Record<string, 'pending' | 'success' | 'error'> = {};
+    filesArray.forEach((file) => {
+      initialProgress[file.name] = 'pending';
+    });
+    setUploadProgress(initialProgress);
+
     const formData = new FormData();
-    formData.append('file', file);
+    filesArray.forEach((file) => {
+      formData.append('uploaded_files', file);
+    });
     formData.append('collection_id', selectedCollection);
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/files/upload`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${user?.access_token}`,
-        },
-        body: formData,
+      const response = await apiUpload(
+        `${import.meta.env.VITE_API_BASE_URL}/files/upload`,
+        formData,
+        user?.access_token
+      );
+
+      if (!response.ok) throw new Error('Failed to upload files');
+
+      const uploadedFiles: FileItem[] = await response.json();
+      const uploadedNames = new Set(uploadedFiles.map((f) => f.file_name));
+
+      setUploadProgress((prev) => {
+        const updated: Record<string, 'pending' | 'success' | 'error'> = {};
+        Object.keys(prev).forEach((name) => {
+          updated[name] = uploadedNames.has(name) ? 'success' : 'error';
+        });
+        return updated;
       });
 
-      if (response.ok) {
-        toast.success('File uploaded successfully');
-        fetchFiles(selectedCollection);
-      } else {
-        throw new Error('Upload failed');
-      }
+      await fetchFiles(selectedCollection);
+
+      toast.success(`Uploaded ${uploadedFiles.length}/${filesArray.length} file(s)`);
+      event.target.value = '';
     } catch (error) {
-      toast.error('Failed to upload file');
+      console.error('Failed to upload files', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to upload files');
+      setUploadProgress((prev) => {
+        const updated: Record<string, 'pending' | 'success' | 'error'> = {};
+        Object.keys(prev).forEach((name) => {
+          updated[name] = 'error';
+        });
+        return updated;
+      });
     } finally {
       setUploading(false);
-      event.target.value = ''; // Reset input
     }
   };
 
@@ -226,7 +268,7 @@ export default function SuperadminFiles() {
                   Upload File
                 </CardTitle>
                 <CardDescription>
-                  Upload files to the selected knowledge base (PDF, TXT, DOC, DOCX - Max 10MB)
+                  Upload files to the selected knowledge base (PDF, TXT, CSV, DOCX, PPTX, XLS/XLSX - Max 10MB)
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -237,7 +279,8 @@ export default function SuperadminFiles() {
                   <Input
                     id="file-upload"
                     type="file"
-                    accept=".pdf,.txt,.doc,.docx"
+                    accept=".pdf,.txt,.csv,.docx,.pptx,.xls,.xlsx"
+                    multiple
                     onChange={handleFileUpload}
                     disabled={uploading}
                     className="w-64"

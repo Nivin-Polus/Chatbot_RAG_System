@@ -43,7 +43,10 @@ export default function SuperadminDashboard() {
     name: '',
     description: '',
     is_active: true,
+    website_url: '',
+    admin_email: '',
     admin_username: '',
+    admin_full_name: '',
     admin_password: '',
   });
   const [editingCollection, setEditingCollection] = useState<Collection | null>(null);
@@ -96,7 +99,10 @@ export default function SuperadminDashboard() {
         {
           name: formData.name,
           description: formData.description,
+          website_url: formData.website_url || undefined,
+          admin_email: formData.admin_email || undefined,
           admin_username: formData.admin_username,
+          admin_full_name: formData.admin_full_name || undefined,
           admin_password: formData.admin_password,
           is_active: formData.is_active,
         },
@@ -113,7 +119,10 @@ export default function SuperadminDashboard() {
         name: '',
         description: '',
         is_active: true,
+        website_url: '',
+        admin_email: '',
         admin_username: '',
+        admin_full_name: '',
         admin_password: '',
       });
       
@@ -188,8 +197,22 @@ export default function SuperadminDashboard() {
 
   const handleCopyCollectionId = async (collectionId: string) => {
     try {
-      await navigator.clipboard.writeText(collectionId);
-      toast.success('Collection ID copied to clipboard');
+      // Try modern clipboard API first
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(collectionId);
+        toast.success('Collection ID copied to clipboard');
+      } else {
+        // Fallback for HTTP or older browsers
+        const textArea = document.createElement('textarea');
+        textArea.value = collectionId;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        toast.success('Collection ID copied to clipboard');
+      }
     } catch (error) {
       console.error('Failed to copy collection ID', error);
       toast.error('Unable to copy collection ID');
@@ -220,7 +243,7 @@ export default function SuperadminDashboard() {
                 Create Knowledge Base
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-md">
+            <DialogContent className="max-w-2xl sm:max-h-[85vh] overflow-y-auto">
               <form onSubmit={handleCreateCollection}>
                 <DialogHeader>
                   <DialogTitle>Create New Knowledge Base</DialogTitle>
@@ -249,6 +272,25 @@ export default function SuperadminDashboard() {
                       rows={3}
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="website_url">Website URL</Label>
+                    <Input
+                      id="website_url"
+                      value={formData.website_url}
+                      onChange={(e) => setFormData({ ...formData, website_url: e.target.value })}
+                      placeholder="https://example.com"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="admin_email">Admin Email</Label>
+                    <Input
+                      id="admin_email"
+                      type="email"
+                      value={formData.admin_email}
+                      onChange={(e) => setFormData({ ...formData, admin_email: e.target.value })}
+                      placeholder="admin@example.com"
+                    />
+                  </div>
                   <div className="flex items-center space-x-2">
                     <Switch
                       id="is_active"
@@ -260,6 +302,15 @@ export default function SuperadminDashboard() {
                   <div className="border-t pt-4">
                     <h4 className="font-medium mb-3">Admin User Credentials</h4>
                     <div className="space-y-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="admin_full_name">Admin Full Name</Label>
+                        <Input
+                          id="admin_full_name"
+                          value={formData.admin_full_name}
+                          onChange={(e) => setFormData({ ...formData, admin_full_name: e.target.value })}
+                          placeholder="Enter full name"
+                        />
+                      </div>
                       <div className="space-y-2">
                         <Label htmlFor="admin_username">Admin Username *</Label>
                         <Input

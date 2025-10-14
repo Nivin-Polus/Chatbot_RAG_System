@@ -197,14 +197,27 @@ export const apiUpload = async (
 ): Promise<Response> => {
   const options: RequestInit = {
     method: 'POST',
-    body: formData,
+    body: formData, // ✅ important
   };
 
   if (token) {
     options.headers = {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${token}`, // only auth, no Content-Type
     };
   }
 
-  return apiRequest(url, options, showErrorToast, logoutOn401);
+  // Call fetch directly, bypassing anything that might set Content-Type
+  const response = await fetch(url, options);
+
+  // Optional: handle status codes
+  if (!response.ok && showErrorToast) {
+    const errorText = await response.text();
+    toast.error(`Upload failed: ${errorText}`);
+    if (response.status === 401 && logoutOn401) {
+      // handle logout
+    }
+  }
+
+  return response;
 };
+

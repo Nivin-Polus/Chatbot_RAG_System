@@ -663,9 +663,13 @@ export default function UserChat() {
     const container = messagesContainerRef.current;
     if (!container) return;
 
-    const threshold = 120;
+    const threshold = 40;
     const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
-    setIsAutoScroll(isNearBottom);
+
+    if (isAutoScrollRef.current !== isNearBottom) {
+      isAutoScrollRef.current = isNearBottom;
+      setIsAutoScroll(isNearBottom);
+    }
   }, []);
 
   const formatTime = (date: Date) => {
@@ -678,7 +682,6 @@ export default function UserChat() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-foreground dark:text-white">Leto Chat</h1>
-          
           </div>
           <div className="flex items-center space-x-2">
             <span className="text-sm font-medium text-muted-foreground dark:text-gray-300">Select Knowledge Base:</span>
@@ -715,7 +718,7 @@ export default function UserChat() {
             ) : (
               <div className="flex flex-1 flex-col min-h-0">
                 <div
-                  className="flex-1 space-y-4 px-4 pt-4 "
+                  className="flex-1 overflow-y-auto space-y-4 px-4 pt-4"
                   ref={messagesContainerRef}
                   onScroll={handleMessageScroll}
                   onWheel={handleWheel}
@@ -723,7 +726,7 @@ export default function UserChat() {
                   onTouchMove={handleTouchMove}
                 >
                   {messages.length === 0 ? (
-                    <div className="flex items-center justify-center h-full text-muted-foreground dark:text-gray-300 h-[50vh]">
+                    <div className="flex items-center justify-center text-muted-foreground dark:text-gray-300 h-[50vh]">
                       <div className="flex flex-col items-center gap-3 text-center">
                         <MessageSquare className="h-12 w-12 opacity-50" />
                         <p className="text-base font-medium">You can start the conversation by sending a message below.</p>
