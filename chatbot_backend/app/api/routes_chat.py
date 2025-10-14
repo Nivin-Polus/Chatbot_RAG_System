@@ -154,65 +154,13 @@ def _process_chat_request(
 
     logger.info(f"[RAG QUERY] User: {identity_username}, Question: {question}, top_k: {top_k}")
 
-    # Determine allowed file IDs within the effective collection (for non super admins)
-    allowed_file_ids: Optional[set] = None
-    try:
-        if user_role != "super_admin" and effective_collection_id:
-            from app.models.file_metadata import FileMetadata
-            allowed_file_ids = set()
-
-            if user_role in ("user_admin", "admin"):
-                # Admin for this collection (already access-validated above)
-                rows = (
-                    db.query(FileMetadata.file_id)
-                    .filter(FileMetadata.collection_id == effective_collection_id)
-                    .all()
-                )
-                allowed_file_ids.update(str(r[0]) for r in rows if r[0])
-            else:
-                # Regular user: explicit access or own uploads within this collection
-                try:
-                    from app.models.user_file_access import UserFileAccess
-                    access_rows = (
-                        db.query(UserFileAccess.file_id)
-                        .join(FileMetadata, FileMetadata.file_id == UserFileAccess.file_id)
-                        .filter(
-                            UserFileAccess.user_id == user_id,
-                            (UserFileAccess.can_read == True) | (UserFileAccess.can_download == True),
-                            FileMetadata.collection_id == effective_collection_id,
-                        )
-                        .all()
-                    )
-                    allowed_file_ids.update(str(r[0]) for r in access_rows if r[0])
-                except Exception:
-                    # If access table not present, fall back to uploader-only filtering
-                    pass
-
-                uploader_rows = (
-                    db.query(FileMetadata.file_id)
-                    .filter(
-                        FileMetadata.collection_id == effective_collection_id,
-                        FileMetadata.uploader_id == user_id,
-                    )
-                    .all()
-                )
-                allowed_file_ids.update(str(r[0]) for r in uploader_rows if r[0])
-    except Exception as e:
-        logger.warning(f"[ACCESS FILTER] Failed to compute allowed_file_ids: {e}")
-        allowed_file_ids = None
-
     # Import here to avoid PyO3 initialization issues during module import
     from app.core.vector_singleton import get_vector_store
     from app.core.rag import RAG
     
     vector_store = get_vector_store()
     rag_instance = RAG(db_session=db)
-    chunks = rag_instance.retrieve_chunks(
-        question,
-        top_k=top_k,
-        collection_id=effective_collection_id,
-        allowed_file_ids=allowed_file_ids,
-    )
+    chunks = rag_instance.retrieve_chunks(question, top_k=top_k, collection_id=effective_collection_id)
     logger.info(f"[CHAT DEBUG] Retrieved {len(chunks)} chunks for query: {question}")
     logger.info(f"[CHAT DEBUG] Vector store type: {'Qdrant' if vector_store.client else 'In-memory fallback'}")
 
@@ -234,7 +182,6 @@ def _process_chat_request(
                 conversation_history,
                 top_k=top_k,
                 collection_id=effective_collection_id,
-                allowed_file_ids=allowed_file_ids,
             )
         else:
             logger.info("[CONTEXT] Using basic RAG without context")
@@ -242,7 +189,6 @@ def _process_chat_request(
                 question,
                 top_k=top_k,
                 collection_id=effective_collection_id,
-                allowed_file_ids=allowed_file_ids,
             )
     except Exception as e:
         logger.error(f"[RAG ERROR] Failed to generate answer: {str(e)}")

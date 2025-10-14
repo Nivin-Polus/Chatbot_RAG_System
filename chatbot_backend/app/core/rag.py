@@ -103,10 +103,8 @@ class RAG:
             print(f"Error getting prompt for collection {collection_id}: {e}")
             return None
 
-    def retrieve_chunks(self, query: str, top_k: int = 5, collection_id: str = None, allowed_file_ids: Optional[set] = None) -> List[Dict]:
-        """Search vector DB and return top matching chunks with metadata.
-        Optionally restrict results to specific file_ids (allowed_file_ids).
-        """
+    def retrieve_chunks(self, query: str, top_k: int = 5, collection_id: str = None) -> List[Dict]:
+        """Search vector DB and return top matching chunks with metadata."""
         results = self.vector_store.search(query, top_k=top_k, collection_id=collection_id)
         chunks_with_sources = []
         for r in results:
@@ -118,11 +116,6 @@ class RAG:
                     # Skip chunks that are not explicitly tagged to avoid cross-collection bleed
                     continue
                 if str(payload_collection_id) != str(collection_id):
-                    continue
-            # Enforce file-level access if provided
-            if allowed_file_ids is not None:
-                file_id_val = payload.get("file_id")
-                if not file_id_val or str(file_id_val) not in allowed_file_ids:
                     continue
             chunks_with_sources.append({
                 "text": payload.get("text", ""),
@@ -182,27 +175,12 @@ class RAG:
             print(f"Claude API Error: {e}")
             return "I wasn't able to retrieve a confident answer, please refine your question."
 
-    def _inject_sources(self, answer: str, source_files: set) -> str:
-        """Ensure a single, deduplicated Sources section at the end of the answer.
-        If the model already included a Sources section, replace it with our canonical version.
-        """
-        if not source_files:
-            return answer
-
-        import re
-        # Remove any existing Sources section (case-insensitive), from 'Sources:' to end or until two line breaks
-        pattern = re.compile(r"\n\s*\*{0,2}Sources:\*{0,2}[\s\S]*$", re.IGNORECASE)
-        cleaned = re.sub(pattern, "", answer).rstrip()
-
-        source_list = "\n".join([f"- {name}" for name in sorted(source_files)])
-        return f"{cleaned}\n\n**Sources:**\n{source_list}"
-
-    def answer(self, query: str, top_k: int = 5, collection_id: str = None, allowed_file_ids: Optional[set] = None) -> str:
+    def answer(self, query: str, top_k: int = 5, collection_id: str = None) -> str:
         """Main pipeline: retrieve → medium-detailed answer with source references using collection-specific prompt."""
         if self._is_small_talk(query):
             return self._handle_small_talk(query)
 
-        chunks_with_sources = self.retrieve_chunks(query, top_k=top_k, collection_id=collection_id, allowed_file_ids=allowed_file_ids)
+        chunks_with_sources = self.retrieve_chunks(query, top_k=top_k, collection_id=collection_id)
         if not chunks_with_sources:
             return "I wasn't able to retrieve a confident answer, please refine your question."
 
@@ -230,21 +208,26 @@ Question: {query}
 Answer:"""
         
         answer = self.call_ai(enhanced_prompt, model=model, max_tokens=max_tokens, temperature=temperature)
-        return self._inject_sources(answer, source_files)
+        
+        # Ensure sources are included if not already present
+        if source_files and "Sources:" not in answer and "sources:" not in answer.lower():
+            source_list = "\n".join([f"- {file}" for file in sorted(source_files)])
+            answer += f"\n\n**Sources:**\n{source_list}"
+
+        return answer
 
     def answer_with_context(
         self,
         query: str,
         conversation_history: List,
         top_k: int = 5,
-        collection_id: Optional[str] = None,
-        allowed_file_ids: Optional[set] = None
+        collection_id: Optional[str] = None
     ) -> str:
         """Main pipeline with conversation context: retrieve → contextual answer with source references."""
         if self._is_small_talk(query):
             return self._handle_small_talk(query)
 
-        chunks_with_sources = self.retrieve_chunks(query, top_k=top_k, collection_id=collection_id, allowed_file_ids=allowed_file_ids)
+        chunks_with_sources = self.retrieve_chunks(query, top_k=top_k, collection_id=collection_id)
         if not chunks_with_sources:
             return "I wasn't able to retrieve a confident answer, please refine your question."
 
@@ -292,4 +275,10 @@ Question: {query}
 Answer:"""
         
         answer = self.call_ai(enhanced_prompt, model=model, max_tokens=max_tokens, temperature=temperature)
-        return self._inject_sources(answer, source_files)
+        
+        # Ensure sources are included if not already present
+        if "Sources:" not in answer and "sources:" not in answer.lower():
+            source_list = "\n".join([f"- {file}" for file in sorted(source_files)])
+            answer += f"\n\n**Sources:**\n{source_list}"
+
+        return answer
