@@ -1,15 +1,21 @@
 # app/api/routes_files.py
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response, Form
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.vector_singleton import get_vector_store
 from app.core.database import get_db
 from app.api.routes_auth import get_current_user
 from app.utils.file_parser import parse_file
+from app.utils.file_sanitizer import (
+    sanitize_filename,
+    validate_file_extension,
+    validate_file_size,
+)
 from app.services.file_storage import FileStorageService
 from app.models.file_metadata import FileMetadata
+from app.models.user import User
 from app.config import settings
 from app.core.cache import get_cache
 from app.services.activity_tracker import activity_tracker
@@ -108,12 +114,12 @@ async def upload_file(
     for uploaded_file in normalized_files:
         try:
             original_filename = uploaded_file.filename
-            safe_filename = original_filename  # For now, use original filename
-            logger.info(f"[UPLOAD DEBUG] Processing file: {original_filename}")
-            
-            # Validate file extension
+            safe_filename = sanitize_filename(original_filename)
             ext = safe_filename.split(".")[-1].lower() if "." in safe_filename else ""
-            if ext not in allowed_extensions:
+            logger.info(f"[UPLOAD DEBUG] Processing file: {original_filename}")
+
+            # Validate file extension
+            if not validate_file_extension(safe_filename, allowed_extensions):
                 raise HTTPException(status_code=400, detail=f"File type not allowed: {original_filename}")
 
             # Read file content
@@ -122,7 +128,7 @@ async def upload_file(
                 raise HTTPException(status_code=400, detail=f"Uploaded file is empty: {original_filename}")
 
             file_size = len(content)
-            if file_size > settings.MAX_FILE_SIZE_MB * 1024 * 1024:
+            if not validate_file_size(file_size, settings.MAX_FILE_SIZE_MB):
                 raise HTTPException(
                     status_code=400,
                     detail=f"File too large: {original_filename}. Maximum size is {settings.MAX_FILE_SIZE_MB}MB"
@@ -214,11 +220,11 @@ async def delete_file(
     db: Session = Depends(get_db)
 ):
     # Check if user has admin role
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in {"admin", "user_admin", "super_admin"}:
         raise HTTPException(status_code=403, detail="Only admin users can delete files")
-    
-    # Check if file exists in both in-memory store and database
-    if file_id not in file_metadata_db:
+
+    file_record = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
+    if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
 
     try:
@@ -229,10 +235,10 @@ async def delete_file(
         # Delete file from disk and database using FileStorageService
         file_deleted = file_storage_service.delete_file(file_id, db)
         if not file_deleted:
-            logger.warning(f"File {file_id} not found in database but exists in metadata store")
+            logger.warning(f"File {file_id} not found in database during deletion")
 
-        # Remove metadata from in-memory store
-        del file_metadata_db[file_id]
+        # Remove metadata from in-memory store if present
+        file_metadata_db.pop(file_id, None)
 
         # Invalidate cache (all cached answers containing this file)
         try:
@@ -251,7 +257,7 @@ async def delete_file(
             user=current_user["username"],
             details={
                 "file_id": file_id,
-                "file_name": file_metadata_db.get(file_id, {}).get("file_name", "Unknown")
+                "file_name": file_record.file_name,
             }
         )
         
@@ -266,8 +272,51 @@ async def delete_file(
 # List files endpoint
 # ------------------------
 @router.get("/list", response_model=List[FileMeta])
-async def list_files(current_user: dict = Depends(get_current_user)):
-    return list(file_metadata_db.values())
+async def list_files(
+    collection_id: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    role = current_user.get("role")
+    user_id = current_user.get("user_id")
+    website_id = current_user.get("website_id")
+
+    if (not user_id or not website_id) and current_user.get("username"):
+        user_record = db.query(User).filter(User.username == current_user["username"]).first()
+        if user_record:
+            user_id = user_id or user_record.user_id
+            website_id = website_id or user_record.website_id
+
+    query = db.query(FileMetadata)
+
+    if collection_id:
+        query = query.filter(FileMetadata.collection_id == collection_id)
+
+    if role != "super_admin":
+        if website_id:
+            query = query.filter(FileMetadata.website_id == website_id)
+        elif user_id:
+            query = query.filter(FileMetadata.uploader_id == user_id)
+
+    files = query.order_by(FileMetadata.upload_timestamp.desc()).all()
+
+    response_items: List[FileMeta] = []
+    for record in files:
+        uploader_username = record.uploader.username if record.uploader else record.uploader_id
+        item = FileMeta(
+            file_id=record.file_id,
+            file_name=record.file_name,
+            uploaded_by=uploader_username,
+            uploader_id=record.uploader_id,
+            upload_timestamp=record.upload_timestamp.isoformat() if record.upload_timestamp else None,
+            file_size=record.file_size,
+            processing_status=record.processing_status,
+            collection_id=record.collection_id,
+        )
+        response_items.append(item)
+        file_metadata_db[record.file_id] = item
+
+    return response_items
 
 
 # ------------------------
@@ -280,32 +329,40 @@ async def download_file(
     db: Session = Depends(get_db)
 ):
     """Download original file by file_id"""
-    # Check permissions - admin can download any file, users can download their own
-    file_path = file_storage_service.get_file_path(file_id, db)
-    
-    if not file_path:
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    # Get file metadata to check permissions
     file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
-    
+
     if not file_metadata:
         raise HTTPException(status_code=404, detail="File metadata not found")
-    
-    # Check if user has permission to download
-    if current_user.get("role") != "admin" and file_metadata.uploader_id != current_user["username"]:
-        raise HTTPException(status_code=403, detail="Permission denied")
-    
-    # Check if file exists on disk
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found on disk")
-    
-    # Return file using FileResponse (now that aiofiles is installed)
-    return FileResponse(
-        path=file_path,
-        filename=file_metadata.file_name,
-        media_type='application/octet-stream'
-    )
+
+    role = current_user.get("role")
+    current_user_id = current_user.get("user_id")
+    current_user_website = current_user.get("website_id")
+
+    if (not current_user_id or not current_user_website) and current_user.get("username"):
+        user_record = db.query(User).filter(User.username == current_user["username"]).first()
+        if user_record:
+            current_user_id = current_user_id or user_record.user_id
+            current_user_website = current_user_website or user_record.website_id
+
+    if role != "super_admin" and file_metadata.website_id and current_user_website and file_metadata.website_id != current_user_website:
+        raise HTTPException(status_code=403, detail="File belongs to a different website")
+
+    if role not in {"admin", "user_admin", "super_admin"}:
+        if not current_user_id or file_metadata.uploader_id != current_user_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
+
+    binary_record = file_storage_service.get_file_binary(file_id, db)
+    if not binary_record or not binary_record.data:
+        raise HTTPException(status_code=404, detail="File data not found")
+
+    filename = file_metadata.file_name or f"download-{file_id}"
+    media_type = binary_record.mime_type or file_metadata.file_type or "application/octet-stream"
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"'
+    }
+
+    return StreamingResponse(iter([binary_record.data]), media_type=media_type, headers=headers)
 
 
 # ------------------------
@@ -323,10 +380,23 @@ async def get_file_metadata(
     if not file_metadata:
         raise HTTPException(status_code=404, detail="File not found")
     
-    # Check permissions
-    if current_user.get("role") != "admin" and file_metadata.uploader_id != current_user["username"]:
-        raise HTTPException(status_code=403, detail="Permission denied")
-    
+    role = current_user.get("role")
+    current_user_id = current_user.get("user_id")
+    current_user_website = current_user.get("website_id")
+
+    if (not current_user_id or not current_user_website) and current_user.get("username"):
+        user_record = db.query(User).filter(User.username == current_user["username"]).first()
+        if user_record:
+            current_user_id = current_user_id or user_record.user_id
+            current_user_website = current_user_website or user_record.website_id
+
+    if role != "super_admin" and file_metadata.website_id and current_user_website and file_metadata.website_id != current_user_website:
+        raise HTTPException(status_code=403, detail="File belongs to a different website")
+
+    if role not in {"admin", "user_admin", "super_admin"}:
+        if not current_user_id or file_metadata.uploader_id != current_user_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
+
     return file_metadata.to_dict()
 
 
