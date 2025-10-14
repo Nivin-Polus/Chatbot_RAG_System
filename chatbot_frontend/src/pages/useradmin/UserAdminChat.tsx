@@ -483,50 +483,30 @@ export default function UserAdminChat() {
         URL.revokeObjectURL(url);
       };
 
-      const baseUrl = import.meta.env.VITE_API_BASE_URL;
+      const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
 
       try {
-        let downloaded = false;
+        // Direct download by file_id (most reliable method)
+        const response = await fetch(`${baseUrl}/files/download/${sourceRef}`, {
+          method: 'GET',
+          headers,
+        });
 
-        if (selectedCollection && inferredFileName) {
-          const byNameResponse = await fetch(
-            `${baseUrl}/files/download/by-name/${selectedCollection}/${encodedFileName}`,
-            {
-              method: 'GET',
-              headers,
-            }
-          );
-
-          if (byNameResponse.ok) {
-            await triggerBrowserDownload(byNameResponse);
-            downloaded = true;
-          } else if (byNameResponse.status !== 404) {
-            const errorText = await byNameResponse.text();
-            throw new Error(errorText || 'Failed to download source');
-          }
-        }
-
-        if (!downloaded && sourceRef && sourceRef !== inferredFileName) {
-          const byIdResponse = await fetch(`${baseUrl}/files/download/${sourceRef}`, {
-            method: 'GET',
-            headers,
-          });
-
-          if (!byIdResponse.ok) {
-            const errorText = await byIdResponse.text();
-            throw new Error(errorText || 'Failed to download source');
-          }
-
-          await triggerBrowserDownload(byIdResponse);
-          downloaded = true;
-        }
-
-        if (!downloaded) {
-          throw new Error('File reference not available for download');
+        if (response.ok) {
+          await triggerBrowserDownload(response, sourceName);
+          toast.success('Source downloaded successfully');
+        } else if (response.status === 404) {
+          toast.error('Source file not found');
+        } else if (response.status === 403) {
+          toast.error('You do not have permission to download this file');
+        } else {
+          const errorText = await response.text();
+          console.error('Download failed:', errorText);
+          toast.error('Failed to download source file');
         }
       } catch (error) {
-        console.error('Failed to download source', error);
-        toast.error('Failed to download source.');
+        console.error('Download error:', error);
+        toast.error('Failed to download source file');
       }
     },
     [selectedCollection, user?.access_token, accessibleIdsSet, accessibleNamesSet]
@@ -632,15 +612,17 @@ export default function UserAdminChat() {
           }
 
           const [, label, linkTarget] = match;
-          const { displayText, downloadName, sourceRef: inlineReference } = extractSourceInfo(label);
-          const reference = inlineReference ?? linkTarget ?? downloadName ?? label;
-          if (canDownloadSource(reference, downloadName ?? displayText ?? label)) {
+          const { displayText, downloadName } = extractSourceInfo(label);
+          // linkTarget is the file_id from backend format: [filename](file_id)
+          const fileId = linkTarget;
+          const fileName = downloadName || displayText || label;
+          if (canDownloadSource(fileId, fileName)) {
             elements.push(
               <button
                 key={nextKey()}
                 type="button"
                 className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2`}
-                onClick={() => handleDownloadSource(reference, downloadName ?? displayText ?? label)}
+                onClick={() => handleDownloadSource(fileId, fileName)}
               >
                 {displayText.trim() || 'Download source'}
               </button>
@@ -778,25 +760,51 @@ export default function UserAdminChat() {
           const normalizedLabel = trimmed.replace(bulletPattern, '').trim();
           const label = normalizedLabel.length > 0 ? normalizedLabel : trimmed;
 
-          const { displayText, downloadName, sourceRef } = extractSourceInfo(label);
-          const reference = sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
-          if (reference && canDownloadSource(reference, downloadName)) {
-            nodes.push(
-              <button
-                key={nextKey()}
-                type="button"
-                className="block text-left text-primary underline underline-offset-2"
-                onClick={() => handleDownloadSource(reference, downloadName ?? displayText)}
-              >
-                {displayText}
-              </button>
-            );
+          // Parse markdown link format: [filename](file_id)
+          const linkMatch = label.match(/\[([^\]]+)\]\(([^)]+)\)/);
+          
+          if (linkMatch) {
+            const [, fileName, fileId] = linkMatch;
+            if (canDownloadSource(fileId, fileName)) {
+              nodes.push(
+                <button
+                  key={nextKey()}
+                  type="button"
+                  className="block text-left text-primary underline underline-offset-2"
+                  onClick={() => handleDownloadSource(fileId, fileName)}
+                >
+                  {fileName}
+                </button>
+              );
+            } else {
+              nodes.push(
+                <span key={nextKey()} className="block whitespace-pre-wrap">
+                  {fileName}
+                </span>
+              );
+            }
           } else {
-            nodes.push(
-              <span key={nextKey()} className="block whitespace-pre-wrap">
-                {label}
-              </span>
-            );
+            // Fallback for old format
+            const { displayText, downloadName, sourceRef } = extractSourceInfo(label);
+            const reference = sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
+            if (reference && canDownloadSource(reference, downloadName)) {
+              nodes.push(
+                <button
+                  key={nextKey()}
+                  type="button"
+                  className="block text-left text-primary underline underline-offset-2"
+                  onClick={() => handleDownloadSource(reference, downloadName ?? displayText)}
+                >
+                  {displayText}
+                </button>
+              );
+            } else {
+              nodes.push(
+                <span key={nextKey()} className="block whitespace-pre-wrap">
+                  {label}
+                </span>
+              );
+            }
           }
           continue;
         }

@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { User, Send, Loader2, MessageSquare } from 'lucide-react';
-import { ChatMessage } from '@/types/auth';
+import { ChatMessage, ChatSource } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost } from '@/utils/api';
 import { getAssetUrl } from '@/utils/assets';
@@ -110,7 +110,7 @@ export default function SuperadminChat() {
 
   // --- Updated Typing Animation ---
   const streamAssistantResponse = useCallback(
-    (rawContent: string) => {
+    (rawContent: string, sources?: ChatSource[]) => {
       const content = rawContent && rawContent.trim().length > 0
         ? rawContent
         : 'I was unable to generate a response.';
@@ -129,6 +129,7 @@ export default function SuperadminChat() {
           role: 'assistant',
           content: '',
           timestamp,
+          sources,
         },
       ]);
 
@@ -142,7 +143,7 @@ export default function SuperadminChat() {
           }
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.id === messageId ? { ...msg, content } : msg
+              msg.id === messageId ? { ...msg, content, sources } : msg
             )
           );
           scrollToBottom();
@@ -171,7 +172,7 @@ export default function SuperadminChat() {
           index += 1;
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.id === messageId ? { ...msg, content: content.slice(0, index) } : msg
+              msg.id === messageId ? { ...msg, content: content.slice(0, index), sources } : msg
             )
           );
           scrollToBottom();
@@ -353,7 +354,27 @@ export default function SuperadminChat() {
       const assistantContent =
         dataResponse.response || dataResponse.answer || dataResponse.content || 'I was unable to generate a response.';
 
-      await streamAssistantResponse(assistantContent);
+      const sources: ChatSource[] | undefined = Array.isArray(dataResponse.sources)
+        ? dataResponse.sources
+            .map((item: any) => {
+              if (!item || typeof item !== 'object') {
+                return null;
+              }
+              const fileName = typeof item.file_name === 'string' ? item.file_name : undefined;
+              const fileId = typeof item.file_id === 'string' ? item.file_id : undefined;
+
+              if (!fileName) {
+                return null;
+              }
+              return {
+                file_name: fileName,
+                file_id: fileId,
+              } satisfies ChatSource;
+            })
+            .filter((value): value is ChatSource => value !== null)
+        : undefined;
+
+      await streamAssistantResponse(assistantContent, sources);
       setIsLoading(false);
 
       if (user?.access_token && selectedCollection) {
@@ -425,63 +446,55 @@ export default function SuperadminChat() {
         URL.revokeObjectURL(url);
       };
 
-      const baseUrl = import.meta.env.VITE_API_BASE_URL;
+      const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
 
       try {
-        let downloaded = false;
+        // Direct download by file_id (most reliable method)
+        const response = await fetch(`${baseUrl}/files/download/${sourceRef}`, {
+          method: 'GET',
+          headers,
+        });
 
-        if (selectedCollection && inferredFileName) {
-          const byNameResponse = await fetch(
-            `${baseUrl}/files/download/by-name/${selectedCollection}/${encodedFileName}`,
-            {
-              method: 'GET',
-              headers,
-            }
-          );
-
-          if (byNameResponse.ok) {
-            await triggerBrowserDownload(byNameResponse);
-            downloaded = true;
-          } else if (byNameResponse.status !== 404) {
-            const errorText = await byNameResponse.text();
-            throw new Error(errorText || 'Failed to download source');
-          }
-        }
-
-        if (!downloaded && sourceRef && sourceRef !== inferredFileName) {
-          const byIdResponse = await fetch(`${baseUrl}/files/download/${sourceRef}`, {
-            method: 'GET',
-            headers,
-          });
-
-          if (!byIdResponse.ok) {
-            const errorText = await byIdResponse.text();
-            throw new Error(errorText || 'Failed to download source');
-          }
-
-          await triggerBrowserDownload(byIdResponse);
-          downloaded = true;
-        }
-
-        if (!downloaded) {
-          throw new Error('File reference not available for download');
+        if (response.ok) {
+          await triggerBrowserDownload(response, sourceName);
+          toast.success('Source downloaded successfully');
+        } else if (response.status === 404) {
+          toast.error('Source file not found');
+        } else if (response.status === 403) {
+          toast.error('You do not have permission to download this file');
+        } else {
+          const errorText = await response.text();
+          console.error('Download failed:', errorText);
+          toast.error('Failed to download source file');
         }
       } catch (error) {
-        console.error('Failed to download source', error);
-        toast.error('Failed to download source.');
+        console.error('Download error:', error);
+        toast.error('Failed to download source file');
       }
     },
     [selectedCollection, user?.access_token]
   );
 
   const renderMessageContent = useCallback(
-    (content: string, messageId: string) => {
+    (content: string, messageId: string, messageSources?: ChatSource[]) => {
       const nodes: ReactNode[] = [];
       const lines = content.split('\n');
       let inSourcesSection = false;
       let keyCounter = 0;
 
       const nextKey = () => `${messageId}-node-${keyCounter++}`;
+
+      const sourceIdLookup = new Map<string, string>();
+      if (Array.isArray(messageSources)) {
+        for (const source of messageSources) {
+          if (!source || !source.file_name || !source.file_id) continue;
+          const normalized = source.file_name.trim().toLowerCase();
+          if (!normalized) continue;
+          if (!sourceIdLookup.has(normalized)) {
+            sourceIdLookup.set(normalized, source.file_id);
+          }
+        }
+      }
 
       const looksLikeFileName = (value: string | null | undefined) =>
         value ? /\.(pdf|docx?|xlsx?|pptx?|txt|csv|json|md)$/i.test(value) : false;
@@ -530,10 +543,14 @@ export default function SuperadminChat() {
           displayText = raw.trim();
         }
 
+        const normalizedDisplay = displayText.trim().toLowerCase();
+        const matchedFileId = normalizedDisplay ? sourceIdLookup.get(normalizedDisplay) : undefined;
+
         return {
           displayText,
           downloadName,
           sourceRef,
+          matchedFileId,
         };
       };
 
@@ -557,14 +574,16 @@ export default function SuperadminChat() {
           }
 
           const [, label, linkTarget] = match;
-          const { displayText, downloadName, sourceRef: inlineReference } = extractSourceInfo(label);
-          const reference = inlineReference ?? linkTarget ?? downloadName ?? label;
+          const { displayText, downloadName, matchedFileId } = extractSourceInfo(label);
+          // linkTarget is the file_id from backend format: [filename](file_id)
+          const fileId = matchedFileId ?? linkTarget;
+          const fileName = downloadName || displayText || label;
           elements.push(
             <button
               key={nextKey()}
               type="button"
               className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2`}
-              onClick={() => handleDownloadSource(reference, downloadName ?? displayText ?? label)}
+              onClick={() => handleDownloadSource(fileId, fileName)}
             >
               {displayText.trim() || 'Download source'}
             </button>
@@ -687,25 +706,46 @@ export default function SuperadminChat() {
 
         if (inSourcesSection && /^-\s*(.+)$/.test(trimmed)) {
           const label = trimmed.replace(/^-\s*/, '');
-          const { displayText, downloadName, sourceRef } = extractSourceInfo(label);
-          const reference = sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
-          if (reference) {
+          // Parse markdown link format: [filename](file_id)
+          const linkMatch = label.match(/\[([^\]]+)\]\(([^)]+)\)/);
+          
+          if (linkMatch) {
+            const [, fileName, linkTarget] = linkMatch;
+            const normalizedName = fileName.trim().toLowerCase();
+            const matchedFileId = normalizedName ? sourceIdLookup.get(normalizedName) : undefined;
+            const resolvedFileId = matchedFileId ?? linkTarget;
             nodes.push(
               <button
                 key={nextKey()}
                 type="button"
                 className="block text-left text-primary underline underline-offset-2"
-                onClick={() => handleDownloadSource(reference, downloadName ?? displayText)}
+                onClick={() => handleDownloadSource(resolvedFileId, fileName)}
               >
-                {displayText}
+                {fileName}
               </button>
             );
           } else {
-            nodes.push(
-              <span key={nextKey()} className="block whitespace-pre-wrap">
-                {label}
-              </span>
-            );
+            // Fallback for old format
+            const { displayText, downloadName, sourceRef, matchedFileId } = extractSourceInfo(label);
+            const reference = matchedFileId ?? sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
+            if (reference) {
+              nodes.push(
+                <button
+                  key={nextKey()}
+                  type="button"
+                  className="block text-left text-primary underline underline-offset-2"
+                  onClick={() => handleDownloadSource(reference, downloadName ?? displayText)}
+                >
+                  {displayText}
+                </button>
+              );
+            } else {
+              nodes.push(
+                <span key={nextKey()} className="block whitespace-pre-wrap">
+                  {label}
+                </span>
+              );
+            }
           }
           continue;
         }
@@ -877,7 +917,7 @@ export default function SuperadminChat() {
                               </p>
                             </div>
                             <div className="space-y-2 text-sm leading-relaxed">
-                              {renderMessageContent(message.content, message.id)}
+                              {renderMessageContent(message.content, message.id, message.sources)}
                             </div>
                           </div>
                         </div>

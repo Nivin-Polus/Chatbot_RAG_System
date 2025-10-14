@@ -150,7 +150,7 @@ def _process_chat_request(
         if cached_answer:
             answer_text = cached_answer.decode("utf-8")
             logger.info(f"[CACHE HIT] User: {identity_username}, Question: {question}")
-            return ChatResponse(answer=answer_text, session_id=effective_session_id)
+            return ChatResponse(answer=answer_text, session_id=effective_session_id, sources=[])
 
     logger.info(f"[RAG QUERY] User: {identity_username}, Question: {question}, top_k: {top_k}")
 
@@ -167,11 +167,45 @@ def _process_chat_request(
     if vector_store.client is None:
         logger.info(f"[CHAT DEBUG] Fallback storage has {len(vector_store.documents)} documents")
 
+    source_records: dict[str, dict] = {}
+    for chunk in chunks:
+        file_id = chunk.get("file_id")
+        file_name = chunk.get("file_name") or "Unknown File"
+        chunk_index = chunk.get("chunk_index")
+
+        record_key = file_id or file_name
+        if not record_key:
+            continue
+
+        record = source_records.get(record_key)
+        if not record:
+            record = {
+                "file_name": file_name,
+                "file_id": file_id,
+                "chunk_indices": [],
+            }
+            source_records[record_key] = record
+
+        if chunk_index is not None:
+            record["chunk_indices"].append(chunk_index)
+
+    sources_payload = []
+    for record in source_records.values():
+        payload = {
+            "file_name": record.get("file_name", "Unknown File"),
+        }
+        if record.get("file_id"):
+            payload["file_id"] = record["file_id"]
+        if record.get("chunk_indices"):
+            payload["chunk_indices"] = record["chunk_indices"]
+        sources_payload.append(payload)
+
     if not chunks:
         logger.warning(f"[CHAT DEBUG] No chunks found for query: {question}")
         return ChatResponse(
             answer="I wasn't able to retrieve a confident answer, please refine your question.",
             session_id=effective_session_id,
+            sources=[],
         )
 
     try:
@@ -195,6 +229,7 @@ def _process_chat_request(
         return ChatResponse(
             answer="I encountered an error while processing your question. Please try again.",
             session_id=effective_session_id,
+            sources=sources_payload,
         )
 
     if r:
@@ -254,7 +289,7 @@ def _process_chat_request(
     except Exception as e:
         logger.error(f"Failed to log activity: {str(e)}")
 
-    return ChatResponse(answer=answer_text, session_id=effective_session_id)
+    return ChatResponse(answer=answer_text, session_id=effective_session_id, sources=sources_payload)
 
 
 # Chat endpoint

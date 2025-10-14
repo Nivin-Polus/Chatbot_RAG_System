@@ -79,11 +79,17 @@ export interface User {
   collection_ids: string[];
 }
 
+export interface ChatSource {
+  file_name: string;
+  file_id?: string;
+  chunk_indices?: number[];
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
   isGeneric?: boolean;
-  sources?: any[];
+  sources?: ChatSource[];
 }
