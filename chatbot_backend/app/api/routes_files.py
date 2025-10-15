@@ -81,7 +81,20 @@ async def upload_file(
 
     user_id = current_user.get("user_id")
     website_id = current_user.get("website_id")
-    uploader_id = user_id or current_user.get("username")
+
+    user_record = None
+    if user_id:
+        user_record = db.query(User).filter(User.user_id == user_id).first()
+
+    if not user_record and current_user.get("username"):
+        user_record = db.query(User).filter(User.username == current_user["username"]).first()
+
+    if not user_record:
+        raise HTTPException(status_code=403, detail="Authenticated user not found")
+
+    uploader_id = user_record.user_id
+    if not website_id:
+        website_id = user_record.website_id
 
     # Allowed file extensions
     allowed_extensions = {
@@ -121,7 +134,14 @@ async def upload_file(
             }
             logger.info(f"[SAVE FILE] Parameters: {file_params}")
 
-            file_metadata = file_storage_service.save_file_with_website(**file_params)
+            file_metadata = file_storage_service.save_file_with_website(
+                user_id=uploader_id,
+                website_id=website_id,
+                db=db,
+                collection_id=collection_id,
+                filename=safe_filename,
+                file_content=content,
+            )
 
             file_id = file_metadata.file_id
             vector_store = get_vector_store()
