@@ -18,19 +18,16 @@ class FileStorageService:
     
     def save_file_with_website(
         self,
-        *args,
-        user_id: Optional[str] = None,
-        website_id: Optional[str] = None,
-        db: Optional[Session] = None,
-        collection_id: Optional[str] = None,
-        filename: Optional[str] = None,
-        file_content: Optional[bytes] = None,
+        *,  # Force all parameters to be keyword-only
+        user_id: str,
+        website_id: str,
+        db: Session,
+        collection_id: Optional[str],
+        filename: str,
+        file_content: bytes,
     ) -> FileMetadata:
         """
         Save a file with website and user context
-        
-        Backward-compatible with older positional-argument call sites. Supported
-        positional order: (user_id, website_id, db, collection_id, filename, file_content)
         
         Args:
             user_id: ID of the user uploading the file
@@ -39,32 +36,10 @@ class FileStorageService:
             collection_id: Optional collection ID
             filename: Name of the file
             file_content: Binary content of the file
-        
+            
         Returns:
             FileMetadata: The created file metadata record
         """
-        # Map positional args if provided (backward-compatibility)
-        if args:
-            # Fill missing keyword params from positional tuple in order
-            # (user_id, website_id, db, collection_id, filename, file_content)
-            ordered = list(args) + [None] * (6 - len(args))
-            if user_id is None:
-                user_id = ordered[0]
-            if website_id is None:
-                website_id = ordered[1]
-            if db is None:
-                db = ordered[2]
-            if collection_id is None:
-                collection_id = ordered[3]
-            if filename is None:
-                filename = ordered[4]
-            if file_content is None:
-                file_content = ordered[5]
-        
-        # Basic validation
-        if not user_id or not website_id or db is None or not filename or file_content is None:
-            raise HTTPException(status_code=400, detail="Missing required parameters for save_file_with_website")
-        
         try:
             file_id = str(uuid.uuid4())  # Fixed: uuid4() -> uuid.uuid4()
             file_size = len(file_content)
