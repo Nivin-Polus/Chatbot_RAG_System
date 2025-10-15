@@ -102,6 +102,7 @@ def main():
     """Main startup function"""
     logger.info("🤖 RAG Chatbot Backend Startup")
     logger.info("=" * 50)
+    logger.info("🛠️ Startup fingerprint: keyword-only save_file patch active")
     
     # Check dependencies
     if not check_dependencies():
