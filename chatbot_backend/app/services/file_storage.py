@@ -8,13 +8,14 @@ from app.models.file_binary import FileBinary
 from app.config import settings
 import uuid
 import logging
+from datetime import datetime
+import os
 
 logger = logging.getLogger(__name__)
 
 class FileStorageService:
     def save_file(self, file: UploadFile, user_id: str, db: Session) -> FileMetadata:
-        """Save uploaded file and create metadata record (legacy method)"""
-        # For backward compatibility, use default website
+        """Legacy method: Save uploaded file to default website"""
         from app.models.website import Website
         default_website = db.query(Website).first()
         website_id = default_website.website_id if default_website else None
@@ -29,17 +30,17 @@ class FileStorageService:
         self,
         *,
         user_id: str,
-        website_id: Optional[str] = None,
         db: Session,
+        website_id: Optional[str] = None,
         collection_id: Optional[str] = None,
         file: Optional[UploadFile] = None,
         filename: Optional[str] = None,
         file_content: Optional[bytes] = None,
+        save_to_disk: bool = False,
     ) -> FileMetadata:
         """
-        Save uploaded file to database and create metadata record with website_id.
-
-        All arguments after `*` must be passed as keywords to avoid conflicts.
+        Save uploaded file to DB and create metadata record.
+        Keyword-only arguments required to avoid conflicts.
         """
         try:
             # Generate unique file ID
@@ -51,7 +52,6 @@ class FileStorageService:
                 if file_content is None:
                     file.file.seek(0)
                     file_content = file.file.read()
-
                 if filename is None:
                     filename = original_filename
                 mime_type = file.content_type or "application/octet-stream"
@@ -60,27 +60,38 @@ class FileStorageService:
 
             if filename is None:
                 raise HTTPException(status_code=400, detail="Filename is required for file upload")
-
             if file_content is None:
                 raise HTTPException(status_code=400, detail="Uploaded file is empty")
-
             if mime_type is None:
                 guessed_type, _ = mimetypes.guess_type(filename)
                 mime_type = guessed_type or "application/octet-stream"
 
             file_size = len(file_content)
 
-            # Create metadata record with website_id
+            # Optional: save to disk
+            if save_to_disk:
+                storage_dir = settings.FILE_STORAGE_DIR or "/tmp/uploads"
+                os.makedirs(storage_dir, exist_ok=True)
+                disk_path = os.path.join(storage_dir, filename)
+                with open(disk_path, "wb") as f:
+                    f.write(file_content)
+                logger.info(f"File saved to disk: {disk_path}")
+            else:
+                disk_path = None
+
+            # Create metadata record
             file_metadata = FileMetadata(
                 file_id=file_id,
                 file_name=filename,
-                file_path=None,
+                file_path=disk_path,
                 file_size=file_size,
                 file_type=mime_type,
                 website_id=website_id,
                 uploader_id=user_id,
                 collection_id=collection_id,
-                processing_status="pending"
+                processing_status="pending",
+                chunk_count=0,
+                upload_timestamp=datetime.utcnow(),
             )
 
             file_binary = FileBinary(
@@ -89,7 +100,7 @@ class FileStorageService:
                 mime_type=mime_type,
             )
 
-            # Save to database
+            # Save to DB
             db.add(file_metadata)
             db.add(file_binary)
             db.commit()
@@ -97,7 +108,7 @@ class FileStorageService:
 
             logger.info(
                 f"File saved: {file_id} - {filename} ({file_size} bytes) "
-                f"to website {website_id} collection {collection_id}"
+                f"to website {website_id}, collection {collection_id}"
             )
             return file_metadata
 
@@ -146,9 +157,8 @@ class FileStorageService:
             db.rollback()
     
     def get_collection_files(self, collection_id: str, db: Session) -> list:
-        """Get all files in a specific collection - DISABLED: collection_id column doesn't exist"""
-        # Since collection_id column doesn't exist, return empty list
-        return []
+        """Get all files in a specific collection"""
+        return db.query(FileMetadata).filter(FileMetadata.collection_id == collection_id).all()
     
     def get_website_files(self, website_id: str, db: Session) -> list:
         """Get all files for a specific website"""
@@ -163,7 +173,6 @@ class FileStorageService:
                 func.sum(FileMetadata.file_size)
             ).scalar() or 0
             
-            # Get file type distribution
             file_types = db.query(
                 FileMetadata.file_type,
                 func.count(FileMetadata.file_id)
