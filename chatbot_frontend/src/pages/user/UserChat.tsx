@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { User, Send, Loader2, MessageSquare } from 'lucide-react';
-import { Collection, ChatMessage } from '@/types/auth';
+import { Collection, ChatMessage, ChatSource } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost } from '@/utils/api';
 
@@ -130,7 +130,7 @@ export default function UserChat() {
   }, []);
 
   const streamAssistantResponse = useCallback(
-    (rawContent: string) => {
+    (rawContent: string, sources?: ChatSource[]) => {
       const content = rawContent && rawContent.trim().length > 0
         ? rawContent
         : 'I was unable to generate a response.';
@@ -149,6 +149,7 @@ export default function UserChat() {
           role: 'assistant',
           content: '',
           timestamp,
+          sources,
         },
       ]);
 
@@ -162,7 +163,7 @@ export default function UserChat() {
           }
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.id === messageId ? { ...msg, content } : msg
+              msg.id === messageId ? { ...msg, content, sources } : msg
             )
           );
           scrollToBottom();
@@ -192,7 +193,7 @@ export default function UserChat() {
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === messageId
-                ? { ...msg, content: content.slice(0, index) }
+                ? { ...msg, content: content.slice(0, index), sources }
                 : msg
             )
           );
@@ -273,7 +274,27 @@ export default function UserChat() {
       const assistantContent =
         data.answer || data.response || data.content || 'I was unable to generate a response.';
 
-      await streamAssistantResponse(assistantContent);
+      const sources: ChatSource[] | undefined = Array.isArray(data.sources)
+        ? data.sources
+            .map((item: any) => {
+              if (!item || typeof item !== 'object') {
+                return null;
+              }
+              const fileName = typeof item.file_name === 'string' ? item.file_name : undefined;
+              const fileId = typeof item.file_id === 'string' ? item.file_id : undefined;
+
+              if (!fileName) {
+                return null;
+              }
+              return {
+                file_name: fileName,
+                file_id: fileId,
+              } satisfies ChatSource;
+            })
+            .filter((value): value is ChatSource => value !== null)
+        : undefined;
+
+      await streamAssistantResponse(assistantContent, sources);
       setIsLoading(false);
     } catch (error) {
       console.error('Chat error:', error);
@@ -357,13 +378,25 @@ export default function UserChat() {
   );
 
   const renderMessageContent = useCallback(
-    (content: string, messageId: string) => {
+    (content: string, messageId: string, messageSources?: ChatSource[]) => {
       const nodes: ReactNode[] = [];
       const lines = content.split('\n');
       let inSourcesSection = false;
       let keyCounter = 0;
 
       const nextKey = () => `${messageId}-node-${keyCounter++}`;
+
+      const sourceIdLookup = new Map<string, string>();
+      if (Array.isArray(messageSources)) {
+        for (const source of messageSources) {
+          if (!source || !source.file_name || !source.file_id) continue;
+          const normalized = source.file_name.trim().toLowerCase();
+          if (!normalized) continue;
+          if (!sourceIdLookup.has(normalized)) {
+            sourceIdLookup.set(normalized, source.file_id);
+          }
+        }
+      }
 
       const looksLikeFileName = (value: string | null | undefined) =>
         value ? /\.(pdf|docx?|xlsx?|pptx?|txt|csv|json|md)$/i.test(value) : false;
@@ -412,10 +445,14 @@ export default function UserChat() {
           displayText = raw.trim();
         }
 
+        const normalizedDisplay = displayText.trim().toLowerCase();
+        const matchedFileId = normalizedDisplay ? sourceIdLookup.get(normalizedDisplay) : undefined;
+
         return {
           displayText,
           downloadName,
           sourceRef,
+          matchedFileId,
         };
       };
 
@@ -439,9 +476,9 @@ export default function UserChat() {
           }
 
           const [, label, linkTarget] = match;
-          const { displayText, downloadName } = extractSourceInfo(label);
+          const { displayText, downloadName, matchedFileId } = extractSourceInfo(label);
           // linkTarget is the file_id from backend format: [filename](file_id)
-          const fileId = linkTarget;
+          const fileId = matchedFileId ?? linkTarget;
           const fileName = downloadName || displayText || label;
           elements.push(
             <button
@@ -570,26 +607,29 @@ export default function UserChat() {
         }
 
         if (inSourcesSection && /^-\s*(.+)$/.test(trimmed)) {
-          const label = trimmed.replace(/^-\s*/, '');
+          const label = trimmed.replace(/^\-\s*/, '');
           // Parse markdown link format: [filename](file_id)
           const linkMatch = label.match(/\[([^\]]+)\]\(([^)]+)\)/);
           
           if (linkMatch) {
-            const [, fileName, fileId] = linkMatch;
+            const [, fileName, linkTarget] = linkMatch;
+            const normalizedName = fileName.trim().toLowerCase();
+            const matchedFileId = normalizedName ? sourceIdLookup.get(normalizedName) : undefined;
+            const resolvedFileId = matchedFileId ?? linkTarget;
             nodes.push(
               <button
                 key={nextKey()}
                 type="button"
                 className="block text-left text-primary underline underline-offset-2"
-                onClick={() => handleDownloadSource(fileId, fileName)}
+                onClick={() => handleDownloadSource(resolvedFileId, fileName)}
               >
                 {fileName}
               </button>
             );
           } else {
             // Fallback for old format or plain text
-            const { displayText, downloadName, sourceRef } = extractSourceInfo(label);
-            const reference = sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
+            const { displayText, downloadName, sourceRef, matchedFileId } = extractSourceInfo(label);
+            const reference = matchedFileId ?? sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
             if (reference) {
               nodes.push(
                 <button
@@ -772,7 +812,7 @@ export default function UserChat() {
                               </p>
                             </div>
                             <div className="space-y-2 text-sm leading-relaxed">
-                              {renderMessageContent(message.content, message.id)}
+                              {renderMessageContent(message.content, message.id, message.sources)}
                             </div>
                           </div>
                         </div>
