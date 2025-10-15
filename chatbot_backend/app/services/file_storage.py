@@ -27,15 +27,20 @@ class FileStorageService:
     
     def save_file_with_website(
         self,
+        *,
         user_id: str,
-        website_id: Optional[str],
+        website_id: Optional[str] = None,
         db: Session,
         collection_id: Optional[str] = None,
         file: Optional[UploadFile] = None,
         filename: Optional[str] = None,
         file_content: Optional[bytes] = None,
     ) -> FileMetadata:
-        """Save uploaded file to database and create metadata record with website_id"""
+        """
+        Save uploaded file to database and create metadata record with website_id.
+
+        All arguments after `*` must be passed as keywords to avoid conflicts.
+        """
         try:
             # Generate unique file ID
             file_id = str(uuid.uuid4())
@@ -44,7 +49,6 @@ class FileStorageService:
             if file is not None:
                 original_filename = file.filename
                 if file_content is None:
-                    # Ensure pointer at start before reading
                     file.file.seek(0)
                     file_content = file.file.read()
 
@@ -78,7 +82,7 @@ class FileStorageService:
                 collection_id=collection_id,
                 processing_status="pending"
             )
-            
+
             file_binary = FileBinary(
                 file_id=file_id,
                 data=file_content,
@@ -90,13 +94,13 @@ class FileStorageService:
             db.add(file_binary)
             db.commit()
             db.refresh(file_metadata)
-            
+
             logger.info(
                 f"File saved: {file_id} - {filename} ({file_size} bytes) "
                 f"to website {website_id} collection {collection_id}"
             )
             return file_metadata
-            
+
         except Exception as e:
             logger.error(f"Failed to save file: {str(e)}")
             db.rollback()

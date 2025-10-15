@@ -110,15 +110,18 @@ async def upload_file(
             # Parse text chunks for embedding
             text_chunks = parse_file(safe_filename, content)
 
-            # Save file & metadata
-            file_metadata = file_storage_service.save_file_with_website(
-                user_id=uploader_id,
-                website_id=website_id,
-                db=db,
-                collection_id=collection_id,
-                filename=safe_filename,
-                file_content=content,
-            )
+            # --- Save file using safe keyword-only approach ---
+            file_params = {
+                "user_id": uploader_id,
+                "website_id": website_id,
+                "db": db,
+                "collection_id": collection_id,
+                "filename": safe_filename,
+                "file_content": content,
+            }
+            logger.info(f"[SAVE FILE] Parameters: {file_params}")
+
+            file_metadata = file_storage_service.save_file_with_website(**file_params)
 
             file_id = file_metadata.file_id
             vector_store = get_vector_store()
