@@ -14,118 +14,123 @@ import os
 logger = logging.getLogger(__name__)
 
 class FileStorageService:
-    def save_file(self, file: UploadFile, user_id: str, db: Session) -> FileMetadata:
-        """Legacy method: Save uploaded file to default website"""
-        from app.models.website import Website
-        default_website = db.query(Website).first()
-        website_id = default_website.website_id if default_website else None
-        return self.save_file_with_website(
-            user_id=user_id,
-            website_id=website_id,
-            db=db,
-            file=file
-        )
+    """Service for handling file storage operations"""
     
     def save_file_with_website(
         self,
-        *,
+        *,  # Force all parameters to be keyword-only
         user_id: str,
+        website_id: str,
         db: Session,
-        website_id: Optional[str] = None,
-        collection_id: Optional[str] = None,
-        file: Optional[UploadFile] = None,
-        filename: Optional[str] = None,
-        file_content: Optional[bytes] = None,
-        save_to_disk: bool = False,
+        collection_id: Optional[str],
+        filename: str,
+        file_content: bytes,
     ) -> FileMetadata:
         """
-        Save uploaded file to DB and create metadata record.
-        Keyword-only arguments required to avoid conflicts.
+        Save a file with website and user context
+        
+        Args:
+            user_id: ID of the user uploading the file
+            website_id: ID of the website the file belongs to
+            db: Database session
+            collection_id: Optional collection ID
+            filename: Name of the file
+            file_content: Binary content of the file
+            
+        Returns:
+            FileMetadata: The created file metadata record
         """
         try:
-            # Generate unique file ID
-            file_id = str(uuid.uuid4())
-            original_filename: Optional[str] = None
-
-            if file is not None:
-                original_filename = file.filename
-                if file_content is None:
-                    file.file.seek(0)
-                    file_content = file.file.read()
-                if filename is None:
-                    filename = original_filename
-                mime_type = file.content_type or "application/octet-stream"
-            else:
-                mime_type = None
-
-            if filename is None:
-                raise HTTPException(status_code=400, detail="Filename is required for file upload")
-            if file_content is None:
-                raise HTTPException(status_code=400, detail="Uploaded file is empty")
-            if mime_type is None:
-                guessed_type, _ = mimetypes.guess_type(filename)
-                mime_type = guessed_type or "application/octet-stream"
-
+            file_id = str(uuid.uuid4())  # Fixed: uuid4() -> uuid.uuid4()
             file_size = len(file_content)
-
-            # Optional: save to disk
-            if save_to_disk:
-                storage_dir = settings.FILE_STORAGE_DIR or "/tmp/uploads"
-                os.makedirs(storage_dir, exist_ok=True)
-                disk_path = os.path.join(storage_dir, filename)
-                with open(disk_path, "wb") as f:
-                    f.write(file_content)
-                logger.info(f"File saved to disk: {disk_path}")
-            else:
-                disk_path = None
-
-            # Create metadata record
+            
+            # Determine MIME type
+            mime_type = self._get_mime_type(filename)
+            
+            # Create file metadata record
             file_metadata = FileMetadata(
                 file_id=file_id,
                 file_name=filename,
-                file_path=disk_path,
                 file_size=file_size,
                 file_type=mime_type,
-                website_id=website_id,
                 uploader_id=user_id,
+                website_id=website_id,
                 collection_id=collection_id,
-                processing_status="pending",
-                chunk_count=0,
                 upload_timestamp=datetime.utcnow(),
+                processing_status="processing",
+                chunk_count=0,
             )
-
+            
+            # Create file binary record
             file_binary = FileBinary(
                 file_id=file_id,
                 data=file_content,
                 mime_type=mime_type,
             )
-
-            # Save to DB
+            
+            # Save to database
             db.add(file_metadata)
             db.add(file_binary)
             db.commit()
             db.refresh(file_metadata)
-
-            logger.info(
-                f"File saved: {file_id} - {filename} ({file_size} bytes) "
-                f"to website {website_id}, collection {collection_id}"
-            )
+            
+            logger.info(f"[FILE STORAGE] Saved file {file_id} ({filename}) for user {user_id}, website {website_id}")
+            
             return file_metadata
-
+            
         except Exception as e:
-            logger.error(f"Failed to save file: {str(e)}")
             db.rollback()
-            raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+            logger.error(f"[FILE STORAGE ERROR] Failed to save file {filename}: {e}")
+            raise
     
-    def get_file_binary(self, file_id: str, db: Session) -> Optional[FileBinary]:
-        """Retrieve file binary record by file ID"""
-        return db.query(FileBinary).filter(FileBinary.file_id == file_id).first()
+    def _get_mime_type(self, filename: str) -> str:
+        """Determine MIME type from file extension"""
+        ext = filename.split(".")[-1].lower() if "." in filename else ""
+        
+        mime_types = {
+            "pdf": "application/pdf",
+            "txt": "text/plain",
+            "doc": "application/msword",
+            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "xls": "application/vnd.ms-excel",
+            "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "csv": "text/csv",
+            "json": "application/json",
+            "xml": "application/xml",
+            "html": "text/html",
+            "md": "text/markdown",
+        }
+        
+        return mime_types.get(ext, "application/octet-stream")
+    
+    def update_processing_status(
+        self,
+        file_id: str,
+        status: str,
+        chunk_count: int,
+        db: Session
+    ) -> bool:
+        """Update the processing status of a file"""
+        try:
+            file_record = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
+            if file_record:
+                file_record.processing_status = status
+                file_record.chunk_count = chunk_count
+                db.commit()
+                logger.info(f"[FILE STORAGE] Updated status for {file_id}: {status}, chunks: {chunk_count}")
+                return True
+            return False
+        except Exception as e:
+            db.rollback()
+            logger.error(f"[FILE STORAGE ERROR] Failed to update status for {file_id}: {e}")
+            return False
     
     def delete_file(self, file_id: str, db: Session) -> bool:
         """Delete file and associated metadata from database"""
         try:
             file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
             if not file_metadata:
+                logger.warning(f"File metadata not found for deletion: {file_id}")
                 return False
 
             file_binary = db.query(FileBinary).filter(FileBinary.file_id == file_id).first()
@@ -143,18 +148,13 @@ class FileStorageService:
             db.rollback()
             return False
     
-    def update_processing_status(self, file_id: str, status: str, chunk_count: int, db: Session):
-        """Update file processing status"""
+    def get_file_binary(self, file_id: str, db: Session) -> Optional[FileBinary]:
+        """Retrieve file binary data"""
         try:
-            file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
-            if file_metadata:
-                file_metadata.processing_status = status
-                file_metadata.chunk_count = chunk_count
-                db.commit()
-                logger.info(f"File {file_id} status updated to {status} with {chunk_count} chunks")
+            return db.query(FileBinary).filter(FileBinary.file_id == file_id).first()
         except Exception as e:
-            logger.error(f"Failed to update file status: {str(e)}")
-            db.rollback()
+            logger.error(f"[FILE STORAGE ERROR] Failed to retrieve binary for {file_id}: {e}")
+            return None
     
     def get_collection_files(self, collection_id: str, db: Session) -> list:
         """Get all files in a specific collection"""
