@@ -18,7 +18,7 @@ class FileStorageService:
     
     def save_file_with_website(
         self,
-        *args,
+        *,  # Force keyword-only arguments
         user_id: Optional[str] = None,
         website_id: Optional[str] = None,
         db: Optional[Session] = None,
@@ -29,8 +29,7 @@ class FileStorageService:
         """
         Save a file with website and user context
         
-        Backward-compatible with older positional-argument call sites. Supported
-        positional order: (user_id, website_id, db, collection_id, filename, file_content)
+        All parameters must be passed as keyword arguments.
         
         Args:
             user_id: ID of the user uploading the file
@@ -43,23 +42,6 @@ class FileStorageService:
         Returns:
             FileMetadata: The created file metadata record
         """
-        # Map positional args if provided (backward-compatibility)
-        if args:
-            # Fill missing keyword params from positional tuple in order
-            # (user_id, website_id, db, collection_id, filename, file_content)
-            ordered = list(args) + [None] * (6 - len(args))
-            if user_id is None:
-                user_id = ordered[0]
-            if website_id is None:
-                website_id = ordered[1]
-            if db is None:
-                db = ordered[2]
-            if collection_id is None:
-                collection_id = ordered[3]
-            if filename is None:
-                filename = ordered[4]
-            if file_content is None:
-                file_content = ordered[5]
         
         # Log received parameters for diagnostics
         try:
