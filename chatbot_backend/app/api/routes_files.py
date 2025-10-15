@@ -293,8 +293,12 @@ async def download_file(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Download original file by file_id or file_name"""
+    """Download original file by file_id or file_name using collection_id for access control"""
     from app.models.user import User
+
+    role = current_user.get("role")
+    current_user_id = current_user.get("user_id")
+    current_user_collection = current_user.get("collection_id")  # assigned collection
 
     # Try to find by file_id first
     file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == identifier).first()
@@ -307,29 +311,14 @@ async def download_file(
         raise HTTPException(status_code=404, detail="File metadata not found")
 
     # --- Permission check ---
-    role = current_user.get("role")
-    current_user_id = current_user.get("user_id")
-    current_user_website = current_user.get("website_id")
-
-    # Load user info if missing
-    if (not current_user_id or not current_user_website) and current_user.get("username"):
-        user_record = db.query(User).filter(User.username == current_user["username"]).first()
-        if user_record:
-            current_user_id = current_user_id or user_record.user_id
-            current_user_website = current_user_website or user_record.website_id
-
-    # Restrict access to files of other websites (except super_admin)
-    if (
-        role != "super_admin"
-        and file_metadata.website_id
-        and current_user_website
-        and file_metadata.website_id != current_user_website
-    ):
-        raise HTTPException(status_code=403, detail="File belongs to a different website")
-
-    # Restrict user access to only their own uploads (if not admin)
-    if role not in {"admin", "user_admin", "super_admin"}:
-        if not current_user_id or file_metadata.uploader_id != current_user_id:
+    if role == "super_admin":
+        pass  # full access
+    elif role in ["user_admin", "user"]:
+        # allow access if file is in user's collection
+        if file_metadata.collection_id != current_user_collection:
+            raise HTTPException(status_code=403, detail="File belongs to a different collection")
+        # normal users can only access their own files within the collection
+        if role == "user" and file_metadata.uploader_id != current_user_id:
             raise HTTPException(status_code=403, detail="Permission denied")
 
     # --- Fetch file binary ---
@@ -340,17 +329,14 @@ async def download_file(
         raise HTTPException(status_code=404, detail="File data not found")
 
     filename = file_metadata.file_name or f"download-{file_metadata.file_id}"
-    media_type = (
-        binary_record.mime_type
-        or file_metadata.file_type
-        or "application/octet-stream"
-    )
+    media_type = binary_record.mime_type or file_metadata.file_type or "application/octet-stream"
 
     headers = {
         "Content-Disposition": f'attachment; filename="{filename}"'
     }
 
     return StreamingResponse(iter([binary_record.data]), media_type=media_type, headers=headers)
+
 
 
 # ------------------------
