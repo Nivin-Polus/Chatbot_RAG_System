@@ -31,6 +31,7 @@ class FileStorageService:
         
         Backward-compatible with older positional-argument call sites. Supported
         positional order: (user_id, website_id, db, collection_id, filename, file_content)
+        Legacy variant: (uploaded_file: UploadFile, website_id, db, collection_id, user_id, file_content?)
         
         Args:
             user_id: ID of the user uploading the file
@@ -43,10 +44,37 @@ class FileStorageService:
         Returns:
             FileMetadata: The created file metadata record
         """
-        # Map positional args if provided (backward-compatibility)
-        if args:
-            # Fill missing keyword params from positional tuple in order
-            # (user_id, website_id, db, collection_id, filename, file_content)
+        # Legacy mapping when first arg is an UploadFile
+        if args and isinstance(args[0], UploadFile):
+            legacy = list(args)
+            uploaded_file: UploadFile = legacy[0]
+            if website_id is None and len(legacy) > 1:
+                website_id = legacy[1]
+            if db is None and len(legacy) > 2:
+                db = legacy[2]
+            if collection_id is None and len(legacy) > 3:
+                collection_id = legacy[3]
+            if user_id is None and len(legacy) > 4:
+                user_id = legacy[4]
+            # filename from UploadFile if not provided
+            if filename is None:
+                try:
+                    filename = uploaded_file.filename
+                except Exception:
+                    filename = None
+            # file_content: prefer explicit arg if provided; otherwise attempt to read
+            if file_content is None:
+                try:
+                    if len(legacy) > 5 and isinstance(legacy[5], (bytes, bytearray)):
+                        file_content = legacy[5]
+                    else:
+                        # Try to read from file-like object without assuming async
+                        if hasattr(uploaded_file, "file") and hasattr(uploaded_file.file, "read"):
+                            file_content = uploaded_file.file.read()
+                except Exception:
+                    file_content = None
+        elif args:
+            # Default positional mapping: (user_id, website_id, db, collection_id, filename, file_content)
             ordered = list(args) + [None] * (6 - len(args))
             if user_id is None:
                 user_id = ordered[0]
@@ -73,7 +101,6 @@ class FileStorageService:
                 (None if file_content is None else len(file_content)),
             )
         except Exception:
-            # Never fail due to logging issues
             pass
         
         # Basic validation (website_id is optional per DB model)
