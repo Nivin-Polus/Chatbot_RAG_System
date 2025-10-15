@@ -59,17 +59,14 @@ async def upload_file(
     db: Session = Depends(get_db),
 ):
     """Upload one or multiple files"""
-    
     logger.info(f"[UPLOAD DEBUG] Upload request from user: {current_user.get('username')}, role: {current_user.get('role')}")
-    logger.info(f"[UPLOAD DEBUG] Collection ID: {collection_id}")
-    
-    # Check if user has appropriate role
+
+    # Check permissions
     role = current_user.get("role")
     if role not in ["admin", "user_admin", "super_admin"]:
-        logger.warning(f"[UPLOAD ERROR] Unauthorized upload attempt by user: {current_user.get('username')} with role: {role}")
         raise HTTPException(status_code=403, detail="Only admin users can upload files")
 
-    # Normalize files from different input sources
+    # Normalize files
     normalized_files: List[UploadFile] = []
     for file_group in (files, uploaded_files):
         if file_group:
@@ -80,31 +77,13 @@ async def upload_file(
         normalized_files.append(single_file)
 
     if not normalized_files:
-        logger.warning(f"[UPLOAD ERROR] No files provided for upload by user: {current_user.get('username')}")
         raise HTTPException(status_code=400, detail="No files provided for upload")
-    
-    logger.info(f"[UPLOAD DEBUG] Processing {len(normalized_files)} files for upload")
 
     user_id = current_user.get("user_id")
-    user_website_id = current_user.get("website_id")
+    website_id = current_user.get("website_id")
     uploader_id = user_id or current_user.get("username")
 
-    # Get website context if not available
-    if role != "super_admin" and (not user_website_id or not user_id):
-        from app.models.user import User
-        user_obj = db.query(User).filter(User.username == current_user["username"]).first()
-        if user_obj:
-            if not user_website_id and user_obj.website_id:
-                user_website_id = user_obj.website_id
-            if not user_id and user_obj.user_id:
-                user_id = user_obj.user_id
-            if not uploader_id and user_obj.user_id:
-                uploader_id = user_obj.user_id
-
-    if not uploader_id:
-        uploader_id = current_user["username"]
-
-    # Allowed extensions
+    # Allowed file extensions
     allowed_extensions = {
         ext.strip().lower() for ext in settings.ALLOWED_FILE_TYPES.split(",") if ext.strip()
     }
@@ -116,60 +95,49 @@ async def upload_file(
             original_filename = uploaded_file.filename
             safe_filename = sanitize_filename(original_filename)
             ext = safe_filename.split(".")[-1].lower() if "." in safe_filename else ""
-            logger.info(f"[UPLOAD DEBUG] Processing file: {original_filename}")
 
-            # Validate file extension
+            # Validate file type & size
             if not validate_file_extension(safe_filename, allowed_extensions):
                 raise HTTPException(status_code=400, detail=f"File type not allowed: {original_filename}")
 
-            # Read file content
             content = await uploaded_file.read()
             if not content:
                 raise HTTPException(status_code=400, detail=f"Uploaded file is empty: {original_filename}")
 
-            file_size = len(content)
-            if not validate_file_size(file_size, settings.MAX_FILE_SIZE_MB):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"File too large: {original_filename}. Maximum size is {settings.MAX_FILE_SIZE_MB}MB"
-                )
+            if not validate_file_size(len(content), settings.MAX_FILE_SIZE_MB):
+                raise HTTPException(status_code=400, detail=f"File too large: {original_filename}")
 
-            # Parse file content
-            try:
-                text_chunks = parse_file(safe_filename, content)
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Failed to parse file {safe_filename}: {str(e)}")
+            # Parse text chunks for embedding
+            text_chunks = parse_file(safe_filename, content)
 
-            # Save file using FileStorageService
+            # Save file & metadata
             file_metadata = file_storage_service.save_file_with_website(
                 user_id=uploader_id,
-                website_id=user_website_id,
+                website_id=website_id,
                 db=db,
                 collection_id=collection_id,
                 filename=safe_filename,
                 file_content=content,
             )
-            file_id = file_metadata.file_id
 
-            # Get vector store and add documents
+            file_id = file_metadata.file_id
             vector_store = get_vector_store()
+
             for i, chunk in enumerate(text_chunks):
-                chunk_metadata = {
+                metadata = {
                     "file_id": file_id,
                     "file_name": safe_filename,
                     "chunk_index": i,
                     "text": chunk,
-                    "website_id": user_website_id,
+                    "website_id": website_id,
                     "collection_id": collection_id,
                     "uploader_id": uploader_id
                 }
-                vector_store.add_document(chunk, chunk_metadata)
+                vector_store.add_document(chunk, metadata)
 
-            # Update processing status
             file_storage_service.update_processing_status(file_id, "completed", len(text_chunks), db)
 
-            # Create response metadata
-            metadata = FileMeta(
+            meta = FileMeta(
                 file_id=file_id,
                 file_name=safe_filename,
                 uploaded_by=current_user.get("username", "unknown"),
@@ -179,10 +147,10 @@ async def upload_file(
                 processing_status="completed",
                 collection_id=collection_id,
             )
-            results.append(metadata)
-            file_metadata_db[file_id] = metadata
 
-            # Log activity
+            results.append(meta)
+            file_metadata_db[file_id] = meta
+
             activity_tracker.log_activity(
                 activity_type="file_upload",
                 user=current_user["username"],
@@ -194,19 +162,13 @@ async def upload_file(
                     "chunk_count": len(text_chunks),
                     "collection_id": collection_id,
                 },
-                metadata={
-                    "processing_time": "completed",
-                    "vector_store_type": "qdrant" if vector_store.client else "in_memory",
-                },
             )
 
-        except HTTPException:
-            raise
         except Exception as e:
             logger.error(f"[UPLOAD ERROR] Failed to upload {safe_filename}: {e}")
             raise HTTPException(status_code=500, detail=f"File upload failed for {safe_filename}: {str(e)}")
 
-    logger.info(f"[UPLOAD SUCCESS] Successfully uploaded {len(results)} files for user: {current_user.get('username')}")
+    logger.info(f"[UPLOAD SUCCESS] Uploaded {len(results)} files by {current_user.get('username')}")
     return results
 
 
@@ -322,41 +284,64 @@ async def list_files(
 # ------------------------
 # Download file endpoint
 # ------------------------
-@router.get("/download/{file_id}")
+@router.get("/download/{identifier}")
 async def download_file(
-    file_id: str,
+    identifier: str,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Download original file by file_id"""
-    file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
+    """Download original file by file_id or file_name"""
+    from app.models.user import User
+
+    # Try to find by file_id first
+    file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == identifier).first()
+
+    # If not found, try by file_name
+    if not file_metadata:
+        file_metadata = db.query(FileMetadata).filter(FileMetadata.file_name == identifier).first()
 
     if not file_metadata:
         raise HTTPException(status_code=404, detail="File metadata not found")
 
+    # --- Permission check ---
     role = current_user.get("role")
     current_user_id = current_user.get("user_id")
     current_user_website = current_user.get("website_id")
 
+    # Load user info if missing
     if (not current_user_id or not current_user_website) and current_user.get("username"):
         user_record = db.query(User).filter(User.username == current_user["username"]).first()
         if user_record:
             current_user_id = current_user_id or user_record.user_id
             current_user_website = current_user_website or user_record.website_id
 
-    if role != "super_admin" and file_metadata.website_id and current_user_website and file_metadata.website_id != current_user_website:
+    # Restrict access to files of other websites (except super_admin)
+    if (
+        role != "super_admin"
+        and file_metadata.website_id
+        and current_user_website
+        and file_metadata.website_id != current_user_website
+    ):
         raise HTTPException(status_code=403, detail="File belongs to a different website")
 
+    # Restrict user access to only their own uploads (if not admin)
     if role not in {"admin", "user_admin", "super_admin"}:
         if not current_user_id or file_metadata.uploader_id != current_user_id:
             raise HTTPException(status_code=403, detail="Permission denied")
 
-    binary_record = file_storage_service.get_file_binary(file_id, db)
+    # --- Fetch file binary ---
+    file_storage_service = FileStorageService()
+    binary_record = file_storage_service.get_file_binary(file_metadata.file_id, db)
+
     if not binary_record or not binary_record.data:
         raise HTTPException(status_code=404, detail="File data not found")
 
-    filename = file_metadata.file_name or f"download-{file_id}"
-    media_type = binary_record.mime_type or file_metadata.file_type or "application/octet-stream"
+    filename = file_metadata.file_name or f"download-{file_metadata.file_id}"
+    media_type = (
+        binary_record.mime_type
+        or file_metadata.file_type
+        or "application/octet-stream"
+    )
 
     headers = {
         "Content-Disposition": f'attachment; filename="{filename}"'
