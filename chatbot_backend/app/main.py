@@ -38,6 +38,17 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# Configure request body size limit (50MB to accommodate file uploads)
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Set max request body size to 50MB (larger than MAX_FILE_SIZE_MB)
+        return await call_next(request)
+
+app.add_middleware(RequestSizeLimitMiddleware)
+
 # CORS (configurable for production)
 origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",")]
 methods = [method.strip() for method in settings.CORS_METHODS.split(",")]

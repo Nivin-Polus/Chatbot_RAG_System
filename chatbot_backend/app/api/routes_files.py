@@ -112,8 +112,12 @@ async def upload_file(
             if not validate_file_extension(safe_filename, allowed_extensions):
                 raise HTTPException(status_code=400, detail=f"File type not allowed: {original_filename}")
 
+            # Read file content with detailed logging
             content = await uploaded_file.read()
+            logger.info(f"[UPLOAD DEBUG] File '{original_filename}' read: content_type={type(content)}, is_none={content is None}, length={len(content) if content else 0}")
+            
             if not content:
+                logger.error(f"[UPLOAD ERROR] File content is empty or None for: {original_filename}")
                 raise HTTPException(status_code=400, detail=f"Uploaded file is empty: {original_filename}")
 
             if not validate_file_size(len(content), settings.MAX_FILE_SIZE_MB):
@@ -122,17 +126,26 @@ async def upload_file(
             # Parse text chunks for embedding
             text_chunks = parse_file(safe_filename, content)
 
+            # --- Validate all parameters before saving ---
+            logger.info(f"[SAVE FILE DEBUG] Validating parameters before save:")
+            logger.info(f"  - uploader_id: {uploader_id} (type: {type(uploader_id)}, is_none: {uploader_id is None})")
+            logger.info(f"  - website_id: {website_id} (type: {type(website_id)}, is_none: {website_id is None})")
+            logger.info(f"  - db: {db} (type: {type(db)}, is_none: {db is None})")
+            logger.info(f"  - collection_id: {collection_id} (type: {type(collection_id)}, is_none: {collection_id is None})")
+            logger.info(f"  - safe_filename: {safe_filename} (type: {type(safe_filename)}, is_none: {safe_filename is None})")
+            logger.info(f"  - content: length={len(content) if content else 0} (type: {type(content)}, is_none: {content is None})")
+            
+            # Explicit validation before calling save_file_with_website
+            if uploader_id is None:
+                raise HTTPException(status_code=400, detail="uploader_id is None")
+            if db is None:
+                raise HTTPException(status_code=400, detail="database session is None")
+            if safe_filename is None or not safe_filename:
+                raise HTTPException(status_code=400, detail="filename is None or empty")
+            if content is None:
+                raise HTTPException(status_code=400, detail="file_content is None")
+            
             # --- Save file using safe keyword-only approach ---
-            file_params = {
-                "user_id": uploader_id,
-                "website_id": website_id,
-                "db": db,
-                "collection_id": collection_id,
-                "filename": safe_filename,
-                "file_content": content,
-            }
-            logger.info(f"[SAVE FILE] Parameters: {file_params}")
-
             file_metadata = file_storage_service.save_file_with_website(
                 user_id=uploader_id,
                 website_id=website_id,
@@ -141,6 +154,8 @@ async def upload_file(
                 filename=safe_filename,
                 file_content=content,
             )
+            
+            logger.info(f"[SAVE FILE SUCCESS] File saved with ID: {file_metadata.file_id}")
 
             file_id = file_metadata.file_id
             vector_store = get_vector_store()

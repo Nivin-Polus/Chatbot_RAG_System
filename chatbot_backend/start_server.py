@@ -88,7 +88,10 @@ def start_server():
             host=host,
             port=port,
             reload=settings.RELOAD,
-            log_level="info" if not settings.DEBUG else "debug"
+            log_level="info" if not settings.DEBUG else "debug",
+            limit_concurrency=1000,
+            limit_max_requests=10000,
+            timeout_keep_alive=5
         )
         
     except Exception as e:
