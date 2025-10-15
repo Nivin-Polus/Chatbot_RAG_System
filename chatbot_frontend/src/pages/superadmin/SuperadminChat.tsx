@@ -681,8 +681,9 @@ export default function SuperadminChat() {
       for (let i = 0; i < lines.length; i += 1) {
         const rawLine = lines[i];
         const trimmed = rawLine.trim();
+        const isSourcesHeading = /^\**\s*sources?\s*:?\s*\**$/i.test(trimmed);
 
-        if (/^sources?:\s*$/i.test(trimmed)) {
+        if (isSourcesHeading) {
           nodes.push(
             <span
               key={nextKey()}

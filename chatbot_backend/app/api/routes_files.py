@@ -15,6 +15,7 @@ from app.utils.file_sanitizer import (
 )
 from app.services.file_storage import FileStorageService
 from app.models.file_metadata import FileMetadata
+from app.models.collection import Collection
 from app.models.user import User
 from app.config import settings
 from app.core.cache import get_cache
@@ -63,7 +64,7 @@ async def upload_file(
 
     # Check permissions
     role = current_user.get("role")
-    if role not in ["admin", "user_admin", "super_admin"]:
+    if role not in ["user_admin", "super_admin"]:
         raise HTTPException(status_code=403, detail="Only admin users can upload files")
 
     # Normalize files
@@ -79,22 +80,20 @@ async def upload_file(
     if not normalized_files:
         raise HTTPException(status_code=400, detail="No files provided for upload")
 
-    user_id = current_user.get("user_id")
-    website_id = current_user.get("website_id")
-
-    user_record = None
-    if user_id:
-        user_record = db.query(User).filter(User.user_id == user_id).first()
-
-    if not user_record and current_user.get("username"):
-        user_record = db.query(User).filter(User.username == current_user["username"]).first()
-
+    # Get user from database using username (most reliable)
+    username = current_user.get("username")
+    if not username:
+        raise HTTPException(status_code=401, detail="Username not found in token")
+    
+    user_record = db.query(User).filter(User.username == username).first()
     if not user_record:
-        raise HTTPException(status_code=403, detail="Authenticated user not found")
-
+        raise HTTPException(status_code=403, detail=f"User '{username}' not found in database")
+    
+    # Use database values as source of truth
     uploader_id = user_record.user_id
-    if not website_id:
-        website_id = user_record.website_id
+    website_id = user_record.website_id
+    
+    logger.info(f"[UPLOAD] User validated: {username}, user_id: {uploader_id}, website_id: {website_id}")
 
     # Allowed file extensions
     allowed_extensions = {
@@ -205,7 +204,7 @@ async def delete_file(
     db: Session = Depends(get_db)
 ):
     # Check if user has admin role
-    if current_user.get("role") not in {"admin", "user_admin", "super_admin"}:
+    if current_user.get("role") not in {"user_admin", "super_admin"}:
         raise HTTPException(status_code=403, detail="Only admin users can delete files")
 
     file_record = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
@@ -263,21 +262,44 @@ async def list_files(
     db: Session = Depends(get_db)
 ):
     role = current_user.get("role")
-    user_id = current_user.get("user_id")
-    website_id = current_user.get("website_id")
-
-    if (not user_id or not website_id) and current_user.get("username"):
-        user_record = db.query(User).filter(User.username == current_user["username"]).first()
-        if user_record:
-            user_id = user_id or user_record.user_id
-            website_id = website_id or user_record.website_id
+    username = current_user.get("username")
+    
+    # Get user from database for reliable user_id and website_id
+    if not username:
+        raise HTTPException(status_code=401, detail="Username not found in token")
+    
+    user_record = db.query(User).filter(User.username == username).first()
+    if not user_record:
+        raise HTTPException(status_code=403, detail=f"User '{username}' not found in database")
+    
+    user_id = user_record.user_id
+    website_id = user_record.website_id
 
     query = db.query(FileMetadata)
 
-    if collection_id:
-        query = query.filter(FileMetadata.collection_id == collection_id)
+    # Super admin can view everything, optionally scoped to collection_id
+    if role == "super_admin":
+        if collection_id:
+            query = query.filter(FileMetadata.collection_id == collection_id)
+    elif role == "user_admin":
+        # User admin: view files in collections they administer
+        admin_collection_ids = [
+            c.collection_id for c in db.query(Collection).filter(Collection.admin_user_id == user_id).all()
+        ]
+        if not admin_collection_ids:
+            return []
 
-    if role != "super_admin":
+        if collection_id:
+            # Ensure requested collection is administered by this user
+            if collection_id not in admin_collection_ids:
+                raise HTTPException(status_code=403, detail="Access denied to this collection")
+            query = query.filter(FileMetadata.collection_id == collection_id)
+        else:
+            query = query.filter(FileMetadata.collection_id.in_(admin_collection_ids))
+    else:
+        # Regular user: limit to same website (if available) or own uploads
+        if collection_id:
+            query = query.filter(FileMetadata.collection_id == collection_id)
         if website_id:
             query = query.filter(FileMetadata.website_id == website_id)
         elif user_id:
@@ -315,10 +337,20 @@ async def download_file(
 ):
     """Download original file by file_id or file_name using collection_id for access control"""
     from app.models.user import User
+    from app.models.collection import CollectionUser
 
     role = current_user.get("role")
-    current_user_id = current_user.get("user_id")
-    current_user_collection = current_user.get("collection_id")  # assigned collection
+    username = current_user.get("username")
+    
+    # Get user from database
+    if not username:
+        raise HTTPException(status_code=401, detail="Username not found in token")
+    
+    user_record = db.query(User).filter(User.username == username).first()
+    if not user_record:
+        raise HTTPException(status_code=403, detail=f"User '{username}' not found in database")
+    
+    current_user_id = user_record.user_id
 
     # Try to find by file_id first
     file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == identifier).first()
@@ -333,13 +365,30 @@ async def download_file(
     # --- Permission check ---
     if role == "super_admin":
         pass  # full access
-    elif role in ["user_admin", "user"]:
-        # allow access if file is in user's collection
-        if file_metadata.collection_id != current_user_collection:
-            raise HTTPException(status_code=403, detail="File belongs to a different collection")
-        # normal users can only access their own files within the collection
-        if role == "user" and file_metadata.uploader_id != current_user_id:
-            raise HTTPException(status_code=403, detail="Permission denied")
+    elif role == "user_admin":
+        # User admin can access files in collections they administer
+        from app.models.collection import Collection
+        administered_collection = db.query(Collection).filter(
+            Collection.collection_id == file_metadata.collection_id,
+            Collection.admin_user_id == current_user_id
+        ).first()
+        
+        if not administered_collection:
+            raise HTTPException(status_code=403, detail="You don't have permission to access this file")
+    elif role == "user":
+        # Regular user can access files in collections they're members of
+        if not file_metadata.collection_id:
+            raise HTTPException(status_code=403, detail="File has no collection assignment")
+        
+        membership = db.query(CollectionUser).filter(
+            CollectionUser.collection_id == file_metadata.collection_id,
+            CollectionUser.user_id == current_user_id
+        ).first()
+        
+        if not membership:
+            raise HTTPException(status_code=403, detail="You don't have access to this collection")
+    else:
+        raise HTTPException(status_code=403, detail="Invalid role")
 
     # --- Fetch file binary ---
     file_storage_service = FileStorageService()
@@ -375,19 +424,23 @@ async def get_file_metadata(
         raise HTTPException(status_code=404, detail="File not found")
     
     role = current_user.get("role")
-    current_user_id = current_user.get("user_id")
-    current_user_website = current_user.get("website_id")
-
-    if (not current_user_id or not current_user_website) and current_user.get("username"):
-        user_record = db.query(User).filter(User.username == current_user["username"]).first()
-        if user_record:
-            current_user_id = current_user_id or user_record.user_id
-            current_user_website = current_user_website or user_record.website_id
+    username = current_user.get("username")
+    
+    # Get user from database
+    if not username:
+        raise HTTPException(status_code=401, detail="Username not found in token")
+    
+    user_record = db.query(User).filter(User.username == username).first()
+    if not user_record:
+        raise HTTPException(status_code=403, detail=f"User '{username}' not found in database")
+    
+    current_user_id = user_record.user_id
+    current_user_website = user_record.website_id
 
     if role != "super_admin" and file_metadata.website_id and current_user_website and file_metadata.website_id != current_user_website:
         raise HTTPException(status_code=403, detail="File belongs to a different website")
 
-    if role not in {"admin", "user_admin", "super_admin"}:
+    if role not in {"user_admin", "super_admin"}:
         if not current_user_id or file_metadata.uploader_id != current_user_id:
             raise HTTPException(status_code=403, detail="Permission denied")
 
@@ -400,7 +453,7 @@ async def get_file_metadata(
 @router.get("/debug/vector-stats")
 async def get_vector_stats(current_user: dict = Depends(get_current_user)):
     """Debug endpoint to check vector database contents"""
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in {"user_admin", "super_admin"}:
         raise HTTPException(status_code=403, detail="Only admin users can access debug info")
     
     try:

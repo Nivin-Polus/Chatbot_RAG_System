@@ -506,7 +506,7 @@ export default function UserChat() {
         const trimmed = line.trim();
         if (!trimmed) return false;
         if (/^sources?:\s*$/i.test(trimmed)) return false;
-        if (/^-\s+/.test(trimmed)) return false;
+        if (/^\-\s+/.test(trimmed)) return false;
         const pipeCount = (trimmed.match(/\|/g) || []).length;
         if (pipeCount < 2) return false;
         return true;
@@ -592,13 +592,11 @@ export default function UserChat() {
       for (let i = 0; i < lines.length; i += 1) {
         const rawLine = lines[i];
         const trimmed = rawLine.trim();
+        const isSourcesHeading = /^\**\s*sources?\s*:?\s*\**$/i.test(trimmed);
 
-        if (/^sources?:\s*$/i.test(trimmed)) {
+        if (isSourcesHeading) {
           nodes.push(
-            <span
-              key={nextKey()}
-              className="block text-xs font-semibold uppercase text-muted-foreground"
-            >
+            <span key={nextKey()} className="block text-xs font-semibold uppercase text-muted-foreground">
               Sources:
             </span>
           );
@@ -607,10 +605,9 @@ export default function UserChat() {
         }
 
         if (inSourcesSection && /^-\s*(.+)$/.test(trimmed)) {
-          const label = trimmed.replace(/^\-\s*/, '');
-          // Parse markdown link format: [filename](file_id)
+          const label = trimmed.replace(/^-\s*/, '');
           const linkMatch = label.match(/\[([^\]]+)\]\(([^)]+)\)/);
-          
+
           if (linkMatch) {
             const [, fileName, linkTarget] = linkMatch;
             const normalizedName = fileName.trim().toLowerCase();
@@ -627,7 +624,6 @@ export default function UserChat() {
               </button>
             );
           } else {
-            // Fallback for old format or plain text
             const { displayText, downloadName, sourceRef, matchedFileId } = extractSourceInfo(label);
             const reference = matchedFileId ?? sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
             if (reference) {
@@ -686,9 +682,7 @@ export default function UserChat() {
       }
 
       return nodes;
-    },
-    [handleDownloadSource]
-  );
+    }, [handleDownloadSource]);
 
   const handleMessageScroll = useCallback(() => {
     const container = messagesContainerRef.current;

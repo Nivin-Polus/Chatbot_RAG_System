@@ -329,9 +329,18 @@ export default function UserAdminChat() {
         user?.access_token
       );
 
-      let data: any = null;
+      type ChatApiResponse = {
+        answer?: string;
+        response?: string;
+        content?: string;
+        sources?: Array<{ file_name?: string; file_id?: string }>;
+        detail?: string;
+        message?: string;
+        error?: string;
+      };
+      let data: ChatApiResponse | null = null;
       try {
-        data = await response.json();
+        data = (await response.json()) as ChatApiResponse;
       } catch (parseError) {
         data = null;
       }
@@ -393,14 +402,14 @@ export default function UserAdminChat() {
         return;
       }
 
-      const dataResponse = data ?? {};
+      const dataResponse: ChatApiResponse = data ?? {};
 
       const assistantContent =
         dataResponse.response || dataResponse.answer || dataResponse.content || 'I was unable to generate a response.';
 
       const sources: ChatSource[] | undefined = Array.isArray(dataResponse.sources)
         ? dataResponse.sources
-            .map((item: any) => {
+            .map<ChatSource | null>((item: { file_name?: unknown; file_id?: unknown } | null | undefined) => {
               if (!item || typeof item !== 'object') {
                 return null;
               }
@@ -521,7 +530,7 @@ export default function UserAdminChat() {
         toast.error('Failed to download source file');
       }
     },
-    [selectedCollection, user?.access_token, accessibleIdsSet, accessibleNamesSet]
+    [user?.access_token, accessibleIdsSet, accessibleNamesSet]
   );
 
   const renderMessageContent = useCallback(
@@ -570,7 +579,7 @@ export default function UserAdminChat() {
         }
 
         if (!downloadName) {
-          const withoutPrefix = raw.replace(/^source\s*\d+[:\-]?\s*/i, '').trim();
+          const withoutPrefix = raw.replace(/^source\s*\d+[:-]?\s*/i, '').trim();
           if (withoutPrefix && withoutPrefix !== raw.trim() && looksLikeFileName(withoutPrefix)) {
             downloadName = withoutPrefix;
           }
@@ -674,7 +683,7 @@ export default function UserAdminChat() {
         const trimmed = line.trim();
         if (!trimmed) return false;
         if (/^sources?:\s*$/i.test(trimmed)) return false;
-        if (/^\-\s+/.test(trimmed)) return false;
+        if (/^-\s+/.test(trimmed)) return false;
         const pipeCount = (trimmed.match(/\|/g) || []).length;
         if (pipeCount < 2) return false;
         return true;
@@ -760,8 +769,9 @@ export default function UserAdminChat() {
       for (let i = 0; i < lines.length; i += 1) {
         const rawLine = lines[i];
         const trimmed = rawLine.trim();
+        const isSourcesHeading = /^\**\s*sources?\s*:?\s*\**$/i.test(trimmed);
 
-        if (/^sources?:\s*$/i.test(trimmed)) {
+        if (isSourcesHeading) {
           nodes.push(
             <span
               key={nextKey()}
