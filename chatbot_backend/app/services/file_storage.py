@@ -34,7 +34,7 @@ class FileStorageService:
         
         Args:
             user_id: ID of the user uploading the file
-            website_id: ID of the website the file belongs to (optional)
+            website_id: ID of the website the file belongs to
             db: Database session
             collection_id: Optional collection ID
             filename: Name of the file
@@ -61,27 +61,12 @@ class FileStorageService:
             if file_content is None:
                 file_content = ordered[5]
         
-        # Log received parameters for diagnostics
-        try:
-            logger.info(
-                "[FILE STORAGE] save_file_with_website params | user_id=%r website_id=%r db_set=%s collection_id=%r filename=%r content_len=%s",
-                user_id,
-                website_id,
-                bool(db),
-                collection_id,
-                filename,
-                (None if file_content is None else len(file_content)),
-            )
-        except Exception:
-            # Never fail due to logging issues
-            pass
-        
-        # Basic validation (website_id is optional per DB model)
-        if not user_id or db is None or not filename or file_content is None:
+        # Basic validation
+        if not user_id or not website_id or db is None or not filename or file_content is None:
             raise HTTPException(status_code=400, detail="Missing required parameters for save_file_with_website")
         
         try:
-            file_id = str(uuid.uuid4())
+            file_id = str(uuid.uuid4())  # Fixed: uuid4() -> uuid.uuid4()
             file_size = len(file_content)
             
             # Determine MIME type
@@ -94,7 +79,7 @@ class FileStorageService:
                 file_size=file_size,
                 file_type=mime_type,
                 uploader_id=user_id,
-                website_id=website_id,  # optional
+                website_id=website_id,
                 collection_id=collection_id,
                 upload_timestamp=datetime.utcnow(),
                 processing_status="processing",
