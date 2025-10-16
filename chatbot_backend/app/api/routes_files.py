@@ -3,7 +3,8 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Union
+from collections.abc import Sequence
 from app.core.vector_singleton import get_vector_store
 from app.core.database import get_db
 from app.api.routes_auth import get_current_user
@@ -53,7 +54,7 @@ file_metadata_db = {}
 @router.post("/upload", response_model=List[FileMeta])
 async def upload_file(
     files: Optional[List[UploadFile]] = File(None),
-    uploaded_files: Optional[List[UploadFile]] = File(None, alias="uploaded_files"),
+    uploaded_files: Optional[Union[UploadFile, List[UploadFile]]] = File(None, alias="uploaded_files"),
     single_file: Optional[UploadFile] = File(None, alias="file"),
     collection_id: Optional[str] = Form(None),
     current_user: dict = Depends(get_current_user),
@@ -69,11 +70,20 @@ async def upload_file(
 
     # Normalize files
     normalized_files: List[UploadFile] = []
-    for file_group in (files, uploaded_files):
-        if file_group:
-            for candidate in file_group:
-                if candidate and getattr(candidate, "filename", None):
-                    normalized_files.append(candidate)
+
+    def _add_candidates(group):
+        if not group:
+            return
+        if isinstance(group, Sequence) and not isinstance(group, (str, bytes)):
+            items = list(group)
+        else:
+            items = [group]
+        for candidate in items:
+            if candidate and getattr(candidate, "filename", None):
+                normalized_files.append(candidate)
+
+    _add_candidates(files)
+    _add_candidates(uploaded_files)
     if single_file and getattr(single_file, "filename", None):
         normalized_files.append(single_file)
 
