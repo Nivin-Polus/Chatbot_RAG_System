@@ -15,6 +15,7 @@ from app.api.routes_auth import (
 from app.utils.prompt_guard import is_safe_prompt
 from app.services.chat_tracking import ChatTrackingService
 from app.services.activity_tracker import activity_tracker
+from app.utils.chat_history_logger import log_chat_interaction
 from app.models.collection import Collection, CollectionUser
 import redis
 import logging
@@ -288,6 +289,23 @@ def _process_chat_request(
         )
     except Exception as e:
         logger.error(f"Failed to log activity: {str(e)}")
+
+    # Log chat interaction to daily rotating file
+    try:
+        log_chat_interaction(
+            session_id=effective_session_id,
+            user_id=user_id or "anonymous",
+            username=identity_username,
+            role=user_role,
+            collection_id=effective_collection_id,
+            question=question,
+            answer=answer_text,
+            processing_time_ms=processing_time,
+            chunks_retrieved=len(chunks),
+            sources=sources_payload,
+        )
+    except Exception as e:
+        logger.error(f"Failed to log chat history to file: {str(e)}")
 
     return ChatResponse(answer=answer_text, session_id=effective_session_id, sources=sources_payload)
 

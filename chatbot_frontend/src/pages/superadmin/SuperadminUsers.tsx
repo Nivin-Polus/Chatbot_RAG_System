@@ -83,7 +83,12 @@ export default function SuperadminUsers() {
       });
       if (response.ok) {
         const data = await response.json();
-        setUsers(data);
+        setUsers(
+          data.map((item: User) => ({
+            ...item,
+            role: (item.role === 'useradmin' ? 'user_admin' : item.role) as UserRole,
+          })),
+        );
       }
     } catch (error) {
       toast.error('Failed to fetch users');
@@ -112,7 +117,7 @@ export default function SuperadminUsers() {
           email: formData.email,
           full_name: formData.full_name,
           password: formData.password,
-          role: formData.role,
+          role: formData.role === 'useradmin' ? 'user_admin' : formData.role,
           collection_ids: formData.collection_ids,
         }),
       });
@@ -152,7 +157,7 @@ export default function SuperadminUsers() {
             formData.password && editingUser.user_id !== user?.user_id
               ? formData.password
               : undefined,
-          role: formData.role,
+          role: formData.role === 'useradmin' ? 'user_admin' : formData.role,
           collection_ids: formData.collection_ids,
         }),
       });
@@ -203,7 +208,7 @@ export default function SuperadminUsers() {
       email: user.email,
       full_name: user.full_name,
       password: '',
-      role: user.role,
+      role: (user.role === 'useradmin' ? 'user_admin' : user.role) as UserRole,
       collection_ids: user.collection_ids || [],
     });
     setShowPassword(false);
@@ -226,7 +231,13 @@ export default function SuperadminUsers() {
     }));
   };
 
-  const roleOptions = Array.from(new Set(users.map((item) => item.role).filter(Boolean))).sort();
+  const roleOptions = Array.from(
+    new Set(
+      users
+        .map((item) => (item.role === 'useradmin' ? 'user_admin' : item.role))
+        .filter(Boolean),
+    ),
+  ).sort();
   const normalizedSearch = searchTerm.trim().toLowerCase();
 
   const filteredUsers = users.filter((candidate) => {
@@ -268,6 +279,7 @@ export default function SuperadminUsers() {
       case 'admin':
         return 'bg-blue-100 text-blue-800';
       case 'useradmin':
+      case 'user_admin':
         return 'bg-green-100 text-green-800';
       default:
         return 'bg-gray-100 text-gray-800';
@@ -281,6 +293,7 @@ export default function SuperadminUsers() {
       case 'superadmin':
         return 'Superadmin';
       case 'useradmin':
+      case 'user_admin':
         return 'User Admin';
       default:
         return role.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
@@ -398,8 +411,7 @@ export default function SuperadminUsers() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="user">User</SelectItem>
-                        <SelectItem value="useradmin">User Admin</SelectItem>
-                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="user_admin">User Admin</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

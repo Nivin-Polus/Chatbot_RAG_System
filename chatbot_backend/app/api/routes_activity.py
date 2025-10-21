@@ -24,11 +24,12 @@ class ActivityLogRequest(BaseModel):
 @router.get("/recent")
 async def get_recent_activities(
     limit: int = Query(50, ge=1, le=100),
+    since_hours: Optional[int] = Query(None, ge=1, le=24 * 180),
     current_user: dict = Depends(get_current_user)
 ):
     """Get recent activities"""
     try:
-        activities = activity_tracker.get_recent_activities(limit)
+        activities = activity_tracker.get_recent_activities(limit, since_hours)
         return {
             "activities": activities,
             "count": len(activities)

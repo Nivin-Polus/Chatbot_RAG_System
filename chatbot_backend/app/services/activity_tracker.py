@@ -121,16 +121,17 @@ class ActivityTracker:
         finally:
             session.close()
 
-    def get_recent_activities(self, limit: int = 50) -> List[Dict]:
-        """Return the most recent activities."""
+    def get_recent_activities(self, limit: int = 50, since_hours: Optional[int] = None) -> List[Dict]:
+        """Return the most recent activities, optionally filtered by a time window."""
         session = self._get_session()
         try:
-            records = (
-                session.query(ActivityLog)
-                    .order_by(desc(ActivityLog.created_at))
-                    .limit(limit)
-                    .all()
-            )
+            query = session.query(ActivityLog).order_by(desc(ActivityLog.created_at))
+
+            if since_hours is not None and since_hours > 0:
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+                query = query.filter(ActivityLog.created_at >= cutoff)
+
+            records = query.limit(limit).all()
             return [activity.to_dict() for activity in records]
         finally:
             session.close()
