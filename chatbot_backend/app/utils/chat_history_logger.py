@@ -1,10 +1,8 @@
-"""
-Chat History Logger - Logs all chat interactions to daily rotating files
-"""
-import json
+"""Chat History Logger - Stores chat interactions in CSV files."""
+
+import csv
 import logging
 from datetime import datetime
-from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -12,42 +10,13 @@ from typing import Any, Dict, Optional
 CHAT_LOG_DIR = Path("storage/chat_logs")
 CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-# Initialize logger
-_chat_history_logger: Optional[logging.Logger] = None
+logger = logging.getLogger(__name__)
 
 
-def get_chat_history_logger() -> logging.Logger:
-    """Get or create the chat history logger with daily rotation"""
-    global _chat_history_logger
-    
-    if _chat_history_logger is not None:
-        return _chat_history_logger
-    
-    # Create logger
-    logger = logging.getLogger("chat_history")
-    logger.setLevel(logging.INFO)
-    logger.propagate = False
-    
-    # Create handler with daily rotation
-    log_file = CHAT_LOG_DIR / "chat_history.log"
-    handler = TimedRotatingFileHandler(
-        filename=str(log_file),
-        when="midnight",  # Rotate at midnight
-        interval=1,       # Every 1 day
-        backupCount=30,   # Keep 30 days of logs
-        encoding="utf-8",
-    )
-    
-    # Set format to just log the JSON message
-    formatter = logging.Formatter("%(message)s")
-    handler.setFormatter(formatter)
-    
-    # Add handler if not already added
-    if not logger.handlers:
-        logger.addHandler(handler)
-    
-    _chat_history_logger = logger
-    return logger
+def _get_csv_file_path() -> Path:
+    """Return the CSV file path for the current UTC day."""
+    date_str = datetime.utcnow().strftime("%Y-%m-%d")
+    return CHAT_LOG_DIR / f"chat_history_{date_str}.csv"
 
 
 def log_chat_interaction(
@@ -63,50 +32,31 @@ def log_chat_interaction(
     chunks_retrieved: Optional[int] = None,
     sources: Optional[list] = None,
 ) -> None:
-    """
-    Log a chat interaction to the daily rotating file
-    
-    Args:
-        session_id: Chat session identifier
-        user_id: User ID
-        username: Username
-        role: User role (user, user_admin, super_admin)
-        collection_id: Knowledge base collection ID
-        question: User's question
-        answer: AI's response
-        processing_time_ms: Time taken to process (milliseconds)
-        chunks_retrieved: Number of document chunks retrieved
-        sources: List of source documents used
-    """
-    logger = get_chat_history_logger()
-    
-    # Extract only file names from sources
-    source_file_names = []
-    if sources:
-        for source in sources:
-            if isinstance(source, dict) and "file_name" in source:
-                source_file_names.append(source["file_name"])
-    
-    # Build simplified log entry with only question, answer, and source file names
-    log_entry: Dict[str, Any] = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "question": question,
-        "answer": answer,
-        "source_files": source_file_names,
-    }
-    
+    """Append a chat interaction to the CSV log file."""
+
+    csv_path = _get_csv_file_path()
+    write_header = not csv_path.exists()
+
     try:
-        # Log as JSON (one line per interaction)
-        logger.info(json.dumps(log_entry, ensure_ascii=False))
-    except Exception as e:
-        # Fallback logging if JSON serialization fails
-        logger.warning(f"Failed to serialize chat log: {e}")
+        with csv_path.open("a", newline="", encoding="utf-8") as csv_file:
+            writer = csv.writer(csv_file)
+            if write_header:
+                writer.writerow(["knowledge_base", "user", "question", "answer"])
+
+            writer.writerow([
+                collection_id or "",
+                username or "",
+                question or "",
+                answer or "",
+            ])
+    except Exception as exc:
+        logger.warning(f"Failed to write chat interaction to CSV: {exc}")
 
 
 def get_chat_log_stats() -> Dict[str, Any]:
     """Get statistics about chat logs"""
     try:
-        log_files = list(CHAT_LOG_DIR.glob("chat_history.log*"))
+        log_files = list(CHAT_LOG_DIR.glob("chat_history_*.csv"))
         total_size = sum(f.stat().st_size for f in log_files if f.is_file())
         
         return {
