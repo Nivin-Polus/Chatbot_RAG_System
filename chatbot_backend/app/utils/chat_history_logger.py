@@ -2,7 +2,6 @@
 
 import csv
 import logging
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -14,9 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 def _get_csv_file_path() -> Path:
-    """Return the CSV file path for the current UTC day."""
-    date_str = datetime.utcnow().strftime("%Y-%m-%d")
-    return CHAT_LOG_DIR / f"chat_history_{date_str}.csv"
+    """Return the CSV file path for chat history."""
+    return CHAT_LOG_DIR / "chat_history.csv"
 
 
 def log_chat_interaction(
@@ -56,12 +54,12 @@ def log_chat_interaction(
 def get_chat_log_stats() -> Dict[str, Any]:
     """Get statistics about chat logs"""
     try:
-        log_files = list(CHAT_LOG_DIR.glob("chat_history_*.csv"))
-        total_size = sum(f.stat().st_size for f in log_files if f.is_file())
-        
+        csv_path = _get_csv_file_path()
+        total_size = csv_path.stat().st_size if csv_path.exists() else 0
+
         return {
             "log_directory": str(CHAT_LOG_DIR),
-            "total_log_files": len(log_files),
+            "log_file": str(csv_path),
             "total_size_bytes": total_size,
             "total_size_mb": round(total_size / (1024 * 1024), 2),
         }
