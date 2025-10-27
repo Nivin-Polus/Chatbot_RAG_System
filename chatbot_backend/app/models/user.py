@@ -65,8 +65,12 @@ class User(Base):
         return self.role == "user_admin"
     
     def is_regular_user(self) -> bool:
-        """Check if user is a regular user"""
-        return self.role == "user"
+        """Check if user is a regular-level account (includes plugin users)"""
+        return self.role in {"user", "plugin_user"}
+
+    def is_plugin_user(self) -> bool:
+        """Check if user is a plugin user"""
+        return self.role == "plugin_user"
     
     def can_manage_website(self, website_id: str) -> bool:
         """Check if user can manage a specific website"""

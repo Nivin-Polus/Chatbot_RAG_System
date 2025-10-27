@@ -19,7 +19,7 @@ from app.core.database import get_db
 from app.services.activity_tracker import activity_tracker
 
 router = APIRouter()
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/rag/auth/token")
 
 
 @router.post("/token")

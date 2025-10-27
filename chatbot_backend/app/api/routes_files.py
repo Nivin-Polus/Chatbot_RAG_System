@@ -400,8 +400,8 @@ async def download_file(
         
         if not administered_collection:
             raise HTTPException(status_code=403, detail="You don't have permission to access this file")
-    elif role == "user":
-        # Regular user can access files in collections they're members of
+    elif role in {"user", "plugin_user"}:
+        # Regular or plugin users can access files in collections they're members of
         if not file_metadata.collection_id:
             raise HTTPException(status_code=403, detail="File has no collection assignment")
         

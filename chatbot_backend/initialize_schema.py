@@ -296,6 +296,16 @@ def main() -> None:
             website_id=website.website_id,
         )
 
+        _ensure_user(
+            db,
+            username="pluginuser",
+            email="pluginuser@chatbot.local",
+            password="plugin123",
+            full_name="Plugin Integrations",
+            role="plugin_user",
+            website_id=website.website_id,
+        )
+
         _ensure_default_collection(db, website, admin_user)
 
         if not db.query(ActivityStats).first():

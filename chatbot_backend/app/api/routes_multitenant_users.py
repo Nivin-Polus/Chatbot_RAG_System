@@ -288,6 +288,30 @@ async def create_new_user(
             collection = _get_managed_collection(db, current_user, collection_id)
             managed_collections.append(collection)
 
+        is_plugin_role = user_data.role == "plugin_user"
+        if is_plugin_role:
+            if len(incoming_collection_ids) != 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Plugin users must be assigned to exactly one collection"
+                )
+
+            target_collection_id = next(iter(incoming_collection_ids))
+            existing_plugin_user = (
+                db.query(User)
+                .join(CollectionUser, CollectionUser.user_id == User.user_id)
+                .filter(
+                    CollectionUser.collection_id == target_collection_id,
+                    User.role == "plugin_user"
+                )
+                .first()
+            )
+            if existing_plugin_user:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="This collection already has a plugin user"
+                )
+
         # Ensure all selected collections belong to the same website (when defined)
         collection_website_ids = {
             collection.website_id for collection in managed_collections if collection.website_id
@@ -382,7 +406,12 @@ async def create_new_user(
         db.flush()
 
         # Ensure collection assignments exist
-        membership_role = "admin" if new_user.role == "user_admin" else "user"
+        if new_user.role == "user_admin":
+            membership_role = "admin"
+        elif new_user.role == "plugin_user":
+            membership_role = "plugin"
+        else:
+            membership_role = "user"
         persisted_collection_ids: set[str] = set()
 
         for collection in managed_collections:
@@ -395,7 +424,7 @@ async def create_new_user(
                     collection_id=collection.collection_id,
                     user_id=new_user.user_id,
                     role=membership_role,
-                    can_upload=True,
+                    can_upload=new_user.role != "plugin_user",
                     can_download=True,
                     can_delete=new_user.role == "user_admin",
                     assigned_by=current_user.user_id
@@ -403,6 +432,7 @@ async def create_new_user(
                 db.add(assignment)
             else:
                 assignment.role = membership_role
+                assignment.can_upload = new_user.role != "plugin_user"
                 assignment.can_delete = new_user.role == "user_admin"
             persisted_collection_ids.add(collection.collection_id)
 
@@ -491,6 +521,15 @@ async def update_user(
 
     try:
         has_changes = False
+        is_target_plugin_user = user.role == "plugin_user"
+        plugin_collection_ids: set[str] = set()
+        if is_target_plugin_user:
+            plugin_collection_ids = {
+                membership.collection_id
+                for membership in db.query(CollectionUser)
+                .filter(CollectionUser.user_id == user.user_id)
+                .all()
+            }
         collections_provided = (
             user_update.collection_ids is not None or user_update.collection_id is not None
         )
@@ -547,6 +586,31 @@ async def update_user(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="You cannot deactivate your own account"
                 )
+            if is_target_plugin_user and not current_user.is_super_admin():
+                if not plugin_collection_ids:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Plugin user is missing collection assignment"
+                    )
+                # Ensure current user manages the plugin collection
+                managed = False
+                for collection_id in plugin_collection_ids:
+                    try:
+                        _get_managed_collection(db, current_user, collection_id)
+                        managed = True
+                        break
+                    except HTTPException:
+                        continue
+                if not managed:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="You do not manage this plugin user's collection"
+                    )
+            if is_target_plugin_user and user_update.is_active and not plugin_collection_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot activate plugin user without collection"
+                )
             user.is_active = user_update.is_active
             has_changes = True
 
@@ -568,9 +632,38 @@ async def update_user(
 
         if collections_provided:
             managed_collections: List[Collection] = []
-            for collection_id in incoming_collection_ids:
-                collection = _get_managed_collection(db, current_user, collection_id)
-                managed_collections.append(collection)
+
+            if is_target_plugin_user:
+                if len(incoming_collection_ids) != 1:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Plugin users must be assigned to exactly one collection"
+                    )
+
+                target_collection_id = next(iter(incoming_collection_ids))
+                target_collection = _get_managed_collection(db, current_user, target_collection_id)
+
+                existing_plugin_user = (
+                    db.query(User)
+                    .join(CollectionUser, CollectionUser.user_id == User.user_id)
+                    .filter(
+                        CollectionUser.collection_id == target_collection_id,
+                        User.role == "plugin_user",
+                        User.user_id != user.user_id
+                    )
+                    .first()
+                )
+                if existing_plugin_user:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="This collection already has a plugin user"
+                    )
+
+                managed_collections.append(target_collection)
+            else:
+                for collection_id in incoming_collection_ids:
+                    collection = _get_managed_collection(db, current_user, collection_id)
+                    managed_collections.append(collection)
 
             collection_website_ids = {
                 collection.website_id for collection in managed_collections if collection.website_id
@@ -582,7 +675,13 @@ async def update_user(
                     detail="Selected collections span multiple websites. Choose collections from a single website."
                 )
 
-            membership_role = "admin" if user.role == "user_admin" else "user"
+            if user.role == "user_admin":
+                membership_role = "admin"
+            elif user.role == "plugin_user":
+                membership_role = "plugin"
+            else:
+                membership_role = "user"
+
             persisted_collection_ids: set[str] = set()
 
             for collection in managed_collections:
@@ -595,7 +694,7 @@ async def update_user(
                         collection_id=collection.collection_id,
                         user_id=user.user_id,
                         role=membership_role,
-                        can_upload=True,
+                        can_upload=user.role != "plugin_user",
                         can_download=True,
                         can_delete=user.role == "user_admin",
                         assigned_by=current_user.user_id
@@ -603,6 +702,7 @@ async def update_user(
                     db.add(membership)
                 else:
                     membership.role = membership_role
+                    membership.can_upload = user.role != "plugin_user"
                     membership.can_delete = user.role == "user_admin"
                 persisted_collection_ids.add(collection.collection_id)
 

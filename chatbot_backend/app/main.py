@@ -1,6 +1,6 @@
 # app/main.py
 
-from fastapi import FastAPI, Request, Form, Body, HTTPException
+from fastapi import FastAPI, APIRouter, Request, Form, Body, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -62,17 +62,22 @@ app.add_middleware(
     allow_headers=headers,
 )
 
-# Include routers
-app.include_router(routes_auth.router, prefix="/auth", tags=["Authentication"])
-app.include_router(routes_files.router, prefix="/files", tags=["Files"])
-app.include_router(routes_chat.router, prefix="/chat", tags=["Chat"])
-app.include_router(routes_health.router, prefix="/system", tags=["Health & Monitoring"])
-app.include_router(routes_activity.router, prefix="/activity", tags=["Activity Tracking"])
-app.include_router(routes_websites.router, prefix="/websites", tags=["Multi-Tenant Websites"])
-app.include_router(routes_multitenant_users.router, prefix="/users", tags=["Multi-Tenant Users"])
-app.include_router(routes_vector_databases.router, prefix="/vector-databases", tags=["Vector Database Management"])
-app.include_router(routes_prompts.router, prefix="/prompts", tags=["System Prompts"])
-app.include_router(routes_collections.router, tags=["Collections"])
+# API router with global prefix
+api_router = APIRouter(prefix="/rag")
+
+# Include routers under global prefix
+api_router.include_router(routes_auth.router, prefix="/auth", tags=["Authentication"])
+api_router.include_router(routes_files.router, prefix="/files", tags=["Files"])
+api_router.include_router(routes_chat.router, prefix="/chat", tags=["Chat"])
+api_router.include_router(routes_health.router, prefix="/system", tags=["Health & Monitoring"])
+api_router.include_router(routes_activity.router, prefix="/activity", tags=["Activity Tracking"])
+api_router.include_router(routes_websites.router, prefix="/websites", tags=["Multi-Tenant Websites"])
+api_router.include_router(routes_multitenant_users.router, prefix="/users", tags=["Multi-Tenant Users"])
+api_router.include_router(routes_vector_databases.router, prefix="/vector-databases", tags=["Vector Database Management"])
+api_router.include_router(routes_prompts.router, prefix="/prompts", tags=["System Prompts"])
+api_router.include_router(routes_collections.router, tags=["Collections"])
+
+app.include_router(api_router)
 
 
 @contextmanager
@@ -124,6 +129,7 @@ async def _initialize_default_users():
             existing_super_admin = db.query(User).filter(User.role == "super_admin").first()
             existing_user_admin = db.query(User).filter(User.username == "admin").first()
             existing_regular_user = db.query(User).filter(User.username == "user").first()
+            existing_plugin_user = db.query(User).filter(User.username == "pluginuser").first()
 
             # Check if default website already exists
             existing_website = db.query(Website).filter(Website.domain == "localhost").first()
@@ -181,7 +187,6 @@ async def _initialize_default_users():
                 logging.info("✅ Using existing admin user")
 
             if not existing_regular_user:
-                # Create regular user for default website
                 regular_user = User(
                     username="user",
                     email="user@chatbot.local",
@@ -198,11 +203,63 @@ async def _initialize_default_users():
                 regular_user = existing_regular_user
                 logging.info("✅ Using existing regular user")
 
+            if not existing_plugin_user:
+                plugin_user = User(
+                    username="pluginuser",
+                    email="pluginuser@chatbot.local",
+                    password_hash=get_password_hash("plugin123"),
+                    full_name="Plugin User",
+                    role="plugin_user",
+                    website_id=default_website.website_id,
+                    is_active=True,
+                )
+                db.add(plugin_user)
+                db.flush()
+                logging.info("✅ Created plugin user")
+            else:
+                plugin_user = existing_plugin_user
+                if plugin_user.website_id != default_website.website_id:
+                    plugin_user.website_id = default_website.website_id
+                logging.info("✅ Using existing plugin user")
+
+            default_collection = db.query(Collection).filter(Collection.collection_id == "col_default").first()
+            if not default_collection:
+                default_collection = Collection(
+                    collection_id="col_default",
+                    name="Default Collection",
+                    description="Default collection created during setup",
+                    website_id=default_website.website_id,
+                    website_url="https://localhost/",
+                    admin_user_id=user_admin.user_id,
+                    admin_email=user_admin.email,
+                    is_active=True,
+                )
+                db.add(default_collection)
+                db.flush()
+                logging.info("✅ Created default collection for plugin user assignment")
+
+            plugin_membership = db.query(CollectionUser).filter(
+                CollectionUser.collection_id == default_collection.collection_id,
+                CollectionUser.user_id == plugin_user.user_id
+            ).first()
+            if not plugin_membership:
+                db.add(CollectionUser(
+                    collection_id=default_collection.collection_id,
+                    user_id=plugin_user.user_id,
+                    role="plugin",
+                    can_upload=False,
+                    can_download=True,
+                    can_delete=False,
+                    assigned_by=super_admin.user_id if existing_super_admin else user_admin.user_id,
+                ))
+                logging.info("✅ Linked plugin user to default collection")
+
             db.commit()
 
             logging.info("✅ User system initialized:")
             logging.info("   - Super Admin: superadmin/superadmin123 (global access)")
             logging.info("   - Admin: admin/admin123 (admin access)")
+            logging.info("   - Plugin User: pluginuser/plugin123 (per-collection plugin access)")
             logging.info("   - Regular User: user/user123 (regular access)")
 
         finally:
@@ -223,7 +280,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # Health check endpoint
-@app.get("/health", tags=["Health"])
+@api_router.get("/health", tags=["Health"])
 async def health_check():
     try:
         health_service = HealthMonitorService()
@@ -239,7 +296,7 @@ async def root():
     return {"message": "Welcome to the Knowledge Base Chatbot API!"}
 
 
-@app.post("/auth/token")
+@api_router.post("/auth/token")
 async def login_for_access_token(
     username: Optional[str] = Form(None),
     password: Optional[str] = Form(None),

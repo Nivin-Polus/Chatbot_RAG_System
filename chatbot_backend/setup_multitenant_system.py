@@ -160,6 +160,24 @@ def create_multitenant_users():
                 regular_user.website_id = default_website.website_id
                 regular_user.role = "user"
                 print("ℹ️ Updated existing regular user")
+
+            plugin_user = db.query(User).filter(User.username == "pluginuser").first()
+            if not plugin_user:
+                plugin_user = User(
+                    username="pluginuser",
+                    email="pluginuser@chatbot.local",
+                    password_hash=pwd_context.hash("plugin123"),
+                    full_name="Plugin User",
+                    role="plugin_user",
+                    website_id=default_website.website_id,
+                    is_active=True
+                )
+                db.add(plugin_user)
+                print("✅ Created Plugin User: pluginuser/plugin123")
+            else:
+                plugin_user.website_id = default_website.website_id
+                plugin_user.role = "plugin_user"
+                print("ℹ️ Updated existing plugin user")
             
             db.commit()
             
@@ -172,7 +190,9 @@ def create_multitenant_users():
             print("     - Can upload/delete files in their website")
             print("     - Can create and manage regular users")
             print("     - Can assign file access to users")
-            print("  3. Regular User (user/user123)")
+            print("  3. Plugin User (pluginuser/plugin123)")
+            print("     - Provides plugin integrations; handle with caution")
+            print("  4. Regular User (user/user123)")
             print("     - Can only access files explicitly granted to them")
             print("     - Can chat with accessible documents")
             
