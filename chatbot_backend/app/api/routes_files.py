@@ -517,7 +517,8 @@ async def download_file(
         "Content-Disposition": f'attachment; filename="{filename}"'
     }
 
-    data_bytes = bytes(str(binary_record.data), 'utf-8') if binary_record.data is not None else b''
+    # Return the raw binary bytes without any string conversion to avoid corruption
+    data_bytes = binary_record.data if binary_record.data is not None else b""
     return StreamingResponse(iter([data_bytes]), media_type=str(media_type), headers=headers)
 
 
