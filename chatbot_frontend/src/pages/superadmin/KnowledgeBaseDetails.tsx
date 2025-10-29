@@ -194,7 +194,6 @@ export default function KnowledgeBaseDetails() {
     setUploadProgress(initialProgress);
 
     const formData = new FormData();
-    // Fix: Only append files once with the correct field name
     filesArray.forEach((file) => {
       formData.append('uploaded_files', file);
     });
