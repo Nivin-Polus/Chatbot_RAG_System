@@ -1,6 +1,6 @@
 # app/api/routes_files.py
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional, Union
@@ -53,6 +53,7 @@ file_metadata_db = {}
 # ------------------------
 @router.post("/upload", response_model=List[FileMeta])
 async def upload_file(
+    request: Request,
     files: Optional[List[UploadFile]] = File(None),
     uploaded_files: Optional[Union[UploadFile, List[UploadFile]]] = File(None, alias="uploaded_files"),
     single_file: Optional[UploadFile] = File(None, alias="file"),
@@ -104,21 +105,32 @@ async def upload_file(
             logger.info(f"[UPLOAD DEBUG] _add_candidates: checking candidate {i}: {type(candidate)}")
             if candidate:
                 logger.info(f"[UPLOAD DEBUG] _add_candidates: candidate {i} is truthy")
-                # Accept Starlette/FastAPI UploadFile or any object with file-like API
-                has_required_attrs = hasattr(candidate, "filename") and hasattr(candidate, "read")
-                if has_required_attrs:
-                    filename = getattr(candidate, "filename", None)
-                    logger.info(f"[UPLOAD DEBUG] _add_candidates: candidate {i} filename: {filename}")
-                    if filename:
-                        normalized_files.append(candidate)
-                        logger.info(f"[UPLOAD DEBUG] Added file: {filename}")
-                    else:
-                        logger.info(f"[UPLOAD DEBUG] _add_candidates: candidate {i} missing filename")
+                # Accept both FastAPI and Starlette UploadFile via duck typing
+                filename = getattr(candidate, "filename", None)
+                has_read = hasattr(candidate, "read")
+                if filename and has_read:
+                    logger.info(f"[UPLOAD DEBUG] _add_candidates: candidate {i} appears to be UploadFile-like, filename: {filename}")
+                    normalized_files.append(candidate)
+                    logger.info(f"[UPLOAD DEBUG] Added file: {filename}")
                 else:
-                    logger.info(f"[UPLOAD DEBUG] _add_candidates: candidate {i} missing required attrs (filename/read)")
+                    logger.info(f"[UPLOAD DEBUG] _add_candidates: candidate {i} is not UploadFile-like: {type(candidate)} (filename={filename}, has_read={has_read})")
             else:
                 logger.info(f"[UPLOAD DEBUG] _add_candidates: candidate {i} is falsy")
 
+    # Prefer robust extraction from raw multipart form to avoid framework type mismatches
+    try:
+        form = await request.form()
+        # Collect all UploadFile-like values from the form, regardless of field name
+        for key in form.keys():
+            values = form.getlist(key)
+            for v in values:
+                # Skip non-file fields (e.g., collection_id)
+                if hasattr(v, "filename") and hasattr(v, "read"):
+                    _add_candidates([v])
+    except Exception as form_err:
+        logger.info(f"[UPLOAD DEBUG] Failed to read raw multipart form: {form_err}")
+
+    # Also add from annotated params (in case framework populated them)
     _add_candidates(files)
     _add_candidates(uploaded_files)
     if single_file and getattr(single_file, "filename", None):
@@ -505,7 +517,8 @@ async def download_file(
         "Content-Disposition": f'attachment; filename="{filename}"'
     }
 
-    data_bytes = bytes(str(binary_record.data), 'utf-8') if binary_record.data is not None else b''
+    # Return the raw binary bytes without any string conversion to avoid corruption
+    data_bytes = binary_record.data if binary_record.data is not None else b""
     return StreamingResponse(iter([data_bytes]), media_type=str(media_type), headers=headers)
 
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Button } from '@/components/ui/button';
@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Upload, Download, Trash2, Search, Loader2 } from 'lucide-react';
-import { apiGet, apiUpload } from '@/utils/api';
+import { apiUpload } from '@/utils/api';
 import { Collection, FileItem } from '@/types/auth';
 import { toast } from 'sonner';
 
@@ -36,33 +36,22 @@ export default function SuperadminFiles() {
   const [uploadProgress, setUploadProgress] = useState<Record<string, 'pending' | 'success' | 'error'>>({});
 
   useEffect(() => {
-    if (!user?.access_token) {
-      setCollections([]);
-      setFiles([]);
-      setSelectedCollection('');
-      setIsLoading(false);
-      return;
-    }
-
     fetchCollections();
-  }, [user]);
+  }, []);
 
   useEffect(() => {
-    if (!user?.access_token || !selectedCollection) {
-      return;
+    if (selectedCollection) {
+      fetchFiles(selectedCollection);
     }
+  }, [selectedCollection]);
 
-    fetchFiles(selectedCollection);
-  }, [selectedCollection, user]);
-
-  const fetchCollections = useCallback(async () => {
-    if (!user?.access_token) {
-      return;
-    }
-
-    setIsLoading(true);
+  const fetchCollections = async () => {
     try {
-      const response = await apiGet(`${import.meta.env.VITE_API_BASE_URL}/collections/`, user.access_token);
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/collections/`, {
+        headers: {
+          Authorization: `Bearer ${user?.access_token}`,
+        },
+      });
       if (response.ok) {
         const data = await response.json();
         setCollections(data);
@@ -72,38 +61,27 @@ export default function SuperadminFiles() {
     } finally {
       setIsLoading(false);
     }
-  }, [user?.access_token]);
+  };
 
-  const fetchFiles = useCallback(async (collectionId: string) => {
-    if (!user?.access_token) {
-      return;
-    }
-
-    setIsLoading(true);
+  const fetchFiles = async (collectionId: string) => {
     try {
-      const response = await apiGet(
-        `${import.meta.env.VITE_API_BASE_URL}/files/list?collection_id=${collectionId}`,
-        user.access_token
-      );
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/files/list?collection_id=${collectionId}`, {
+        headers: {
+          Authorization: `Bearer ${user?.access_token}`,
+        },
+      });
       if (response.ok) {
         const data = await response.json();
         setFiles(data);
       }
     } catch (error) {
       toast.error('Failed to fetch files');
-    } finally {
-      setIsLoading(false);
     }
-  }, [user?.access_token]);
+  };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = event.target.files;
     if (!selectedFiles || selectedFiles.length === 0 || !selectedCollection) return;
-
-    if (!user?.access_token) {
-      toast.error('Session expired. Please login again.');
-      return;
-    }
 
     const filesArray = Array.from(selectedFiles);
     const allowedTypes = [
@@ -152,7 +130,7 @@ export default function SuperadminFiles() {
       const response = await apiUpload(
         `${import.meta.env.VITE_API_BASE_URL}/files/upload`,
         formData,
-        user.access_token
+        user?.access_token
       );
 
       if (!response.ok) throw new Error('Failed to upload files');
