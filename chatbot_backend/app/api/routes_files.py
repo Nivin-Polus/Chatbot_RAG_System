@@ -62,6 +62,21 @@ async def upload_file(
 ):
     """Upload one or multiple files"""
     logger.info(f"[UPLOAD DEBUG] Upload request from user: {current_user.get('username')}, role: {current_user.get('role')}")
+    
+    # Debug: Log what files we received
+    logger.info(f"[UPLOAD DEBUG] Received files: {files is not None}")
+    logger.info(f"[UPLOAD DEBUG] Received uploaded_files: {uploaded_files is not None}")
+    logger.info(f"[UPLOAD DEBUG] Received single_file: {single_file is not None}")
+    logger.info(f"[UPLOAD DEBUG] Received collection_id: {collection_id}")
+    
+    # Additional debug info for uploaded_files
+    if uploaded_files:
+        if isinstance(uploaded_files, list):
+            logger.info(f"[UPLOAD DEBUG] uploaded_files is a list with {len(uploaded_files)} items")
+            for i, uf in enumerate(uploaded_files):
+                logger.info(f"[UPLOAD DEBUG] uploaded_files[{i}].filename: {getattr(uf, 'filename', 'None')}")
+        else:
+            logger.info(f"[UPLOAD DEBUG] uploaded_files is a single file: {getattr(uploaded_files, 'filename', 'None')}")
 
     # Check permissions
     role = current_user.get("role")
@@ -72,22 +87,48 @@ async def upload_file(
     normalized_files: List[UploadFile] = []
 
     def _add_candidates(group):
+        logger.info(f"[UPLOAD DEBUG] _add_candidates called with group: {type(group)}")
         if not group:
+            logger.info("[UPLOAD DEBUG] _add_candidates: group is falsy, returning")
             return
+        logger.info(f"[UPLOAD DEBUG] _add_candidates: group is not falsy")
+        
         if isinstance(group, Sequence) and not isinstance(group, (str, bytes)):
             items = list(group)
+            logger.info(f"[UPLOAD DEBUG] _add_candidates: group is Sequence, items count: {len(items)}")
         else:
             items = [group]
-        for candidate in items:
-            if candidate and isinstance(candidate, UploadFile) and getattr(candidate, "filename", None):
-                normalized_files.append(candidate)
+            logger.info(f"[UPLOAD DEBUG] _add_candidates: group is not Sequence, items count: {len(items)}")
+            
+        for i, candidate in enumerate(items):
+            logger.info(f"[UPLOAD DEBUG] _add_candidates: checking candidate {i}: {type(candidate)}")
+            if candidate:
+                logger.info(f"[UPLOAD DEBUG] _add_candidates: candidate {i} is truthy")
+                # Accept Starlette/FastAPI UploadFile or any object with file-like API
+                has_required_attrs = hasattr(candidate, "filename") and hasattr(candidate, "read")
+                if has_required_attrs:
+                    filename = getattr(candidate, "filename", None)
+                    logger.info(f"[UPLOAD DEBUG] _add_candidates: candidate {i} filename: {filename}")
+                    if filename:
+                        normalized_files.append(candidate)
+                        logger.info(f"[UPLOAD DEBUG] Added file: {filename}")
+                    else:
+                        logger.info(f"[UPLOAD DEBUG] _add_candidates: candidate {i} missing filename")
+                else:
+                    logger.info(f"[UPLOAD DEBUG] _add_candidates: candidate {i} missing required attrs (filename/read)")
+            else:
+                logger.info(f"[UPLOAD DEBUG] _add_candidates: candidate {i} is falsy")
 
     _add_candidates(files)
     _add_candidates(uploaded_files)
     if single_file and getattr(single_file, "filename", None):
         normalized_files.append(single_file)
+        logger.info(f"[UPLOAD DEBUG] Added single file: {single_file.filename}")
 
+    logger.info(f"[UPLOAD DEBUG] Total normalized files: {len(normalized_files)}")
+    
     if not normalized_files:
+        logger.error("[UPLOAD ERROR] No files provided for upload - files list is empty")
         raise HTTPException(status_code=400, detail="No files provided for upload")
 
     # Get user from database using username (most reliable)
@@ -502,7 +543,10 @@ async def get_file_metadata(
         raise HTTPException(status_code=403, detail="File belongs to a different website")
 
     if role not in {"user_admin", "super_admin"}:
-        if not current_user_id or (file_metadata.uploader_id is not None and current_user_id is not None and str(file_metadata.uploader_id) != str(current_user_id)):
+        # Convert to string values for comparison to avoid boolean evaluation error
+        file_uploader_id = str(file_metadata.uploader_id) if file_metadata.uploader_id is not None else None
+        user_id_str = str(current_user_id) if current_user_id is not None else None
+        if not user_id_str or (file_uploader_id is not None and user_id_str is not None and file_uploader_id != user_id_str):
             raise HTTPException(status_code=403, detail="Permission denied")
 
     return file_metadata.to_dict()
