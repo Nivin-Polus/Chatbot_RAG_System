@@ -163,6 +163,53 @@ def get_current_user_from_token(token: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def create_plugin_user_token(
+    *,
+    user_id: str,
+    username: str,
+    password: str,
+    collection_id: str
+) -> str:
+    """Create a signed token for plugin user credentials."""
+    issued_at = datetime.utcnow()
+    expires_at = issued_at + timedelta(days=settings.PLUGIN_TOKEN_EXPIRE_DAYS)
+
+    payload = {
+        "type": "plugin_user_token",
+        "sub": username,
+        "user_id": user_id,
+        "username": username,
+        "password": password,
+        "collection_id": collection_id,
+        "iat": issued_at,
+        "exp": expires_at,
+    }
+
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+
+def decode_plugin_user_token(token: str) -> Dict[str, str]:
+    """Decode and validate a plugin user token."""
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+    except jwt.ExpiredSignatureError as exc:
+        raise ValueError("Plugin token has expired") from exc
+    except jwt.PyJWTError as exc:
+        raise ValueError("Invalid plugin token") from exc
+
+    if payload.get("type") != "plugin_user_token":
+        raise ValueError("Invalid plugin token type")
+
+    try:
+        return {
+            "collection_id": payload["collection_id"],
+            "username": payload["username"],
+            "password": payload["password"],
+        }
+    except KeyError as exc:
+        raise ValueError("Malformed plugin token payload") from exc
+
+
 def create_user(username: str, password: str, email: str = None, full_name: str = None, role: str = "user") -> Optional[Dict[str, Any]]:
     """Create a new user in the database"""
     try:

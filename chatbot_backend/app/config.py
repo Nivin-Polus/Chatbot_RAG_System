@@ -15,88 +15,98 @@ load_dotenv()
 
 class Settings(BaseSettings):
     # Claude API
-    CLAUDE_API_KEY: str = Field(default="", env="CLAUDE_API_KEY")
-    CLAUDE_API_URL: str = Field("https://api.anthropic.com/v1/messages", env="CLAUDE_API_URL")
-    CLAUDE_MODEL: str = Field("claude-3-haiku-20240307", env="CLAUDE_MODEL")
-    CLAUDE_MAX_TOKENS: int = Field(1000, env="CLAUDE_MAX_TOKENS")
-    CLAUDE_TEMPERATURE: float = Field(0.0, env="CLAUDE_TEMPERATURE")
-    SYSTEM_PROMPT: str = Field("", env="SYSTEM_PROMPT")  # Empty means use default
+    CLAUDE_API_KEY: str = Field(default="", validation_alias="CLAUDE_API_KEY")
+    CLAUDE_API_URL: str = Field("https://api.anthropic.com/v1/messages", validation_alias="CLAUDE_API_URL")
+    CLAUDE_MODEL: str = Field("claude-3-haiku-20240307", validation_alias="CLAUDE_MODEL")
+    CLAUDE_MAX_TOKENS: int = Field(1000, validation_alias="CLAUDE_MAX_TOKENS")
+    CLAUDE_TEMPERATURE: float = Field(0.0, validation_alias="CLAUDE_TEMPERATURE")
+    SYSTEM_PROMPT: str = Field("", validation_alias="SYSTEM_PROMPT")  # Empty means use default
+    
+    # AWS Bedrock Configuration
+    AWS_REGION: str = Field("us-east-1", validation_alias="AWS_REGION")
+    AWS_ACCESS_KEY_ID: str = Field("", validation_alias="AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY: str = Field("", validation_alias="AWS_SECRET_ACCESS_KEY")
+    AWS_MODEL: str = Field("anthropic.claude-3-5-sonnet-20241022-v1:0", validation_alias="AWS_MODEL")
     
     # Server Configuration (from your .env)
-    SERVER_HOST: str = Field("0.0.0.0", env="SERVER_HOST")
-    SERVER_PORT: int = Field(8000, env="SERVER_PORT")
+    SERVER_HOST: str = Field("0.0.0.0", validation_alias="SERVER_HOST")
+    SERVER_PORT: int = Field(8000, validation_alias="SERVER_PORT")
     
     # Frontend Configuration (from your .env)
-    FRONTEND_HOST: str = Field("localhost", env="FRONTEND_HOST")
-    FRONTEND_PORT: int = Field(3000, env="FRONTEND_PORT")
+    FRONTEND_HOST: str = Field("localhost", validation_alias="FRONTEND_HOST")
+    FRONTEND_PORT: int = Field(3000, validation_alias="FRONTEND_PORT")
     
     # Database Configuration - MySQL Support
-    DATABASE_TYPE: str = Field("mysql", env="DATABASE_TYPE")  # mysql, sqlite, postgresql
-    DATABASE_HOST: str = Field("localhost", env="DATABASE_HOST")
-    DATABASE_PORT: int = Field(3306, env="DATABASE_PORT")  # Default MySQL port
-    DATABASE_NAME: str = Field("chatbot_rag", env="DATABASE_NAME")
-    DATABASE_USER: str = Field("root", env="DATABASE_USER")
-    DATABASE_PASSWORD: str = Field("", env="DATABASE_PASSWORD")
-    DATABASE_CHARSET: str = Field("utf8mb4", env="DATABASE_CHARSET")
-    DATABASE_COLLATION: str = Field("utf8mb4_unicode_ci", env="DATABASE_COLLATION")
+    DATABASE_TYPE: str = Field("mysql", validation_alias="DATABASE_TYPE")  # mysql, sqlite, postgresql
+    DATABASE_HOST: str = Field("localhost", validation_alias="DATABASE_HOST")
+    DATABASE_PORT: int = Field(3306, validation_alias="DATABASE_PORT")  # Default MySQL port
+    DATABASE_NAME: str = Field("chatbot_rag", validation_alias="DATABASE_NAME")
+    DATABASE_USER: str = Field("root", validation_alias="DATABASE_USER")
+    DATABASE_PASSWORD: str = Field("", validation_alias="DATABASE_PASSWORD")
+    DATABASE_CHARSET: str = Field("utf8mb4", validation_alias="DATABASE_CHARSET")
+    DATABASE_COLLATION: str = Field("utf8mb4_unicode_ci", validation_alias="DATABASE_COLLATION")
     
     # Connection Pool Settings
-    DATABASE_POOL_SIZE: int = Field(10, env="DATABASE_POOL_SIZE")
-    DATABASE_MAX_OVERFLOW: int = Field(20, env="DATABASE_MAX_OVERFLOW")
-    DATABASE_POOL_TIMEOUT: int = Field(30, env="DATABASE_POOL_TIMEOUT")
-    DATABASE_POOL_RECYCLE: int = Field(3600, env="DATABASE_POOL_RECYCLE")  # 1 hour
+    DATABASE_POOL_SIZE: int = Field(10, validation_alias="DATABASE_POOL_SIZE")
+    DATABASE_MAX_OVERFLOW: int = Field(20, validation_alias="DATABASE_MAX_OVERFLOW")
+    DATABASE_POOL_TIMEOUT: int = Field(30, validation_alias="DATABASE_POOL_TIMEOUT")
+    DATABASE_POOL_RECYCLE: int = Field(3600, validation_alias="DATABASE_POOL_RECYCLE")  # 1 hour
     
     # SSL Configuration for MySQL
-    DATABASE_SSL_DISABLED: bool = Field(False, env="DATABASE_SSL_DISABLED")
-    DATABASE_SSL_CA: str = Field("", env="DATABASE_SSL_CA")
-    DATABASE_SSL_CERT: str = Field("", env="DATABASE_SSL_CERT")
-    DATABASE_SSL_KEY: str = Field("", env="DATABASE_SSL_KEY")
+    DATABASE_SSL_DISABLED: bool = Field(False, validation_alias="DATABASE_SSL_DISABLED")
+    DATABASE_SSL_CA: str = Field("", validation_alias="DATABASE_SSL_CA")
+    DATABASE_SSL_CERT: str = Field("", validation_alias="DATABASE_SSL_CERT")
+    DATABASE_SSL_KEY: str = Field("", validation_alias="DATABASE_SSL_KEY")
     
     # Legacy DATABASE_URL for backward compatibility
-    DATABASE_URL: str = Field("", env="DATABASE_URL")
+    DATABASE_URL: str = Field("", validation_alias="DATABASE_URL")
     
     # Vector DB (Qdrant) - with fallback support
-    VECTOR_DB_URL: str = Field("http://localhost:6333", env="VECTOR_DB_URL")
-    VECTOR_DB_FALLBACK: bool = Field(True, env="VECTOR_DB_FALLBACK")  # Enable fallback mode
+    VECTOR_DB_URL: str = Field("http://localhost:6333", validation_alias="VECTOR_DB_URL")
+    VECTOR_DB_FALLBACK: bool = Field(True, validation_alias="VECTOR_DB_FALLBACK")  # Enable fallback mode
     
     # Redis (optional)
-    USE_REDIS: bool = Field(False, env="USE_REDIS")
-    REDIS_HOST: str = Field("localhost", env="REDIS_HOST")
-    REDIS_PORT: int = Field(6379, env="REDIS_PORT")
-    REDIS_DB: int = Field(0, env="REDIS_DB")
-    REDIS_TIMEOUT: int = Field(5, env="REDIS_TIMEOUT")  # Connection timeout in seconds
+    USE_REDIS: bool = Field(False, validation_alias="USE_REDIS")
+    REDIS_HOST: str = Field("localhost", validation_alias="REDIS_HOST")
+    REDIS_PORT: int = Field(6379, validation_alias="REDIS_PORT")
+    REDIS_DB: int = Field(0, validation_alias="REDIS_DB")
+    REDIS_TIMEOUT: int = Field(5, validation_alias="REDIS_TIMEOUT")  # Connection timeout in seconds
     
     # JWT Auth
-    SECRET_KEY: str = Field(default="", env="SECRET_KEY")
-    ALGORITHM: str = Field("HS256", env="ALGORITHM")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(30, env="ACCESS_TOKEN_EXPIRE_MINUTES")
+    SECRET_KEY: str = Field(default="", validation_alias="SECRET_KEY")
+    ALGORITHM: str = Field("HS256", validation_alias="ALGORITHM")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(30, validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES")
+    PLUGIN_TOKEN_EXPIRE_DAYS: int = Field(30, validation_alias="PLUGIN_TOKEN_EXPIRE_DAYS")
     
     # App mode
-    APP_MODE: str = Field("api", env="APP_MODE")  # "api" or "ui"
+    APP_MODE: str = Field("api", validation_alias="APP_MODE")  # "api" or "ui"
+    
+    # AI Provider
+    AI_PROVIDER: str = Field("claude", validation_alias="AI_PROVIDER")
     
     # File settings
-    MAX_FILE_SIZE_MB: int = Field(25, env="MAX_FILE_SIZE_MB")
-    ALLOWED_FILE_TYPES: str = Field("pdf,docx,pptx,xlsx,txt,csv", env="ALLOWED_FILE_TYPES")
-    UPLOAD_DIR: str = Field("uploads", env="UPLOAD_DIR")
+    MAX_FILE_SIZE_MB: int = Field(25, validation_alias="MAX_FILE_SIZE_MB")
+    ALLOWED_FILE_TYPES: str = Field("pdf,docx,pptx,xlsx,txt,csv", validation_alias="ALLOWED_FILE_TYPES")
+    UPLOAD_DIR: str = Field("uploads", validation_alias="UPLOAD_DIR")
     
     # Server Settings (using SERVER_HOST and SERVER_PORT from .env)
-    HOST: str = Field("0.0.0.0", env="HOST")  # Fallback if HOST is used
-    PORT: int = Field(8000, env="PORT")  # Fallback if PORT is used
-    DEBUG: bool = Field(False, env="DEBUG")
-    RELOAD: bool = Field(False, env="RELOAD")  # Auto-reload in production
+    HOST: str = Field("0.0.0.0", validation_alias="HOST")  # Fallback if HOST is used
+    PORT: int = Field(8000, validation_alias="PORT")  # Fallback if PORT is used
+    DEBUG: bool = Field(False, validation_alias="DEBUG")
+    RELOAD: bool = Field(False, validation_alias="RELOAD")  # Auto-reload in production
     
     # CORS Settings
-    CORS_ORIGINS: str = Field("http://localhost:3000,http://127.0.0.1:3000,http://10.199.100.54:3000", env="CORS_ORIGINS")  # Comma-separated list
-    CORS_METHODS: str = Field("*", env="CORS_METHODS")
-    CORS_HEADERS: str = Field("*", env="CORS_HEADERS")
+    CORS_ORIGINS: str = Field("http://localhost:3000,http://127.0.0.1:3000,http://10.199.100.54:3000", validation_alias="CORS_ORIGINS")  # Comma-separated list
+    CORS_METHODS: str = Field("*", validation_alias="CORS_METHODS")
+    CORS_HEADERS: str = Field("*", validation_alias="CORS_HEADERS")
     
     # Activity Tracking
-    ACTIVITY_LOG_DIR: str = Field("activity_logs", env="ACTIVITY_LOG_DIR")
-    ACTIVITY_RETENTION_DAYS: int = Field(30, env="ACTIVITY_RETENTION_DAYS")
+    ACTIVITY_LOG_DIR: str = Field("activity_logs", validation_alias="ACTIVITY_LOG_DIR")
+    ACTIVITY_RETENTION_DAYS: int = Field(30, validation_alias="ACTIVITY_RETENTION_DAYS")
 
     # API credentials
-    API_USERNAME: str = Field("your_username", env="API_USERNAME")
-    API_PASSWORD_HASH: str = Field("your_hashed_password", env="API_PASSWORD_HASH")
+    API_USERNAME: str = Field("your_username", validation_alias="API_USERNAME")
+    API_PASSWORD_HASH: str = Field("your_hashed_password", validation_alias="API_PASSWORD_HASH")
 
     class Config:
         env_file = ".env"

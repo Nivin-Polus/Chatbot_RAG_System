@@ -2,6 +2,7 @@
 
 import uuid
 import logging
+from typing import Optional
 from app.config import settings
 
 logger = logging.getLogger("vectorstore_logger")
@@ -169,7 +170,7 @@ class VectorStore:
             logger.info(f"Deleted {len(to_delete)} chunks for file {file_id} from memory")
             return len(to_delete)
 
-    def search(self, query: str, top_k: int = 5, collection_id: str = None):
+    def search(self, query: str, top_k: int = 5, collection_id: Optional[str] = None):
         query_vector = self.embeddings.encode(query)
         
         if self.client:

@@ -1,4 +1,4 @@
-export type UserRole = 'super_admin' | 'superadmin' | 'admin' | 'useradmin' | 'user_admin' | 'user';
+export type UserRole = 'super_admin' | 'superadmin' | 'admin' | 'useradmin' | 'user_admin' | 'user' | 'plugin_user';
 
 export interface AuthUser {
   access_token: string;
@@ -8,6 +8,7 @@ export interface AuthUser {
   website_id?: string;
   collection_id?: string;
   collection_ids?: string[];
+  plugin_token?: string;
 }
 
 export interface LoginCredentials {
@@ -77,6 +78,14 @@ export interface User {
   updated_at?: string;
   last_login?: string;
   collection_ids: string[];
+  plugin_token?: string;
+}
+
+export interface UserWithPermissions extends User {
+  accessible_file_ids: string[];
+  can_upload_files: boolean;
+  can_manage_users: boolean;
+  can_manage_website: boolean;
 }
 
 export interface ChatSource {

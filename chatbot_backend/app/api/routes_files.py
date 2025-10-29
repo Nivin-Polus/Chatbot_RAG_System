@@ -79,7 +79,7 @@ async def upload_file(
         else:
             items = [group]
         for candidate in items:
-            if candidate and getattr(candidate, "filename", None):
+            if candidate and isinstance(candidate, UploadFile) and getattr(candidate, "filename", None):
                 normalized_files.append(candidate)
 
     _add_candidates(files)
@@ -100,8 +100,8 @@ async def upload_file(
         raise HTTPException(status_code=403, detail=f"User '{username}' not found in database")
     
     # Use database values as source of truth
-    uploader_id = user_record.user_id
-    website_id = user_record.website_id
+    uploader_id = str(user_record.user_id) if user_record.user_id is not None else None
+    website_id = str(user_record.website_id) if user_record.website_id is not None else None
     
     logger.info(f"[UPLOAD] User validated: {username}, user_id: {uploader_id}, website_id: {website_id}")
 
@@ -112,26 +112,38 @@ async def upload_file(
 
     results: List[FileMeta] = []
 
+    # Process each file individually to ensure partial success
+    failed_files = []
+    
     for uploaded_file in normalized_files:
+        original_filename = uploaded_file.filename
+        if not original_filename:
+            logger.warning("[UPLOAD SKIP] File with no name encountered")
+            continue
+            
         try:
-            original_filename = uploaded_file.filename
             safe_filename = sanitize_filename(original_filename)
             ext = safe_filename.split(".")[-1].lower() if "." in safe_filename else ""
 
             # Validate file type & size
             if not validate_file_extension(safe_filename, allowed_extensions):
-                raise HTTPException(status_code=400, detail=f"File type not allowed: {original_filename}")
+                failed_files.append(f"{original_filename}: File type not allowed")
+                logger.warning(f"[UPLOAD SKIP] File type not allowed: {original_filename}")
+                continue
 
             # Read file content with detailed logging
             content = await uploaded_file.read()
             logger.info(f"[UPLOAD DEBUG] File '{original_filename}' read: content_type={type(content)}, is_none={content is None}, length={len(content) if content else 0}")
             
             if not content:
-                logger.error(f"[UPLOAD ERROR] File content is empty or None for: {original_filename}")
-                raise HTTPException(status_code=400, detail=f"Uploaded file is empty: {original_filename}")
+                failed_files.append(f"{original_filename}: File is empty")
+                logger.warning(f"[UPLOAD SKIP] File content is empty or None for: {original_filename}")
+                continue
 
             if not validate_file_size(len(content), settings.MAX_FILE_SIZE_MB):
-                raise HTTPException(status_code=400, detail=f"File too large: {original_filename}")
+                failed_files.append(f"{original_filename}: File too large")
+                logger.warning(f"[UPLOAD SKIP] File too large: {original_filename}")
+                continue
 
             # Parse text chunks for embedding
             text_chunks = parse_file(safe_filename, content)
@@ -147,18 +159,26 @@ async def upload_file(
             
             # Explicit validation before calling save_file_with_website
             if uploader_id is None:
-                raise HTTPException(status_code=400, detail="uploader_id is None")
+                failed_files.append(f"{original_filename}: uploader_id is None")
+                logger.warning(f"[UPLOAD SKIP] uploader_id is None for: {original_filename}")
+                continue
             if db is None:
-                raise HTTPException(status_code=400, detail="database session is None")
+                failed_files.append(f"{original_filename}: database session is None")
+                logger.warning(f"[UPLOAD SKIP] database session is None for: {original_filename}")
+                continue
             if safe_filename is None or not safe_filename:
-                raise HTTPException(status_code=400, detail="filename is None or empty")
+                failed_files.append(f"{original_filename}: filename is None or empty")
+                logger.warning(f"[UPLOAD SKIP] filename is None or empty for: {original_filename}")
+                continue
             if content is None:
-                raise HTTPException(status_code=400, detail="file_content is None")
+                failed_files.append(f"{original_filename}: file_content is None")
+                logger.warning(f"[UPLOAD SKIP] file_content is None for: {original_filename}")
+                continue
             
             # --- Save file using safe keyword-only approach ---
             file_metadata = file_storage_service.save_file_with_website(
-                user_id=uploader_id,
-                website_id=website_id,
+                user_id=str(uploader_id) if uploader_id else None,
+                website_id=str(website_id) if website_id else None,
                 db=db,
                 collection_id=collection_id,
                 filename=safe_filename,
@@ -167,7 +187,7 @@ async def upload_file(
             
             logger.info(f"[SAVE FILE SUCCESS] File saved with ID: {file_metadata.file_id}")
 
-            file_id = file_metadata.file_id
+            file_id = str(file_metadata.file_id)
             vector_store = get_vector_store()
 
             for i, chunk in enumerate(text_chunks):
@@ -176,9 +196,9 @@ async def upload_file(
                     "file_name": safe_filename,
                     "chunk_index": i,
                     "text": chunk,
-                    "website_id": website_id,
+                    "website_id": str(website_id) if website_id else None,
                     "collection_id": collection_id,
-                    "uploader_id": uploader_id
+                    "uploader_id": str(uploader_id) if uploader_id else None
                 }
                 vector_store.add_document(chunk, metadata)
 
@@ -188,9 +208,9 @@ async def upload_file(
                 file_id=file_id,
                 file_name=safe_filename,
                 uploaded_by=current_user.get("username", "unknown"),
-                uploader_id=uploader_id,
-                upload_timestamp=file_metadata.upload_timestamp.isoformat() if file_metadata.upload_timestamp else None,
-                file_size=file_metadata.file_size,
+                uploader_id=str(uploader_id) if uploader_id else None,
+                upload_timestamp=file_metadata.upload_timestamp.isoformat() if file_metadata.upload_timestamp is not None else None,
+                file_size=int(str(file_metadata.file_size)) if file_metadata.file_size is not None else None,
                 processing_status="completed",
                 collection_id=collection_id,
             )
@@ -204,7 +224,7 @@ async def upload_file(
                 details={
                     "file_name": safe_filename,
                     "file_id": file_id,
-                    "file_size": file_metadata.file_size,
+                    "file_size": int(str(file_metadata.file_size)) if file_metadata.file_size is not None else 0,
                     "file_type": ext,
                     "chunk_count": len(text_chunks),
                     "collection_id": collection_id,
@@ -212,10 +232,25 @@ async def upload_file(
             )
 
         except Exception as e:
-            logger.error(f"[UPLOAD ERROR] Failed to upload {safe_filename}: {e}")
-            raise HTTPException(status_code=500, detail=f"File upload failed for {safe_filename}: {str(e)}")
+            error_msg = f"File upload failed for {original_filename}: {str(e)}"
+            failed_files.append(error_msg)
+            logger.error(f"[UPLOAD ERROR] {error_msg}")
+            # Continue with other files instead of failing the entire request
+            continue
 
-    logger.info(f"[UPLOAD SUCCESS] Uploaded {len(results)} files by {current_user.get('username')}")
+    # If all files failed, return an error
+    if len(results) == 0 and len(normalized_files) > 0:
+        logger.error(f"[UPLOAD COMPLETE FAILURE] All {len(normalized_files)} files failed to upload")
+        raise HTTPException(status_code=500, detail=f"All files failed to upload. Errors: {'; '.join(failed_files)}")
+    
+    # Log results
+    success_count = len(results)
+    total_count = len(normalized_files)
+    if failed_files:
+        logger.warning(f"[UPLOAD PARTIAL SUCCESS] Uploaded {success_count}/{total_count} files. Failed files: {', '.join(failed_files)}")
+    else:
+        logger.info(f"[UPLOAD SUCCESS] Uploaded {success_count}/{total_count} files by {current_user.get('username')}")
+    
     return results
 
 
@@ -325,28 +360,28 @@ async def list_files(
         # Regular user: limit to same website (if available) or own uploads
         if collection_id:
             query = query.filter(FileMetadata.collection_id == collection_id)
-        if website_id:
+        if website_id is not None:
             query = query.filter(FileMetadata.website_id == website_id)
-        elif user_id:
+        elif user_id is not None:
             query = query.filter(FileMetadata.uploader_id == user_id)
 
     files = query.order_by(FileMetadata.upload_timestamp.desc()).all()
 
     response_items: List[FileMeta] = []
     for record in files:
-        uploader_username = record.uploader.username if record.uploader else record.uploader_id
+        uploader_username = str(record.uploader.username) if record.uploader and record.uploader.username else str(record.uploader_id)
         item = FileMeta(
-            file_id=record.file_id,
-            file_name=record.file_name,
+            file_id=str(record.file_id),
+            file_name=str(record.file_name),
             uploaded_by=uploader_username,
-            uploader_id=record.uploader_id,
-            upload_timestamp=record.upload_timestamp.isoformat() if record.upload_timestamp else None,
-            file_size=record.file_size,
-            processing_status=record.processing_status,
-            collection_id=record.collection_id,
+            uploader_id=str(record.uploader_id),
+            upload_timestamp=record.upload_timestamp.isoformat() if record.upload_timestamp is not None else None,
+            file_size=int(str(record.file_size)) if record.file_size is not None else None,
+            processing_status=str(record.processing_status),
+            collection_id=str(record.collection_id) if record.collection_id is not None else None,
         )
         response_items.append(item)
-        file_metadata_db[record.file_id] = item
+        file_metadata_db[str(record.file_id)] = item
 
     return response_items
 
@@ -402,7 +437,7 @@ async def download_file(
             raise HTTPException(status_code=403, detail="You don't have permission to access this file")
     elif role in {"user", "plugin_user"}:
         # Regular or plugin users can access files in collections they're members of
-        if not file_metadata.collection_id:
+        if file_metadata.collection_id is None:
             raise HTTPException(status_code=403, detail="File has no collection assignment")
         
         membership = db.query(CollectionUser).filter(
@@ -417,9 +452,9 @@ async def download_file(
 
     # --- Fetch file binary ---
     file_storage_service = FileStorageService()
-    binary_record = file_storage_service.get_file_binary(file_metadata.file_id, db)
+    binary_record = file_storage_service.get_file_binary(str(file_metadata.file_id), db)
 
-    if not binary_record or not binary_record.data:
+    if not binary_record or binary_record.data is None:
         raise HTTPException(status_code=404, detail="File data not found")
 
     filename = file_metadata.file_name or f"download-{file_metadata.file_id}"
@@ -429,7 +464,8 @@ async def download_file(
         "Content-Disposition": f'attachment; filename="{filename}"'
     }
 
-    return StreamingResponse(iter([binary_record.data]), media_type=media_type, headers=headers)
+    data_bytes = bytes(str(binary_record.data), 'utf-8') if binary_record.data is not None else b''
+    return StreamingResponse(iter([data_bytes]), media_type=str(media_type), headers=headers)
 
 
 
@@ -462,11 +498,11 @@ async def get_file_metadata(
     current_user_id = user_record.user_id
     current_user_website = user_record.website_id
 
-    if role != "super_admin" and file_metadata.website_id and current_user_website and file_metadata.website_id != current_user_website:
+    if role != "super_admin" and file_metadata.website_id is not None and current_user_website is not None and str(file_metadata.website_id) != str(current_user_website):
         raise HTTPException(status_code=403, detail="File belongs to a different website")
 
     if role not in {"user_admin", "super_admin"}:
-        if not current_user_id or file_metadata.uploader_id != current_user_id:
+        if not current_user_id or (file_metadata.uploader_id is not None and current_user_id is not None and str(file_metadata.uploader_id) != str(current_user_id)):
             raise HTTPException(status_code=403, detail="Permission denied")
 
     return file_metadata.to_dict()

@@ -1,5 +1,11 @@
 from typing import List, Dict, Optional
 import requests
+import json
+
+try:
+    import boto3
+except ImportError:
+    boto3 = None
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.system_prompt import SystemPrompt
@@ -25,20 +31,41 @@ Answering Rules:
 
 
 class RAG:
-    def __init__(self, db_session: Session = None):
+    def __init__(self, db_session=None):
         self.db_session = db_session
         self._vector_store = None
 
-        # Claude/LLM settings
-        self.api_key = settings.CLAUDE_API_KEY
+        # LLM configuration
+        self.ai_provider = getattr(settings, "AI_PROVIDER", "claude").lower()
+        self.api_key = getattr(settings, "CLAUDE_API_KEY", None)
         self.endpoint = getattr(settings, "CLAUDE_API_URL", "https://api.anthropic.com/v1/messages")
-        
-        # Default settings (can be overridden by database prompts)
         self.default_model = getattr(settings, "CLAUDE_MODEL", "claude-3-haiku-20240307")
         self.default_max_tokens = getattr(settings, "CLAUDE_MAX_TOKENS", 4000)
         self.default_temperature = getattr(settings, "CLAUDE_TEMPERATURE", 0.7)
         self.default_system_prompt = getattr(settings, "SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
 
+        # AWS Bedrock setup (lazy init)
+        self.aws_region = getattr(settings, "AWS_REGION", "us-east-1")
+        self.aws_model = getattr(settings, "AWS_MODEL", "anthropic.claude-3-5-sonnet-20241022-v1:0")
+        self._bedrock_client = None
+
+    def _get_bedrock_client(self):
+        """Lazily initialize AWS Bedrock client."""
+        if not self._bedrock_client:
+            if boto3 is None:
+                raise ImportError("boto3 is required for AWS Bedrock support but is not installed")
+            # Check if AWS credentials are available in settings
+            if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
+                self._bedrock_client = boto3.client(
+                    "bedrock-runtime",
+                    region_name=self.aws_region,
+                    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
+                )
+            else:
+                # Use default credentials (from IAM roles, ~/.aws/credentials, etc.)
+                self._bedrock_client = boto3.client("bedrock-runtime", region_name=self.aws_region)
+        return self._bedrock_client
     @property
     def vector_store(self):
         """Lazily initialize vector store to avoid PyO3 issues during module import"""
@@ -103,9 +130,11 @@ class RAG:
             print(f"Error getting prompt for collection {collection_id}: {e}")
             return None
 
-    def retrieve_chunks(self, query: str, top_k: int = 5, collection_id: str = None) -> List[Dict]:
+    def retrieve_chunks(self, query: str, top_k: int = 5, collection_id: Optional[str] = None) -> List[Dict]:
         """Search vector DB and return top matching chunks with metadata."""
-        results = self.vector_store.search(query, top_k=top_k, collection_id=collection_id)
+        # Handle None collection_id properly
+        collection_id_str = collection_id if collection_id is not None else None
+        results = self.vector_store.search(query, top_k=top_k, collection_id=collection_id_str)
         chunks_with_sources = []
         for r in results:
             payload = r.get("payload", {})
@@ -150,32 +179,58 @@ class RAG:
 
         return system_prompt, model, max_tokens, temperature
 
-    def call_ai(self, prompt: str, model: str = None, max_tokens: int = None, temperature: float = None) -> str:
-        """Call Claude (or configured LLM)."""
+    def call_ai(self, prompt: str, model: Optional[str] = None, max_tokens: Optional[int] = None, temperature: Optional[float] = None) -> str:
+        """Call the configured AI provider (Anthropic or Bedrock)."""
+        model = model or self.default_model
+        max_tokens = max_tokens or self.default_max_tokens
+        temperature = temperature or self.default_temperature
+
         try:
-            response = requests.post(
-                self.endpoint,
-                headers={
-                    "x-api-key": self.api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json"
-                },
-                json={
-                    "model": model or self.default_model,
-                    "max_tokens": max_tokens or self.default_max_tokens,
-                    "temperature": temperature or self.default_temperature,
+            # --- Case 1: Anthropic direct API ---
+            if self.ai_provider == "claude":
+                response = requests.post(
+                    self.endpoint,
+                    headers={
+                        "x-api-key": self.api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json"
+                    },
+                    json={
+                        "model": model,
+                        "max_tokens": max_tokens,
+                        "temperature": temperature,
+                        "messages": [{"role": "user", "content": prompt}]
+                    },
+                    timeout=20
+                )
+                response.raise_for_status()
+                data = response.json()
+                return data.get("content", [{}])[0].get("text", "").strip()
+
+            # --- Case 2: AWS Bedrock ---
+            elif self.ai_provider == "bedrock":
+                client = self._get_bedrock_client()
+                body = json.dumps({
+                    "anthropic_version": "bedrock-2023-05-31",
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
                     "messages": [{"role": "user", "content": prompt}]
-                },
-                timeout=20
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data.get("content", [{}])[0].get("text", "").strip()
+                })
+                response = client.invoke_model(
+                    modelId=self.aws_model,
+                    body=body
+                )
+                data = json.loads(response["body"].read())
+                return data["content"][0]["text"].strip()
+
+            else:
+                raise ValueError(f"Unsupported AI_PROVIDER: {self.ai_provider}")
+
         except Exception as e:
-            print(f"Claude API Error: {e}")
+            print(f"AI Provider Error ({self.ai_provider}): {e}")
             return "I wasn't able to retrieve a confident answer, please refine your question."
 
-    def answer(self, query: str, top_k: int = 5, collection_id: str = None) -> str:
+    def answer(self, query: str, top_k: int = 5, collection_id: Optional[str] = None) -> str:
         """Main pipeline: retrieve → medium-detailed answer with source references using collection-specific prompt."""
         if self._is_small_talk(query):
             return self._handle_small_talk(query)
@@ -209,7 +264,12 @@ Context from uploaded documents:
 Question: {query}
 Answer:"""
         
-        answer = self.call_ai(enhanced_prompt, model=model, max_tokens=max_tokens, temperature=temperature)
+        # Extract values from SQLAlchemy model objects
+        model_value = model if isinstance(model, str) else getattr(model, 'model_name', self.default_model)
+        max_tokens_value = max_tokens if isinstance(max_tokens, int) else getattr(max_tokens, 'max_tokens', self.default_max_tokens)
+        temperature_value = temperature if isinstance(temperature, (int, float)) else getattr(temperature, 'temperature', self.default_temperature)
+        
+        answer = self.call_ai(enhanced_prompt, model=model_value, max_tokens=max_tokens_value, temperature=temperature_value)
         
         # Ensure sources are included if not already present
         # Format: [file_name](file_id) for easy parsing in frontend
@@ -279,7 +339,12 @@ Context from uploaded documents:
 Question: {query}
 Answer:"""
         
-        answer = self.call_ai(enhanced_prompt, model=model, max_tokens=max_tokens, temperature=temperature)
+        # Extract values from SQLAlchemy model objects
+        model_value = model if isinstance(model, str) else getattr(model, 'model_name', self.default_model)
+        max_tokens_value = max_tokens if isinstance(max_tokens, int) else getattr(max_tokens, 'max_tokens', self.default_max_tokens)
+        temperature_value = temperature if isinstance(temperature, (int, float)) else getattr(temperature, 'temperature', self.default_temperature)
+        
+        answer = self.call_ai(enhanced_prompt, model=model_value, max_tokens=max_tokens_value, temperature=temperature_value)
         
         # Ensure sources are included if not already present
         # Format: [file_name](file_id) for easy parsing in frontend

@@ -24,6 +24,7 @@ class User(Base):
     # User preferences and settings
     is_active = Column(Boolean, default=True, nullable=False)
     role = Column(String(50), default="user", nullable=False)
+    plugin_token = Column(Text, nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -49,6 +50,7 @@ class User(Base):
             "full_name": self.full_name,
             "website_id": self.website_id,
             "role": self.role,
+            "plugin_token": self.plugin_token,
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -179,6 +181,7 @@ class UserResponse(BaseModel):
     updated_at: Optional[str] = None
     last_login: Optional[str] = None
     collection_ids: List[str]
+    plugin_token: Optional[str] = None
 
 class UserWithPermissions(UserResponse):
     """User response with permission information"""

@@ -11,7 +11,7 @@ from app.core.permissions import (
     get_current_user, require_super_admin, PermissionChecker, 
     check_website_quota, get_user_context
 )
-from app.core.auth import create_user, get_password_hash
+from app.core.auth import create_user, get_password_hash, create_plugin_user_token
 from app.models.user import (
     User, UserCreate, UserUpdate, UserResponse, UserWithPermissions
 )
@@ -184,6 +184,53 @@ async def get_user(
             detail="Failed to retrieve user"
         )
 
+
+class PluginTokenResponse(BaseModel):
+    plugin_token: str
+
+
+@router.post("/{user_id}/plugin-token", response_model=PluginTokenResponse)
+async def generate_plugin_user_token(
+    user_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Generate a fresh plugin token for a plugin user (admin only)."""
+    target_user = db.query(User).filter(User.user_id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if target_user.role != "plugin_user":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token generation only allowed for plugin users")
+
+    # Ensure current user can manage this plugin user
+    if not PermissionChecker.can_modify_user(current_user, target_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    memberships = db.query(CollectionUser).filter(CollectionUser.user_id == target_user.user_id).all()
+    if not memberships:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plugin user is not assigned to any collection")
+    if len(memberships) != 1:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plugin users must be assigned to exactly one collection")
+
+    membership = memberships[0]
+
+    if not target_user.password_hash:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plugin user password not set")
+
+    plugin_token_value = create_plugin_user_token(
+        user_id=target_user.user_id,
+        username=target_user.username,
+        password="",  # password not stored
+        collection_id=membership.collection_id
+    )
+    target_user.plugin_token = plugin_token_value
+    db.add(target_user)
+    db.commit()
+    db.refresh(target_user)
+
+    return PluginTokenResponse(plugin_token=plugin_token_value)
+
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: str,
@@ -289,6 +336,7 @@ async def create_new_user(
             managed_collections.append(collection)
 
         is_plugin_role = user_data.role == "plugin_user"
+        plugin_collection_id: Optional[str] = None
         if is_plugin_role:
             if len(incoming_collection_ids) != 1:
                 raise HTTPException(
@@ -297,6 +345,7 @@ async def create_new_user(
                 )
 
             target_collection_id = next(iter(incoming_collection_ids))
+            plugin_collection_id = target_collection_id
             existing_plugin_user = (
                 db.query(User)
                 .join(CollectionUser, CollectionUser.user_id == User.user_id)
@@ -405,6 +454,21 @@ async def create_new_user(
         db.add(new_user)
         db.flush()
 
+        plugin_token_value: Optional[str] = None
+        if is_plugin_role:
+            if not user_data.password:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Plugin users require a password to generate a token"
+                )
+            plugin_token_value = create_plugin_user_token(
+                user_id=new_user.user_id,
+                username=new_user.username,
+                password=user_data.password,
+                collection_id=plugin_collection_id or ""
+            )
+            new_user.plugin_token = plugin_token_value
+
         # Ensure collection assignments exist
         if new_user.role == "user_admin":
             membership_role = "admin"
@@ -477,7 +541,12 @@ async def create_new_user(
 
         logger.info(f"User created: {new_user.username} ({new_user.user_id})")
 
-        return UserResponse(**new_user.to_dict())
+        response_payload = new_user.to_dict()
+
+        if plugin_token_value:
+            response_payload["plugin_token"] = plugin_token_value
+
+        return UserResponse(**response_payload)
     except HTTPException as http_exc:
         db.rollback()
         raise http_exc

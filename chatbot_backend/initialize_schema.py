@@ -86,6 +86,11 @@ def _perform_schema_migrations(engine) -> None:
                 "Incompatible schema detected: missing 'users.user_id' column. "
                 "Apply a migration or recreate the database to align with the latest models."
             )
+        if "plugin_token" not in user_columns:
+            LOGGER.info("Adding 'plugin_token' column to 'users'")
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN plugin_token TEXT NULL"))
+
     try:
         if not inspector.has_table("file_metadata"):
             LOGGER.info("No 'file_metadata' table yet, skipping migrations")

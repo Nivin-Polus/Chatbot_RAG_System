@@ -14,7 +14,12 @@ from app.config import settings
 from app.models.user import User
 from app.models.collection import Collection, CollectionUser
 from app.models.website import Website
-from app.core.auth import verify_password, get_password_hash, create_access_token
+from app.core.auth import (
+    verify_password,
+    get_password_hash,
+    create_access_token,
+    decode_plugin_user_token,
+)
 from app.core.database import get_db
 from app.services.activity_tracker import activity_tracker
 
@@ -160,6 +165,46 @@ async def verify_token(current_user: dict = Depends(get_current_user)):
 class PublicTokenRequest(BaseModel):
     website_url: str
     session_id: Optional[str] = None
+
+
+class PluginTokenVerifyRequest(BaseModel):
+    token: str
+
+
+@router.post("/plugin-token/verify")
+async def verify_plugin_token(
+    request: PluginTokenVerifyRequest,
+    db: Session = Depends(get_db)
+):
+    """Validate a plugin user token and return associated metadata."""
+    if not request.token:
+        raise HTTPException(status_code=400, detail="Plugin token is required")
+
+    try:
+        token_payload = decode_plugin_user_token(request.token)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    user = db.query(User).filter(User.username == token_payload["username"]).first()
+    if not user or not user.is_active or user.role != "plugin_user":
+        raise HTTPException(status_code=401, detail="Invalid plugin user")
+
+    if user.plugin_token != request.token:
+        raise HTTPException(status_code=401, detail="Plugin token has been rotated")
+
+    memberships = db.query(CollectionUser).filter(CollectionUser.user_id == user.user_id).all()
+    if len(memberships) != 1:
+        raise HTTPException(status_code=400, detail="Plugin user must belong to exactly one collection")
+
+    membership = memberships[0]
+
+    return {
+        "valid": True,
+        "user_id": user.user_id,
+        "username": user.username,
+        "collection_id": membership.collection_id,
+        "website_id": user.website_id,
+    }
 
 
 class PublicTokenResponse(BaseModel):

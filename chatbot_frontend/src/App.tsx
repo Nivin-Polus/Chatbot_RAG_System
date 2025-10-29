@@ -24,6 +24,7 @@ import UserChat from "./pages/user/UserChat";
 import UserAdminDashboard from "./pages/useradmin/UserAdminDashboard";
 import UserAdminChat from "./pages/useradmin/UserAdminChat";
 import UserAdminSettings from "./pages/useradmin/UserAdminSettings";
+import UserAdminUsers from "./pages/useradmin/UserAdminUsers";
 
 const queryClient = new QueryClient();
 
@@ -72,7 +73,7 @@ const App = () => (
                         index
                         element={<Navigate to="knowledge-base" replace />}
                       />
-                      <Route path="users" element={<UserAdminDashboard />} />
+                      <Route path="users" element={<UserAdminUsers />} />
                       <Route path="knowledge-base" element={<UserAdminDashboard />} />
                       <Route path="chat" element={<UserAdminChat />} />
                       <Route path="settings" element={<UserAdminSettings />} />

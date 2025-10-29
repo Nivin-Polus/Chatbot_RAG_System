@@ -82,6 +82,9 @@ def start_server():
         logger.info(f"🔍 Health Check: http://{host}:{port}/health")
         logger.info(f"🔧 Debug Mode: {settings.DEBUG}")
         logger.info(f"🔄 Auto-reload: {settings.RELOAD}")
+        logger.info("🧠 AI Provider: Anthropic")
+        logger.info(f"🧾 Model: {settings.CLAUDE_MODEL}")
+        logger.info(f"🔢 Max Tokens: {settings.CLAUDE_MAX_TOKENS}")
         
         uvicorn.run(
             app,

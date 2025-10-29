@@ -30,11 +30,11 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Plus, Pencil, Trash2, Users, Search, Loader2, MoreHorizontal, Power, PowerOff } from 'lucide-react';
-import { Collection, User, UserRole, UserWithPermissions } from '@/types/auth';
+import { Collection, User, UserRole } from '@/types/auth';
 import { toast } from 'sonner';
 
-export default function SuperadminUsers() {
-  const { user: authUser } = useAuth();
+export default function UserAdminUsers() {
+  const { user } = useAuth();
   const [collections, setCollections] = useState<Collection[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -52,7 +52,6 @@ export default function SuperadminUsers() {
     collection_ids: [] as string[],
   });
   const [showPassword, setShowPassword] = useState(false);
-  const [isRegeneratingToken, setIsRegeneratingToken] = useState(false);
 
   useEffect(() => {
     fetchCollections();
@@ -63,7 +62,7 @@ export default function SuperadminUsers() {
     try {
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/collections/`, {
         headers: {
-          Authorization: `Bearer ${authUser?.access_token}`,
+          Authorization: `Bearer ${user?.access_token}`,
         },
       });
       if (response.ok) {
@@ -79,7 +78,7 @@ export default function SuperadminUsers() {
     try {
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/users/`, {
         headers: {
-          Authorization: `Bearer ${authUser?.access_token}`,
+          Authorization: `Bearer ${user?.access_token}`,
         },
       });
       if (response.ok) {
@@ -99,47 +98,18 @@ export default function SuperadminUsers() {
   };
 
   const copyTokenToClipboard = async (token: string) => {
-    if (!token) {
-      toast.error('No plugin token available to copy');
-      return;
-    }
-
     try {
-      const canUseNavigator =
-        typeof navigator !== 'undefined' &&
-        typeof window !== 'undefined' &&
-        Boolean(window.isSecureContext) &&
-        Boolean(navigator.clipboard);
-
-      if (canUseNavigator) {
-        await navigator.clipboard.writeText(token);
-      } else {
-        const textArea = document.createElement('textarea');
-        textArea.value = token;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-9999px';
-        textArea.style.top = '-9999px';
-        textArea.style.opacity = '0';
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        const successful = document.execCommand('copy');
-        document.body.removeChild(textArea);
-        if (!successful) {
-          throw new Error('execCommand copy failed');
-        }
-      }
-
+      await navigator.clipboard.writeText(token);
       toast.success('Plugin token copied to clipboard');
     } catch (error) {
-      console.error('Failed to copy plugin token', error);
       toast.error('Failed to copy plugin token');
     }
   };
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (formData.collection_ids.length === 0 && formData.role !== 'super_admin') {
+
+    if (formData.collection_ids.length === 0) {
       toast.error('Please select at least one collection');
       return;
     }
@@ -149,7 +119,7 @@ export default function SuperadminUsers() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${authUser?.access_token}`,
+          Authorization: `Bearer ${user?.access_token}`,
         },
         body: JSON.stringify({
           username: formData.username,
@@ -181,7 +151,7 @@ export default function SuperadminUsers() {
     e.preventDefault();
     if (!editingUser) return;
 
-    if (formData.collection_ids.length === 0 && formData.role !== 'super_admin') {
+    if (formData.collection_ids.length === 0) {
       toast.error('Please select at least one collection');
       return;
     }
@@ -191,14 +161,14 @@ export default function SuperadminUsers() {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${authUser?.access_token}`,
+          Authorization: `Bearer ${user?.access_token}`,
         },
         body: JSON.stringify({
           username: formData.username,
           email: formData.email,
           full_name: formData.full_name,
           password:
-            formData.password && editingUser.user_id !== authUser?.user_id
+            formData.password && editingUser.user_id !== user?.user_id
               ? formData.password
               : undefined,
           role: formData.role === 'useradmin' ? 'user_admin' : formData.role,
@@ -220,8 +190,8 @@ export default function SuperadminUsers() {
   };
 
   const handleDelete = async (userId: string, username: string) => {
-    if (username === 'superadmin') {
-      toast.error('Cannot delete superadmin account');
+    if (username === user?.username) {
+      toast.error('Cannot delete your own account');
       return;
     }
 
@@ -231,7 +201,7 @@ export default function SuperadminUsers() {
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/users/${userId}`, {
         method: 'DELETE',
         headers: {
-          Authorization: `Bearer ${authUser?.access_token}`,
+          Authorization: `Bearer ${user?.access_token}`,
         },
       });
 
@@ -259,7 +229,7 @@ export default function SuperadminUsers() {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${authUser?.access_token}`,
+          Authorization: `Bearer ${user?.access_token}`,
         },
         body: JSON.stringify({
           is_active: !isActive,
@@ -275,75 +245,18 @@ export default function SuperadminUsers() {
     }
   };
 
-  const openEditDialog = async (selectedUser: User) => {
-    setEditingUser(selectedUser);
+  const openEditDialog = (user: User) => {
+    setEditingUser(user);
     setFormData({
-      username: selectedUser.username,
-      email: selectedUser.email,
-      full_name: selectedUser.full_name,
+      username: user.username,
+      email: user.email,
+      full_name: user.full_name,
       password: '',
-      role: (selectedUser.role === 'useradmin' ? 'user_admin' : selectedUser.role) as UserRole,
-      collection_ids: selectedUser.collection_ids || [],
+      role: (user.role === 'useradmin' ? 'user_admin' : user.role) as UserRole,
+      collection_ids: user.collection_ids || [],
     });
     setShowPassword(false);
     setIsDialogOpen(true);
-
-    if (selectedUser.role === 'plugin_user') {
-      try {
-        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/users/${selectedUser.user_id}`, {
-          headers: {
-            Authorization: `Bearer ${authUser?.access_token || ''}`,
-          },
-        });
-        if (response.ok) {
-          const detailedUser: UserWithPermissions = await response.json();
-          setEditingUser((prev) =>
-            prev && prev.user_id === selectedUser.user_id
-              ? { ...prev, plugin_token: detailedUser.plugin_token }
-              : prev,
-          );
-          setUsers((prev) =>
-            prev.map((existing) =>
-              existing.user_id === selectedUser.user_id
-                ? { ...existing, plugin_token: detailedUser.plugin_token }
-                : existing,
-            ),
-          );
-        }
-      } catch (error) {
-        console.error('Failed to load plugin token', error);
-        toast.error('Failed to load plugin token');
-      }
-    }
-  };
-
-  const handleRegeneratePluginToken = async (userId: string) => {
-    if (!authUser?.access_token) return;
-    setIsRegeneratingToken(true);
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/users/${userId}/plugin-token`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${authUser.access_token}`,
-        },
-      });
-      if (!response.ok) {
-        throw new Error('Failed to generate plugin token');
-      }
-      const data: { plugin_token: string } = await response.json();
-      toast.success('Plugin token regenerated');
-      setEditingUser((prev) => (prev && prev.user_id === userId ? { ...prev, plugin_token: data.plugin_token } : prev));
-      setUsers((prev) =>
-        prev.map((existing) =>
-          existing.user_id === userId ? { ...existing, plugin_token: data.plugin_token } : existing,
-        ),
-      );
-    } catch (error) {
-      console.error(error);
-      toast.error('Failed to regenerate plugin token');
-    } finally {
-      setIsRegeneratingToken(false);
-    }
   };
 
   const closeDialog = () => {
@@ -441,7 +354,6 @@ export default function SuperadminUsers() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">Users Management</h1>
-           
           </div>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
@@ -457,10 +369,9 @@ export default function SuperadminUsers() {
                     {editingUser ? 'Edit User' : 'Create New User'}
                   </DialogTitle>
                   <DialogDescription>
-                    {editingUser 
-                      ? 'Update user details and permissions' 
-                      : 'Create a new user account'
-                    }
+                    {editingUser
+                      ? 'Update user details and permissions'
+                      : 'Create a new user account'}
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
@@ -500,7 +411,7 @@ export default function SuperadminUsers() {
                     <Label htmlFor="password">
                       Password
                       {editingUser
-                        ? editingUser.user_id === authUser?.user_id
+                        ? editingUser.user_id === user?.user_id
                           ? ' (manage from Settings)'
                           : ' (optional — retain existing if left blank)'
                         : ' *'}
@@ -512,19 +423,19 @@ export default function SuperadminUsers() {
                         value={formData.password}
                         onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                         required={!editingUser}
-                        disabled={editingUser?.user_id === authUser?.user_id}
+                        disabled={editingUser?.user_id === user?.user_id}
                       />
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         onClick={() => setShowPassword((prev) => !prev)}
-                        disabled={editingUser?.user_id === authUser?.user_id}
+                        disabled={editingUser?.user_id === user?.user_id}
                       >
                         {showPassword ? 'Hide' : 'Show'}
                       </Button>
                     </div>
-                    {editingUser?.user_id === authUser?.user_id && (
+                    {editingUser?.user_id === user?.user_id && (
                       <p className="text-xs text-muted-foreground">
                         Update your password from the Settings page.
                       </p>
@@ -532,21 +443,20 @@ export default function SuperadminUsers() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="role">
-                      Role * {editingUser?.user_id === authUser?.user_id && (
+                      Role * {editingUser?.user_id === user?.user_id && (
                         <span className="text-sm text-muted-foreground">(Cannot change your own role)</span>
                       )}
                     </Label>
-                    <Select 
-                      value={formData.role} 
+                    <Select
+                      value={formData.role}
                       onValueChange={(value: UserRole) => setFormData({ ...formData, role: value })}
-                      disabled={editingUser?.user_id === authUser?.user_id}
+                      disabled={editingUser?.user_id === user?.user_id}
                     >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="user">User</SelectItem>
-                        <SelectItem value="user_admin">User Admin</SelectItem>
                         <SelectItem value="plugin_user">Plugin User</SelectItem>
                       </SelectContent>
                     </Select>
@@ -579,51 +489,35 @@ export default function SuperadminUsers() {
                       </p>
                     )}
                   </div>
-                  {editingUser?.role === 'plugin_user' && (
-                    <div className="space-y-2">
-                      <Label className="flex items-center justify-between">
-                        Plugin Access Token
-                        <div className="flex items-center gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => copyTokenToClipboard(editingUser.plugin_token ?? '')}
-                            disabled={!editingUser.plugin_token}
-                          >
-                            Copy Token
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => handleRegeneratePluginToken(editingUser.user_id)}
-                            disabled={isRegeneratingToken}
-                          >
-                            {isRegeneratingToken ? 'Generating…' : editingUser.plugin_token ? 'Generate New' : 'Generate Token'}
-                          </Button>
-                        </div>
-                      </Label>
-                      <div className="rounded-md border bg-muted/40 p-3 text-xs break-all font-mono min-h-[48px] flex items-center">
-                        {editingUser.plugin_token ? (
-                          <span>{editingUser.plugin_token}</span>
-                        ) : (
-                          <span className="text-muted-foreground">No token generated yet. Generate one to enable plugin access.</span>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Provide this token to the plugin to authenticate with this collection.
-                      </p>
-                    </div>
-                  )}
                 </div>
+                {editingUser?.role === 'plugin_user' && editingUser.plugin_token && (
+                  <div className="space-y-2">
+                    <Label className="flex items-center justify-between">
+                      Plugin Access Token
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => copyTokenToClipboard(editingUser.plugin_token ?? '')}
+                      >
+                        Copy Token
+                      </Button>
+                    </Label>
+                    <div className="rounded-md border bg-muted/40 p-3 text-xs break-all font-mono">
+                      {editingUser.plugin_token}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Provide this token to the plugin to authenticate with this collection.
+                    </p>
+                  </div>
+                )}
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={closeDialog}>
                     Cancel
                   </Button>
                   {editingUser && editingUser.role === 'plugin_user' && (
-                    <Button 
-                      type="button" 
+                    <Button
+                      type="button"
                       variant={editingUser.is_active ? "destructive" : "default"}
                       onClick={() => handleToggleUserStatus(editingUser.user_id, editingUser.is_active, editingUser.role)}
                     >
@@ -785,14 +679,16 @@ export default function SuperadminUsers() {
                           variant="ghost"
                           size="icon"
                           onClick={() => openEditDialog(user)}
+                          disabled={user.username === user?.username}
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        {user.username !== 'superadmin' && user.role !== 'plugin_user' && (
+                        {user.username !== user?.username && user.role !== 'plugin_user' && (
                           <Button
                             variant="ghost"
                             size="icon"
                             onClick={() => handleDelete(user.user_id, user.username)}
+                            disabled={user.username === user?.username}
                             className="text-destructive hover:text-destructive hover:bg-destructive/10"
                           >
                             <Trash2 className="h-4 w-4" />
