@@ -1,6 +1,6 @@
 # app/api/routes_files.py
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional, Union
@@ -53,6 +53,7 @@ file_metadata_db = {}
 # ------------------------
 @router.post("/upload", response_model=List[FileMeta])
 async def upload_file(
+    request: Request,
     files: Optional[List[UploadFile]] = File(None),
     uploaded_files: Optional[Union[UploadFile, List[UploadFile]]] = File(None, alias="uploaded_files"),
     single_file: Optional[UploadFile] = File(None, alias="file"),
@@ -62,6 +63,21 @@ async def upload_file(
 ):
     """Upload one or multiple files"""
     logger.info(f"[UPLOAD DEBUG] Upload request from user: {current_user.get('username')}, role: {current_user.get('role')}")
+    
+    # Debug: Log what files we received
+    logger.info(f"[UPLOAD DEBUG] Received files: {files is not None}")
+    logger.info(f"[UPLOAD DEBUG] Received uploaded_files: {uploaded_files is not None}")
+    logger.info(f"[UPLOAD DEBUG] Received single_file: {single_file is not None}")
+    logger.info(f"[UPLOAD DEBUG] Received collection_id: {collection_id}")
+    
+    # Additional debug info for uploaded_files
+    if uploaded_files:
+        if isinstance(uploaded_files, list):
+            logger.info(f"[UPLOAD DEBUG] uploaded_files is a list with {len(uploaded_files)} items")
+            for i, uf in enumerate(uploaded_files):
+                logger.info(f"[UPLOAD DEBUG] uploaded_files[{i}].filename: {getattr(uf, 'filename', 'None')}")
+        else:
+            logger.info(f"[UPLOAD DEBUG] uploaded_files is a single file: {getattr(uploaded_files, 'filename', 'None')}")
 
     # Check permissions
     role = current_user.get("role")
@@ -72,22 +88,59 @@ async def upload_file(
     normalized_files: List[UploadFile] = []
 
     def _add_candidates(group):
+        logger.info(f"[UPLOAD DEBUG] _add_candidates called with group: {type(group)}")
         if not group:
+            logger.info("[UPLOAD DEBUG] _add_candidates: group is falsy, returning")
             return
+        logger.info(f"[UPLOAD DEBUG] _add_candidates: group is not falsy")
+        
         if isinstance(group, Sequence) and not isinstance(group, (str, bytes)):
             items = list(group)
+            logger.info(f"[UPLOAD DEBUG] _add_candidates: group is Sequence, items count: {len(items)}")
         else:
             items = [group]
-        for candidate in items:
-            if candidate and isinstance(candidate, UploadFile) and getattr(candidate, "filename", None):
-                normalized_files.append(candidate)
+            logger.info(f"[UPLOAD DEBUG] _add_candidates: group is not Sequence, items count: {len(items)}")
+            
+        for i, candidate in enumerate(items):
+            logger.info(f"[UPLOAD DEBUG] _add_candidates: checking candidate {i}: {type(candidate)}")
+            if candidate:
+                logger.info(f"[UPLOAD DEBUG] _add_candidates: candidate {i} is truthy")
+                # Accept both FastAPI and Starlette UploadFile via duck typing
+                filename = getattr(candidate, "filename", None)
+                has_read = hasattr(candidate, "read")
+                if filename and has_read:
+                    logger.info(f"[UPLOAD DEBUG] _add_candidates: candidate {i} appears to be UploadFile-like, filename: {filename}")
+                    normalized_files.append(candidate)
+                    logger.info(f"[UPLOAD DEBUG] Added file: {filename}")
+                else:
+                    logger.info(f"[UPLOAD DEBUG] _add_candidates: candidate {i} is not UploadFile-like: {type(candidate)} (filename={filename}, has_read={has_read})")
+            else:
+                logger.info(f"[UPLOAD DEBUG] _add_candidates: candidate {i} is falsy")
 
+    # Prefer robust extraction from raw multipart form to avoid framework type mismatches
+    try:
+        form = await request.form()
+        # Collect all UploadFile-like values from the form, regardless of field name
+        for key in form.keys():
+            values = form.getlist(key)
+            for v in values:
+                # Skip non-file fields (e.g., collection_id)
+                if hasattr(v, "filename") and hasattr(v, "read"):
+                    _add_candidates([v])
+    except Exception as form_err:
+        logger.info(f"[UPLOAD DEBUG] Failed to read raw multipart form: {form_err}")
+
+    # Also add from annotated params (in case framework populated them)
     _add_candidates(files)
     _add_candidates(uploaded_files)
     if single_file and getattr(single_file, "filename", None):
         normalized_files.append(single_file)
+        logger.info(f"[UPLOAD DEBUG] Added single file: {single_file.filename}")
 
+    logger.info(f"[UPLOAD DEBUG] Total normalized files: {len(normalized_files)}")
+    
     if not normalized_files:
+        logger.error("[UPLOAD ERROR] No files provided for upload - files list is empty")
         raise HTTPException(status_code=400, detail="No files provided for upload")
 
     # Get user from database using username (most reliable)
@@ -502,7 +555,10 @@ async def get_file_metadata(
         raise HTTPException(status_code=403, detail="File belongs to a different website")
 
     if role not in {"user_admin", "super_admin"}:
-        if not current_user_id or (file_metadata.uploader_id is not None and current_user_id is not None and str(file_metadata.uploader_id) != str(current_user_id)):
+        # Convert to string values for comparison to avoid boolean evaluation error
+        file_uploader_id = str(file_metadata.uploader_id) if file_metadata.uploader_id is not None else None
+        user_id_str = str(current_user_id) if current_user_id is not None else None
+        if not user_id_str or (file_uploader_id is not None and user_id_str is not None and file_uploader_id != user_id_str):
             raise HTTPException(status_code=403, detail="Permission denied")
 
     return file_metadata.to_dict()
