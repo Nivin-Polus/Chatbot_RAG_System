@@ -46,6 +46,11 @@ class Collection(Base):
         back_populates="collection",
         cascade="all, delete-orphan"
     )
+    plugin_integrations = relationship(
+        "PluginIntegration",
+        back_populates="collection",
+        cascade="all, delete-orphan"
+    )
     
     def __repr__(self):
         return f"<Collection(id='{self.collection_id}', name='{self.name}')>"

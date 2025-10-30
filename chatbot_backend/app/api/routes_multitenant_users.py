@@ -116,6 +116,10 @@ async def list_users(
         # Apply filters
         if role:
             query = query.filter(User.role == role)
+        else:
+            if not current_user.is_plugin_user():
+                query = query.filter(User.role != "plugin_user")
+
         if active_only:
             query = query.filter(User.is_active == True)
         if collection_id:

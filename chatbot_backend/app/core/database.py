@@ -64,6 +64,7 @@ def init_database():
         from app.models.query_log import QueryLog
         from app.models.chat_tracking import ChatSession, ChatQuery
         from app.models.collection import Collection, CollectionUser
+        from app.models.plugin_integration import PluginIntegration
         from app.models.system_prompt import SystemPrompt
         from app.models.vector_database import VectorDatabase
         from app.models.activity_log import ActivityLog

@@ -1,13 +1,14 @@
 # app/api/routes_files.py
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request, status
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from typing import List, Optional, Union
 from collections.abc import Sequence
 from app.core.vector_singleton import get_vector_store
 from app.core.database import get_db
-from app.api.routes_auth import get_current_user
+from app.core.permissions import get_current_user
 from app.utils.file_parser import parse_file
 from app.utils.file_sanitizer import (
     sanitize_filename,
@@ -30,6 +31,9 @@ logger = logging.getLogger("files_logger")
 logging.basicConfig(level=logging.INFO)
 
 router = APIRouter()
+
+# Security for plugin tokens
+plugin_security = HTTPBearer()
 
 # Initialize services
 file_storage_service = FileStorageService()
@@ -445,26 +449,53 @@ async def list_files(
 @router.get("/download/{identifier}")
 async def download_file(
     identifier: str,
-    current_user: dict = Depends(get_current_user),
+    credentials: HTTPAuthorizationCredentials = Depends(plugin_security),
     db: Session = Depends(get_db)
 ):
     """Download original file by file_id or file_name using collection_id for access control"""
     from app.models.user import User
     from app.models.collection import CollectionUser
+    from app.core.auth import decode_plugin_user_token
 
-    role = current_user.get("role")
-    username = current_user.get("username")
+    # Try to authenticate as plugin user first, then as regular user
+    current_user = None
+    role = None
+    username = None
+    current_user_id = None
     
-    # Get user from database
-    if not username:
-        raise HTTPException(status_code=401, detail="Username not found in token")
+    try:
+        # Try to decode as plugin token first
+        token_payload = decode_plugin_user_token(credentials.credentials)
+        
+        # Get plugin user from database
+        user_record = db.query(User).filter(
+            User.username == token_payload["username"],
+            User.role == "plugin_user",
+            User.is_active == True
+        ).first()
+        
+        if user_record and user_record.plugin_token == credentials.credentials:
+            current_user = user_record
+            role = "plugin_user"
+            username = user_record.username
+            current_user_id = user_record.user_id
+    except ValueError:
+        # Not a plugin token, try regular user authentication
+        pass
     
-    user_record = db.query(User).filter(User.username == username).first()
-    if not user_record:
-        raise HTTPException(status_code=403, detail=f"User '{username}' not found in database")
+    # If plugin authentication failed, try regular user authentication
+    if current_user is None:
+        try:
+            # This is the existing authentication logic
+            from app.core.permissions import get_current_user
+            user_record = get_current_user(credentials, db)
+            current_user = user_record
+            role = user_record.role
+            username = user_record.username
+            current_user_id = user_record.user_id
+        except:
+            raise HTTPException(status_code=401, detail="Could not validate credentials")
     
-    current_user_id = user_record.user_id
-
     # Try to find by file_id first
     file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == identifier).first()
 
@@ -500,6 +531,10 @@ async def download_file(
         
         if not membership:
             raise HTTPException(status_code=403, detail="You don't have access to this collection")
+        
+        # For plugin users, also check specific download permission
+        if role == "plugin_user" and not membership.can_download:
+            raise HTTPException(status_code=403, detail="Plugin user does not have download permission")
     else:
         raise HTTPException(status_code=403, detail="Invalid role")
 
@@ -521,6 +556,119 @@ async def download_file(
     data_bytes = binary_record.data if binary_record.data is not None else b""
     return StreamingResponse(iter([data_bytes]), media_type=str(media_type), headers=headers)
 
+
+# ------------------------
+# Download file by name and collection endpoint
+# ------------------------
+@router.get("/download/by-name/{collection_id}/{file_name}")
+async def download_file_by_name(
+    collection_id: str,
+    file_name: str,
+    credentials: HTTPAuthorizationCredentials = Depends(plugin_security),
+    db: Session = Depends(get_db)
+):
+    """Download original file by file_name and collection_id for access control"""
+    from app.models.user import User
+    from app.models.collection import CollectionUser
+    from app.core.auth import decode_plugin_user_token
+
+    # Try to authenticate as plugin user first, then as regular user
+    current_user = None
+    role = None
+    username = None
+    current_user_id = None
+    
+    try:
+        # Try to decode as plugin token first
+        token_payload = decode_plugin_user_token(credentials.credentials)
+        
+        # Get plugin user from database
+        user_record = db.query(User).filter(
+            User.username == token_payload["username"],
+            User.role == "plugin_user",
+            User.is_active == True
+        ).first()
+        
+        if user_record and user_record.plugin_token == credentials.credentials:
+            current_user = user_record
+            role = "plugin_user"
+            username = user_record.username
+            current_user_id = user_record.user_id
+    except ValueError:
+        # Not a plugin token, try regular user authentication
+        pass
+    
+    # If plugin authentication failed, try regular user authentication
+    if current_user is None:
+        try:
+            # This is the existing authentication logic
+            from app.core.permissions import get_current_user
+            user_record = get_current_user(credentials, db)
+            current_user = user_record
+            role = user_record.role
+            username = user_record.username
+            current_user_id = user_record.user_id
+        except:
+            raise HTTPException(status_code=401, detail="Could not validate credentials")
+
+    # Find file by file_name and collection_id
+    file_metadata = db.query(FileMetadata).filter(
+        FileMetadata.file_name == file_name,
+        FileMetadata.collection_id == collection_id
+    ).first()
+
+    if not file_metadata:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # --- Permission check ---
+    if role == "super_admin":
+        pass  # full access
+    elif role == "user_admin":
+        # User admin can access files in collections they administer
+        from app.models.collection import Collection
+        administered_collection = db.query(Collection).filter(
+            Collection.collection_id == file_metadata.collection_id,
+            Collection.admin_user_id == current_user_id
+        ).first()
+        
+        if not administered_collection:
+            raise HTTPException(status_code=403, detail="You don't have permission to access this file")
+    elif role in {"user", "plugin_user"}:
+        # Regular or plugin users can access files in collections they're members of
+        if file_metadata.collection_id is None:
+            raise HTTPException(status_code=403, detail="File has no collection assignment")
+        
+        membership = db.query(CollectionUser).filter(
+            CollectionUser.collection_id == file_metadata.collection_id,
+            CollectionUser.user_id == current_user_id
+        ).first()
+        
+        if not membership:
+            raise HTTPException(status_code=403, detail="You don't have access to this collection")
+        
+        # For plugin users, also check specific download permission
+        if role == "plugin_user" and not membership.can_download:
+            raise HTTPException(status_code=403, detail="Plugin user does not have download permission")
+    else:
+        raise HTTPException(status_code=403, detail="Invalid role")
+
+    # --- Fetch file binary ---
+    file_storage_service = FileStorageService()
+    binary_record = file_storage_service.get_file_binary(str(file_metadata.file_id), db)
+
+    if not binary_record or binary_record.data is None:
+        raise HTTPException(status_code=404, detail="File data not found")
+
+    filename = file_metadata.file_name or f"download-{file_metadata.file_id}"
+    media_type = binary_record.mime_type or file_metadata.file_type or "application/octet-stream"
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"'
+    }
+
+    # Return the raw binary bytes without any string conversion to avoid corruption
+    data_bytes = binary_record.data if binary_record.data is not None else b""
+    return StreamingResponse(iter([data_bytes]), media_type=str(media_type), headers=headers)
 
 
 # ------------------------
@@ -599,3 +747,6 @@ async def get_vector_stats(current_user: dict = Depends(get_current_user)):
             }
     except Exception as e:
         return {"error": str(e), "vector_db_type": "unknown"}
+
+# Add security scheme for plugin tokens
+plugin_security = HTTPBearer()

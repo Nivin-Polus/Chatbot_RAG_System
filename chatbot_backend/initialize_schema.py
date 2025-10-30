@@ -31,6 +31,7 @@ from app.core.database import create_database_if_not_exists, init_database
 from app.models.website import Website
 from app.models.user import User
 from app.models.collection import Collection, CollectionUser
+from app.models.plugin_integration import PluginIntegration
 from app.models.system_prompt import SystemPrompt
 from app.models.activity_stats import ActivityStats
 
@@ -55,6 +56,7 @@ DEFAULT_WEBSITE_DOMAIN = "localhost"
 DEFAULT_WEBSITE_NAME = "Default Organization"
 DEFAULT_COLLECTION_ID = "col_default"
 DEFAULT_COLLECTION_NAME = "Default Collection"
+DEFAULT_PLUGIN_URL = "https://localhost/"
 
 
 def _ensure_database() -> None:
@@ -140,6 +142,8 @@ def _perform_schema_migrations(engine) -> None:
                 with engine.connect() as conn:
                     conn.execute(text(f"ALTER TABLE system_prompts ADD COLUMN {name} {ddl}"))
                 LOGGER.info("Added column '%s' to system_prompts", name)
+
+    # Ensure plugin integrations table exists (created via ORM metadata). Nothing else yet.
 
 
 def _ensure_default_website(db) -> Website:
@@ -258,7 +262,82 @@ def _ensure_default_collection(db, website: Website, admin_user: User) -> Collec
         )
         LOGGER.info("Created default prompt for collection '%s'", collection.name)
 
+    _ensure_default_plugin_integration(db, collection, admin_user)
+
     return collection
+
+
+def _normalize_url(raw_url: str) -> str:
+    if not raw_url:
+        return ""
+
+    candidate = raw_url.strip()
+    if not candidate:
+        return ""
+
+    from urllib.parse import urlparse
+
+    parsed = urlparse(candidate)
+    if not parsed.scheme:
+        parsed = urlparse(f"https://{candidate}")
+
+    netloc = parsed.netloc.lower()
+    path = parsed.path.rstrip("/")
+
+    if not netloc:
+        netloc = parsed.path.lower().rstrip("/")
+        path = ""
+
+    normalized = netloc
+    if path:
+        normalized = f"{normalized}{path}"
+
+    return normalized
+
+
+def _ensure_default_plugin_integration(db, collection: Collection, creator: User | None) -> None:
+    existing_plugin = (
+        db.query(PluginIntegration)
+        .filter(PluginIntegration.collection_id == collection.collection_id)
+        .first()
+    )
+
+    if existing_plugin:
+        LOGGER.info("Plugin integration already exists for collection '%s'", collection.collection_id)
+        return
+
+    normalized = _normalize_url(collection.website_url or DEFAULT_PLUGIN_URL)
+    if not normalized:
+        LOGGER.warning(
+            "Skipping default plugin integration for collection '%s' due to invalid URL",
+            collection.collection_id,
+        )
+        return
+
+    duplicate_plugin = (
+        db.query(PluginIntegration)
+        .filter(PluginIntegration.normalized_url == normalized)
+        .first()
+    )
+    if duplicate_plugin:
+        LOGGER.warning(
+            "Skipping plugin integration for collection '%s' because URL '%s' is already linked to collection '%s'",
+            collection.collection_id,
+            normalized,
+            duplicate_plugin.collection_id,
+        )
+        return
+
+    plugin = PluginIntegration(
+        collection_id=collection.collection_id,
+        website_url=collection.website_url or DEFAULT_PLUGIN_URL,
+        normalized_url=normalized,
+        display_name=f"{collection.name} Plugin",
+        is_active=True,
+        created_by=creator.user_id if creator else None,
+    )
+    db.add(plugin)
+    LOGGER.info("Created default plugin integration for collection '%s'", collection.collection_id)
 
 
 def main() -> None:

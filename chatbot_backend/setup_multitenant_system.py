@@ -23,9 +23,11 @@ def setup_database_tables():
         from app.models.base import Base
         from app.models.website import Website
         from app.models.user import User
+        from app.models.collection import Collection, CollectionUser, CollectionWebsite
         from app.models.file_metadata import FileMetadata
         from app.models.user_file_access import UserFileAccess
         from app.models.query_log import QueryLog
+        from app.models.plugin_integration import PluginIntegration
         
         print("🔄 Setting up multi-tenant database tables...")
         
@@ -68,6 +70,8 @@ def create_multitenant_users():
     try:
         from app.config import settings
         from app.models.website import Website
+        from app.models.collection import Collection, CollectionUser
+        from app.models.plugin_integration import PluginIntegration
         from app.models.user import User
         from passlib.context import CryptContext
         from sqlalchemy import create_engine
@@ -178,7 +182,63 @@ def create_multitenant_users():
                 plugin_user.website_id = default_website.website_id
                 plugin_user.role = "plugin_user"
                 print("ℹ️ Updated existing plugin user")
-            
+
+            # Ensure default collection exists for plugin mapping
+            default_collection = db.query(Collection).filter(Collection.collection_id == "col_default").first()
+            if not default_collection:
+                default_collection = Collection(
+                    collection_id="col_default",
+                    name="Default Collection",
+                    description="Default collection created during setup",
+                    website_id=default_website.website_id,
+                    website_url="https://localhost/",
+                    admin_user_id=user_admin.user_id,
+                    admin_email=user_admin.email,
+                    is_active=True,
+                )
+                db.add(default_collection)
+                db.flush()
+                print("✅ Created default collection for plugin integration")
+
+            membership = (
+                db.query(CollectionUser)
+                .filter(
+                    CollectionUser.collection_id == default_collection.collection_id,
+                    CollectionUser.user_id == plugin_user.user_id,
+                )
+                .first()
+            )
+            if not membership:
+                db.add(
+                    CollectionUser(
+                        collection_id=default_collection.collection_id,
+                        user_id=plugin_user.user_id,
+                        role="plugin",
+                        can_upload=False,
+                        can_download=True,
+                        can_delete=False,
+                        assigned_by=user_admin.user_id,
+                    )
+                )
+                print("✅ Linked plugin user to default collection")
+
+            plugin = (
+                db.query(PluginIntegration)
+                .filter(PluginIntegration.collection_id == default_collection.collection_id)
+                .first()
+            )
+            if not plugin:
+                plugin = PluginIntegration(
+                    collection_id=default_collection.collection_id,
+                    website_url=default_collection.website_url or "https://localhost/",
+                    normalized_url="localhost",
+                    display_name=f"{default_collection.name} Plugin",
+                    is_active=True,
+                    created_by=user_admin.user_id,
+                )
+                db.add(plugin)
+                print("✅ Created default plugin integration")
+
             db.commit()
             
             print("\n🎯 Multi-Tenant System Ready!")

@@ -25,8 +25,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Plus, Pencil, Trash2, Database, Loader2, Search, Folder, FileCode, Copy } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Search, Folder, FileCode, Copy } from 'lucide-react';
 import { Collection } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost, apiDelete, apiPut } from '@/utils/api';
@@ -443,126 +442,105 @@ export default function SuperadminDashboard() {
                 {searchTerm ? 'No knowledge bases found matching your search.' : 'No knowledge bases yet. Create your first one!'}
               </div>
             ) : (
-              <TooltipProvider delayDuration={150}>
-                <Table>
-                  <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead>Collection ID</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+              <Table>
+                <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Collection ID</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+                </TableHeader>
+                <TableBody>
+                {filteredCollections.map((collection) => (
+                  <TableRow key={collection.collection_id}>
+                    <TableCell className="font-medium">
+                      <button
+                        onClick={() => navigate(`/superadmin/knowledge-base/${collection.collection_id}`)}
+                        className="text-primary hover:text-primary/80 hover:underline font-medium"
+                      >
+                        {collection.name}
+                      </button>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {collection.description || '—'}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <code className="text-xs bg-muted px-2 py-1 rounded">
+                          {collection.collection_id}
+                        </code>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleCopyCollectionId(collection.collection_id)}
+                          aria-label="Copy collection ID"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <span
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                          collection.is_active
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}
+                      >
+                        {collection.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {new Date(collection.created_at).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end space-x-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleNavigateToTab(collection.collection_id, 'files')}
+                          aria-label="View files"
+                        >
+                          <Folder className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleNavigateToTab(collection.collection_id, 'prompts')}
+                          aria-label="View prompts"
+                        >
+                          <FileCode className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleOpenEditDialog(collection)}
+                          aria-label="Edit knowledge base"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteCollection(collection.collection_id)}
+                          className="text-destructive hover:text-destructive"
+                          aria-label="Delete knowledge base"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
                   </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                  {filteredCollections.map((collection) => (
-                    <TableRow key={collection.collection_id}>
-                      <TableCell className="font-medium">
-                        <button
-                          onClick={() => navigate(`/superadmin/knowledge-base/${collection.collection_id}`)}
-                          className="text-primary hover:text-primary/80 hover:underline font-medium"
-                        >
-                          {collection.name}
-                        </button>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {collection.description || '—'}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <code className="text-xs bg-muted px-2 py-1 rounded">
-                            {collection.collection_id}
-                          </code>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleCopyCollectionId(collection.collection_id)}
-                            aria-label="Copy collection ID"
-                          >
-                            <Copy className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <span
-                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                            collection.is_active
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-gray-100 text-gray-800'
-                          }`}
-                        >
-                          {collection.is_active ? 'Active' : 'Inactive'}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {new Date(collection.created_at).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end space-x-1">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleNavigateToTab(collection.collection_id, 'files')}
-                                aria-label="View files"
-                              >
-                                <Folder className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="top">Manage files</TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleNavigateToTab(collection.collection_id, 'prompts')}
-                                aria-label="View prompts"
-                              >
-                                <FileCode className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="top">Manage prompts</TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleOpenEditDialog(collection)}
-                                aria-label="Edit knowledge base"
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="top">Edit knowledge base</TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleDeleteCollection(collection.collection_id)}
-                                className="text-destructive hover:text-destructive"
-                                aria-label="Delete knowledge base"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="top">Delete knowledge base</TooltipContent>
-                          </Tooltip>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  </TableBody>
-                </Table>
-              </TooltipProvider>
+                ))}
+                </TableBody>
+              </Table>
             )}
           </CardContent>
         </Card>
+
       </div>
     </DashboardLayout>
   );

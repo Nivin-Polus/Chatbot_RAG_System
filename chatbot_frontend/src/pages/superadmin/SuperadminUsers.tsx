@@ -85,10 +85,12 @@ export default function SuperadminUsers() {
       if (response.ok) {
         const data = await response.json();
         setUsers(
-          data.map((item: User) => ({
-            ...item,
-            role: (item.role === 'useradmin' ? 'user_admin' : item.role) as UserRole,
-          })),
+          data
+            .filter((item: User) => item.role !== 'plugin_user')
+            .map((item: User) => ({
+              ...item,
+              role: (item.role === 'useradmin' ? 'user_admin' : item.role) as UserRole,
+            })),
         );
       }
     } catch (error) {
