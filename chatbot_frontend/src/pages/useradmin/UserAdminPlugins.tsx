@@ -135,7 +135,7 @@ export default function UserAdminPlugins() {
         display_name: pluginFormData.display_name || undefined,
       };
 
-      const endpoint = `${import.meta.env.VITE_API_BASE_URL}/plugins${editingPlugin ? `/${editingPlugin.id}` : ''}`;
+      const endpoint = `${import.meta.env.VITE_API_BASE_URL}/plugins${editingPlugin ? `/${editingPlugin.id}` : '/integrations'}`;
       const method = editingPlugin ? apiPut : apiPost;
       const response = await method(endpoint, payload, user?.access_token);
 

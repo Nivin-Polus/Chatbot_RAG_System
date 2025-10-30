@@ -303,8 +303,8 @@ async def list_plugins(
     return responses
 
 
-@router.post("/", response_model=PluginIntegrationResponse, status_code=status.HTTP_201_CREATED)
-async def create_plugin(
+@router.post("/integrations", response_model=PluginIntegrationResponse, status_code=status.HTTP_201_CREATED)
+async def create_plugin_integration(
     payload: PluginIntegrationCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
