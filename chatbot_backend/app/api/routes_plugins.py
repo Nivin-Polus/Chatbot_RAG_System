@@ -245,7 +245,6 @@ def _ensure_plugin_user_for_collection(
             # or if there's no existing token, generate a fresh token
             if creator_user_id is None or not plugin_user.plugin_token:
                 # Generate a fresh token for active plugins
-                from app.core.auth import create_plugin_user_token
                 plugin_token_value = create_plugin_user_token(
                     user_id=plugin_user.user_id,
                     username=plugin_user.username,
@@ -382,12 +381,46 @@ async def lookup_plugin_credentials(
     if not normalized:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid URL")
 
+    # Find plugin by doing a prefix match instead of exact match
+    # This allows subpaths like /login or /hero to match the base domain
     plugin = (
         db.query(PluginIntegration)
         .join(Collection, PluginIntegration.collection_id == Collection.collection_id)
         .filter(PluginIntegration.normalized_url == normalized)
         .first()
     )
+    
+    # If exact match fails, try prefix matching
+    # This allows subpaths like /login or /hero to match a base domain registration
+    if not plugin:
+        # Parse the normalized URL to get domain and path
+        parsed_request = urlparse(f"https://{normalized}" if "://" not in normalized else normalized)
+        request_domain = parsed_request.netloc.lower()
+        request_path = parsed_request.path.rstrip('/')
+        
+        # Try to match plugins by checking if the request URL is a subpath of a registered plugin URL
+        # or if the plugin URL is a subpath of the request URL
+        plugins = (
+            db.query(PluginIntegration)
+            .join(Collection, PluginIntegration.collection_id == Collection.collection_id)
+            .all()
+        )
+        
+        for p in plugins:
+            # Parse the plugin's normalized URL
+            parsed_plugin = urlparse(f"https://{p.normalized_url}" if "://" not in p.normalized_url else p.normalized_url)
+            plugin_domain = parsed_plugin.netloc.lower()
+            plugin_path = parsed_plugin.path.rstrip('/')
+            
+            # Check if domains match
+            if request_domain == plugin_domain:
+                # Same domain, check paths
+                # If plugin is registered with base domain, it should match any subpath
+                # If plugin is registered with a specific path, the request path should start with it
+                if not plugin_path or request_path.startswith(plugin_path):
+                    plugin = p
+                    break
+    
     if not plugin:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin not found for the provided URL")
 
