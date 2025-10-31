@@ -65,6 +65,19 @@ def initialize_database():
         logger.error(f"❌ Database initialization failed: {e}")
         return False
 
+def initialize_schema():
+    """Initialize the schema using the initialize_schema script"""
+    try:
+        logger.info("🔧 Initializing schema...")
+        # Import and run the schema initialization
+        from initialize_schema import main as init_schema_main
+        init_schema_main()
+        logger.info("✅ Schema initialized successfully")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Schema initialization failed: {e}")
+        return False
+
 def start_server():
     """Start the FastAPI server"""
     try:
@@ -115,9 +128,9 @@ def main():
     if not check_environment():
         logger.info("⚠️  Continuing with missing environment variables...")
     
-    # Initialize database
-    if not initialize_database():
-        logger.error("Failed to initialize database")
+    # Initialize schema (this includes database initialization and ensures existing data is preserved)
+    if not initialize_schema():
+        logger.error("Failed to initialize schema")
         sys.exit(1)
     
     # Start server
