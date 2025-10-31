@@ -128,9 +128,9 @@ def main():
     if not check_environment():
         logger.info("⚠️  Continuing with missing environment variables...")
     
-    # Initialize schema (this includes database initialization and ensures existing data is preserved)
-    if not initialize_schema():
-        logger.error("Failed to initialize schema")
+    # Initialize database (without schema initialization)
+    if not initialize_database():
+        logger.error("Failed to initialize database")
         sys.exit(1)
     
     # Start server
