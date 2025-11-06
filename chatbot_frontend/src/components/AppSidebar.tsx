@@ -20,7 +20,8 @@ import {
   MessageSquare,
   Layers,
   LogOut,
-  Activity
+  Activity,
+  Link2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { getAssetUrl } from '@/utils/assets';
@@ -29,6 +30,7 @@ import { getAssetUrl } from '@/utils/assets';
 const superadminNav = [
   { title: 'Knowledge Base', url: '/superadmin', icon: Layers },
   { title: 'Users', url: '/superadmin/users', icon: Users },
+  { title: 'Plugins', url: '/superadmin/plugins', icon: Link2 },
   { title: 'Chat', url: '/superadmin/chat', icon: MessageSquare },
   { title: 'Activity', url: '/superadmin/activity', icon: Activity },
   { title: 'Settings', url: '/superadmin/settings', icon: Settings },
@@ -45,6 +47,7 @@ const adminNav = (collectionId?: string) => [
 const userAdminNav = () => [
   { title: 'Knowledge Base', url: `/useradmin/knowledge-base`, icon: Layers },
   { title: 'Users', url: `/useradmin/users`, icon: Users },
+  { title: 'Plugins', url: `/useradmin/plugins`, icon: Link2 },
   { title: 'Chat', url: `/useradmin/chat`, icon: MessageSquare },
   { title: 'Settings', url: `/useradmin/settings`, icon: Settings },
 ];

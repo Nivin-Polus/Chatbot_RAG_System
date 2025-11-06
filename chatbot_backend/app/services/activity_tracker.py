@@ -77,7 +77,7 @@ class ActivityTracker:
         if latest_activity and (stats.last_activity is None or stats.last_activity < latest_activity):
             stats.last_activity = latest_activity
 
-    def log_activity(self, activity_type: str, user: str, details: Dict = None, metadata: Dict = None):
+    def log_activity(self, activity_type: str, user: str, details: Optional[Dict] = None, metadata: Optional[Dict] = None):
         """Persist a new activity event."""
         timestamp = datetime.now(timezone.utc)
         session = self._get_session()
@@ -100,15 +100,15 @@ class ActivityTracker:
             stats = self._get_or_create_stats(session)
 
             if activity_type == "file_upload":
-                stats.total_files_uploaded += 1
+                stats.total_files_uploaded = stats.total_files_uploaded + 1
                 stats.last_document_upload = timestamp
             elif activity_type == "chat_session_start":
-                stats.total_chat_sessions += 1
+                stats.total_chat_sessions = stats.total_chat_sessions + 1
                 stats.last_chat_session = timestamp
             elif activity_type == "chat_query":
-                stats.total_queries += 1
+                stats.total_queries = stats.total_queries + 1
             elif activity_type in {"user_created", "user_registered"}:
-                stats.total_users += 1
+                stats.total_users = stats.total_users + 1
 
             stats.touch_activity(timestamp)
 
@@ -121,17 +121,47 @@ class ActivityTracker:
         finally:
             session.close()
 
-    def get_recent_activities(self, limit: int = 50, since_hours: Optional[int] = None) -> List[Dict]:
-        """Return the most recent activities, optionally filtered by a time window."""
+    def get_recent_activities(self, limit: int = 100, offset: int = 0, since_hours: Optional[int] = None, 
+                             activity_type: Optional[str] = None, username: Optional[str] = None, 
+                             collection_id: Optional[str] = None) -> List[Dict]:
+        """Return the most recent activities, optionally filtered by a time window and other criteria."""
         session = self._get_session()
         try:
             query = session.query(ActivityLog).order_by(desc(ActivityLog.created_at))
 
+            # Apply time filter
             if since_hours is not None and since_hours > 0:
                 cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
                 query = query.filter(ActivityLog.created_at >= cutoff)
 
-            records = query.limit(limit).all()
+            # Apply activity type filter
+            if activity_type:
+                query = query.filter(ActivityLog.activity_type == activity_type)
+
+            # Apply username filter
+            if username:
+                query = query.filter(ActivityLog.username == username)
+
+            # Apply collection filter by checking details field
+            if collection_id:
+                # We need to filter by collection_id in the details JSON field
+                # This is a bit tricky with SQLAlchemy, so we'll do it in Python after fetching
+                pass
+
+            # Apply pagination
+            query = query.offset(offset).limit(limit)
+            
+            records = query.all()
+            
+            # Post-filter by collection_id if needed
+            if collection_id:
+                filtered_records = []
+                for record in records:
+                    details = record._safe_json_load(record.details) or {}
+                    if details.get('collection_id') == collection_id or details.get('collection_name') == collection_id:
+                        filtered_records.append(record)
+                records = filtered_records
+            
             return [activity.to_dict() for activity in records]
         finally:
             session.close()

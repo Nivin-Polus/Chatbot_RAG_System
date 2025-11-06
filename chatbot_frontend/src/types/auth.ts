@@ -11,6 +11,18 @@ export interface AuthUser {
   plugin_token?: string;
 }
 
+export interface PluginIntegration {
+  id: number;
+  collection_id: string;
+  collection_name: string;
+  website_url: string;
+  normalized_url: string;
+  display_name?: string | null;
+  is_active: boolean;
+  created_at?: string | null;
+  created_by?: string | null;
+}
+
 export interface LoginCredentials {
   username: string;
   password: string;

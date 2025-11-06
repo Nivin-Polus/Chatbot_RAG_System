@@ -9,16 +9,17 @@ from contextlib import contextmanager
 import logging
 
 from app.api import (
-    routes_auth,
-    routes_files,
-    routes_chat,
     routes_health,
-    routes_activity,
-    routes_websites,
-    routes_multitenant_users,
+    routes_auth,
+    routes_chat,
     routes_collections,
-    routes_vector_databases,
+    routes_files,
+    routes_activity,
     routes_prompts,
+    routes_multitenant_users,
+    routes_websites,
+    routes_vector_databases,
+    routes_plugins,
 )
 from app.core.database import init_database, create_database_if_not_exists, get_db
 from app.config import settings
@@ -76,6 +77,7 @@ api_router.include_router(routes_multitenant_users.router, prefix="/users", tags
 api_router.include_router(routes_vector_databases.router, prefix="/vector-databases", tags=["Vector Database Management"])
 api_router.include_router(routes_prompts.router, prefix="/prompts", tags=["System Prompts"])
 api_router.include_router(routes_collections.router, tags=["Collections"])
+api_router.include_router(routes_plugins.router, tags=["Plugins"])
 
 app.include_router(api_router)
 

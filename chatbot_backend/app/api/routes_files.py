@@ -1,13 +1,14 @@
 # app/api/routes_files.py
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request, status
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from typing import List, Optional, Union
 from collections.abc import Sequence
 from app.core.vector_singleton import get_vector_store
 from app.core.database import get_db
-from app.api.routes_auth import get_current_user
+from app.core.permissions import get_current_user
 from app.utils.file_parser import parse_file
 from app.utils.file_sanitizer import (
     sanitize_filename,
@@ -30,6 +31,9 @@ logger = logging.getLogger("files_logger")
 logging.basicConfig(level=logging.INFO)
 
 router = APIRouter()
+
+# Security for plugin tokens
+plugin_security = HTTPBearer()
 
 # Initialize services
 file_storage_service = FileStorageService()
@@ -58,11 +62,11 @@ async def upload_file(
     uploaded_files: Optional[Union[UploadFile, List[UploadFile]]] = File(None, alias="uploaded_files"),
     single_file: Optional[UploadFile] = File(None, alias="file"),
     collection_id: Optional[str] = Form(None),
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Upload one or multiple files"""
-    logger.info(f"[UPLOAD DEBUG] Upload request from user: {current_user.get('username')}, role: {current_user.get('role')}")
+    logger.info(f"[UPLOAD DEBUG] Upload request from user: {getattr(current_user, 'username', None)}, role: {getattr(current_user, 'role', None)}")
     
     # Debug: Log what files we received
     logger.info(f"[UPLOAD DEBUG] Received files: {files is not None}")
@@ -80,7 +84,7 @@ async def upload_file(
             logger.info(f"[UPLOAD DEBUG] uploaded_files is a single file: {getattr(uploaded_files, 'filename', 'None')}")
 
     # Check permissions
-    role = current_user.get("role")
+    role = getattr(current_user, 'role', None)
     if role not in ["user_admin", "super_admin"]:
         raise HTTPException(status_code=403, detail="Only admin users can upload files")
 
@@ -144,7 +148,7 @@ async def upload_file(
         raise HTTPException(status_code=400, detail="No files provided for upload")
 
     # Get user from database using username (most reliable)
-    username = current_user.get("username")
+    username = getattr(current_user, 'username', None)
     if not username:
         raise HTTPException(status_code=401, detail="Username not found in token")
     
@@ -260,7 +264,7 @@ async def upload_file(
             meta = FileMeta(
                 file_id=file_id,
                 file_name=safe_filename,
-                uploaded_by=current_user.get("username", "unknown"),
+                uploaded_by=getattr(current_user, 'username', 'unknown'),
                 uploader_id=str(uploader_id) if uploader_id else None,
                 upload_timestamp=file_metadata.upload_timestamp.isoformat() if file_metadata.upload_timestamp is not None else None,
                 file_size=int(str(file_metadata.file_size)) if file_metadata.file_size is not None else None,
@@ -273,7 +277,7 @@ async def upload_file(
 
             activity_tracker.log_activity(
                 activity_type="file_upload",
-                user=current_user["username"],
+                user=getattr(current_user, 'username', 'unknown'),
                 details={
                     "file_name": safe_filename,
                     "file_id": file_id,
@@ -302,7 +306,7 @@ async def upload_file(
     if failed_files:
         logger.warning(f"[UPLOAD PARTIAL SUCCESS] Uploaded {success_count}/{total_count} files. Failed files: {', '.join(failed_files)}")
     else:
-        logger.info(f"[UPLOAD SUCCESS] Uploaded {success_count}/{total_count} files by {current_user.get('username')}")
+        logger.info(f"[UPLOAD SUCCESS] Uploaded {success_count}/{total_count} files by {getattr(current_user, 'username', 'unknown')}")
     
     return results
 
@@ -313,11 +317,12 @@ async def upload_file(
 @router.delete("/{file_id}")
 async def delete_file(
     file_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     # Check if user has admin role
-    if current_user.get("role") not in {"user_admin", "super_admin"}:
+    role = getattr(current_user, 'role', None)
+    if role not in {"user_admin", "super_admin"}:
         raise HTTPException(status_code=403, detail="Only admin users can delete files")
 
     file_record = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
@@ -346,12 +351,12 @@ async def delete_file(
         except Exception as cache_error:
             logger.warning(f"Failed to invalidate cache: {cache_error}")
 
-        logger.info(f"File deleted: {file_id} by {current_user['username']}")
+        logger.info(f"File deleted: {file_id} by {getattr(current_user, 'username', 'unknown')}")
         
         # Log activity
         activity_tracker.log_activity(
             activity_type="file_delete",
-            user=current_user["username"],
+            user=getattr(current_user, 'username', 'unknown'),
             details={
                 "file_id": file_id,
                 "file_name": file_record.file_name,
@@ -371,11 +376,11 @@ async def delete_file(
 @router.get("/list", response_model=List[FileMeta])
 async def list_files(
     collection_id: Optional[str] = Query(None),
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    role = current_user.get("role")
-    username = current_user.get("username")
+    role = str(current_user.role) if hasattr(current_user, 'role') else None
+    username = str(current_user.username) if hasattr(current_user, 'username') else None
     
     # Get user from database for reliable user_id and website_id
     if not username:
@@ -385,8 +390,8 @@ async def list_files(
     if not user_record:
         raise HTTPException(status_code=403, detail=f"User '{username}' not found in database")
     
-    user_id = user_record.user_id
-    website_id = user_record.website_id
+    user_id = str(user_record.user_id) if hasattr(user_record, 'user_id') and user_record.user_id is not None else None
+    website_id = str(user_record.website_id) if hasattr(user_record, 'website_id') and user_record.website_id is not None else None
 
     query = db.query(FileMetadata)
 
@@ -397,7 +402,7 @@ async def list_files(
     elif role == "user_admin":
         # User admin: view files in collections they administer
         admin_collection_ids = [
-            c.collection_id for c in db.query(Collection).filter(Collection.admin_user_id == user_id).all()
+            str(c.collection_id) for c in db.query(Collection).filter(Collection.admin_user_id == user_id).all()
         ]
         if not admin_collection_ids:
             return []
@@ -422,7 +427,7 @@ async def list_files(
 
     response_items: List[FileMeta] = []
     for record in files:
-        uploader_username = str(record.uploader.username) if record.uploader and record.uploader.username else str(record.uploader_id)
+        uploader_username = str(record.uploader.username) if record.uploader and hasattr(record.uploader, 'username') and record.uploader.username else str(record.uploader_id)
         item = FileMeta(
             file_id=str(record.file_id),
             file_name=str(record.file_name),
@@ -445,26 +450,57 @@ async def list_files(
 @router.get("/download/{identifier}")
 async def download_file(
     identifier: str,
-    current_user: dict = Depends(get_current_user),
+    credentials: HTTPAuthorizationCredentials = Depends(plugin_security),
     db: Session = Depends(get_db)
 ):
     """Download original file by file_id or file_name using collection_id for access control"""
     from app.models.user import User
     from app.models.collection import CollectionUser
+    from app.core.auth import decode_plugin_user_token
 
-    role = current_user.get("role")
-    username = current_user.get("username")
+    # Try to authenticate as plugin user first, then as regular user
+    current_user = None
+    role = None
+    username = None
+    current_user_id = None
     
-    # Get user from database
-    if not username:
-        raise HTTPException(status_code=401, detail="Username not found in token")
+    try:
+        # Try to decode as plugin token first
+        token_payload = decode_plugin_user_token(credentials.credentials)
+        
+        # Get plugin user from database
+        user_record = db.query(User).filter(
+            User.username == token_payload["username"],
+            User.role == "plugin_user",
+            User.is_active == True
+        ).first()
+        
+        # Extract values from SQLAlchemy model instances
+        user_record_plugin_token = str(user_record.plugin_token) if user_record and hasattr(user_record, 'plugin_token') else None
+        credentials_token = str(credentials.credentials) if credentials and hasattr(credentials, 'credentials') else None
+        
+        if user_record and user_record_plugin_token == credentials_token:
+            current_user = user_record
+            role = "plugin_user"
+            username = str(user_record.username) if hasattr(user_record, 'username') else None
+            current_user_id = str(user_record.user_id) if hasattr(user_record, 'user_id') else None
+    except ValueError:
+        # Not a plugin token, try regular user authentication
+        pass
     
-    user_record = db.query(User).filter(User.username == username).first()
-    if not user_record:
-        raise HTTPException(status_code=403, detail=f"User '{username}' not found in database")
+    # If plugin authentication failed, try regular user authentication
+    if current_user is None:
+        try:
+            # This is the existing authentication logic
+            from app.core.permissions import get_current_user
+            user_record = get_current_user(credentials, db)
+            current_user = user_record
+            role = user_record.role
+            username = user_record.username
+            current_user_id = user_record.user_id
+        except:
+            raise HTTPException(status_code=401, detail="Could not validate credentials")
     
-    current_user_id = user_record.user_id
-
     # Try to find by file_id first
     file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == identifier).first()
 
@@ -474,6 +510,134 @@ async def download_file(
 
     if not file_metadata:
         raise HTTPException(status_code=404, detail="File metadata not found")
+
+    # --- Permission check ---
+    role_str = str(role) if role is not None else ""
+    if role_str == "super_admin":
+        pass  # full access
+    elif role_str == "user_admin":
+        # User admin can access files in collections they administer
+        from app.models.collection import Collection
+        administered_collection = db.query(Collection).filter(
+            Collection.collection_id == file_metadata.collection_id,
+            Collection.admin_user_id == current_user_id
+        ).first()
+        
+        if not administered_collection:
+            raise HTTPException(status_code=403, detail="You don't have permission to access this file")
+    elif role in {"user", "plugin_user"}:
+        # Regular or plugin users can access files in collections they're members of
+        if file_metadata.collection_id is None:
+            raise HTTPException(status_code=403, detail="File has no collection assignment")
+        
+        membership = db.query(CollectionUser).filter(
+            CollectionUser.collection_id == file_metadata.collection_id,
+            CollectionUser.user_id == current_user_id
+        ).first()
+        
+        if not membership:
+            raise HTTPException(status_code=403, detail="You don't have access to this collection")
+        
+        # For plugin users, also check specific download permission
+        if role == "plugin_user" and not membership.can_download:
+            raise HTTPException(status_code=403, detail="Plugin user does not have download permission")
+    else:
+        raise HTTPException(status_code=403, detail="Invalid role")
+
+    # --- Fetch file binary ---
+    file_storage_service = FileStorageService()
+    binary_record = file_storage_service.get_file_binary(str(file_metadata.file_id), db)
+
+    if not binary_record or binary_record.data is None:
+        raise HTTPException(status_code=404, detail="File data not found")
+
+    filename = file_metadata.file_name or f"download-{file_metadata.file_id}"
+    media_type = binary_record.mime_type or file_metadata.file_type or "application/octet-stream"
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"'
+    }
+
+    # Return the raw binary bytes without any string conversion to avoid corruption
+    data_bytes = binary_record.data if binary_record.data is not None else b""
+    # Ensure we have bytes, handling SQLAlchemy column objects
+    if hasattr(data_bytes, 'tobytes') and callable(getattr(data_bytes, 'tobytes', None)):
+        data_bytes = data_bytes.tobytes()
+    elif not isinstance(data_bytes, bytes):
+        # If it's not bytes and doesn't have tobytes, try to convert it
+        try:
+            # Check if it's a SQLAlchemy column object
+            if hasattr(data_bytes, 'value'):
+                data_bytes = bytes(data_bytes.value) if data_bytes.value else b""
+            else:
+                data_bytes = bytes(data_bytes) if data_bytes else b""
+        except:
+            data_bytes = b""
+    return StreamingResponse(iter([data_bytes]), media_type=str(media_type), headers=headers)
+
+
+# ------------------------
+# Download file by name and collection endpoint
+# ------------------------
+@router.get("/download/by-name/{collection_id}/{file_name}")
+async def download_file_by_name(
+    collection_id: str,
+    file_name: str,
+    credentials: HTTPAuthorizationCredentials = Depends(plugin_security),
+    db: Session = Depends(get_db)
+):
+    """Download original file by file_name and collection_id for access control"""
+    from app.models.user import User
+    from app.models.collection import CollectionUser
+    from app.core.auth import decode_plugin_user_token
+
+    # Try to authenticate as plugin user first, then as regular user
+    current_user = None
+    role = None
+    username = None
+    current_user_id = None
+    
+    try:
+        # Try to decode as plugin token first
+        token_payload = decode_plugin_user_token(credentials.credentials)
+        
+        # Get plugin user from database
+        user_record = db.query(User).filter(
+            User.username == token_payload["username"],
+            User.role == "plugin_user",
+            User.is_active == True
+        ).first()
+        
+        if user_record and user_record.plugin_token == credentials.credentials:
+            current_user = user_record
+            role = "plugin_user"
+            username = user_record.username
+            current_user_id = user_record.user_id
+    except ValueError:
+        # Not a plugin token, try regular user authentication
+        pass
+    
+    # If plugin authentication failed, try regular user authentication
+    if current_user is None:
+        try:
+            # This is the existing authentication logic
+            from app.core.permissions import get_current_user
+            user_record = get_current_user(credentials, db)
+            current_user = user_record
+            role = user_record.role
+            username = user_record.username
+            current_user_id = user_record.user_id
+        except:
+            raise HTTPException(status_code=401, detail="Could not validate credentials")
+
+    # Find file by file_name and collection_id
+    file_metadata = db.query(FileMetadata).filter(
+        FileMetadata.file_name == file_name,
+        FileMetadata.collection_id == collection_id
+    ).first()
+
+    if not file_metadata:
+        raise HTTPException(status_code=404, detail="File not found")
 
     # --- Permission check ---
     if role == "super_admin":
@@ -500,6 +664,10 @@ async def download_file(
         
         if not membership:
             raise HTTPException(status_code=403, detail="You don't have access to this collection")
+        
+        # For plugin users, also check specific download permission
+        if role == "plugin_user" and not membership.can_download:
+            raise HTTPException(status_code=403, detail="Plugin user does not have download permission")
     else:
         raise HTTPException(status_code=403, detail="Invalid role")
 
@@ -522,14 +690,13 @@ async def download_file(
     return StreamingResponse(iter([data_bytes]), media_type=str(media_type), headers=headers)
 
 
-
 # ------------------------
 # Get file metadata endpoint
 # ------------------------
 @router.get("/metadata/{file_id}")
 async def get_file_metadata(
     file_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Get file metadata by file_id"""
@@ -538,8 +705,8 @@ async def get_file_metadata(
     if not file_metadata:
         raise HTTPException(status_code=404, detail="File not found")
     
-    role = current_user.get("role")
-    username = current_user.get("username")
+    role = getattr(current_user, 'role', None)
+    username = getattr(current_user, 'username', None)
     
     # Get user from database
     if not username:
@@ -569,9 +736,10 @@ async def get_file_metadata(
 # Debug endpoint - Vector DB stats
 # ------------------------
 @router.get("/debug/vector-stats")
-async def get_vector_stats(current_user: dict = Depends(get_current_user)):
+async def get_vector_stats(current_user: User = Depends(get_current_user)):
     """Debug endpoint to check vector database contents"""
-    if current_user.get("role") not in {"user_admin", "super_admin"}:
+    role = getattr(current_user, 'role', None)
+    if role not in {"user_admin", "super_admin"}:
         raise HTTPException(status_code=403, detail="Only admin users can access debug info")
     
     try:
@@ -599,3 +767,6 @@ async def get_vector_stats(current_user: dict = Depends(get_current_user)):
             }
     except Exception as e:
         return {"error": str(e), "vector_db_type": "unknown"}
+
+# Add security scheme for plugin tokens
+plugin_security = HTTPBearer()

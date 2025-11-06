@@ -18,6 +18,7 @@ import SuperadminUsers from "./pages/superadmin/SuperadminUsers";
 import SuperadminChat from "./pages/superadmin/SuperadminChat";
 import SuperadminActivity from "./pages/superadmin/SuperadminActivity";
 import SuperadminSettings from "./pages/superadmin/SuperadminSettings";
+import SuperadminPlugins from "./pages/superadmin/SuperadminPlugins";
 import KnowledgeBaseDetails from "./pages/superadmin/KnowledgeBaseDetails";
 import UserDashboard from "./pages/user/UserDashboard";
 import UserChat from "./pages/user/UserChat";
@@ -25,6 +26,7 @@ import UserAdminDashboard from "./pages/useradmin/UserAdminDashboard";
 import UserAdminChat from "./pages/useradmin/UserAdminChat";
 import UserAdminSettings from "./pages/useradmin/UserAdminSettings";
 import UserAdminUsers from "./pages/useradmin/UserAdminUsers";
+import UserAdminPlugins from "./pages/useradmin/UserAdminPlugins";
 
 const queryClient = new QueryClient();
 
@@ -55,6 +57,7 @@ const App = () => (
                       <Route path="files" element={<SuperadminFiles />} />
                       <Route path="prompts" element={<SuperadminPrompts />} />
                       <Route path="users" element={<SuperadminUsers />} />
+                      <Route path="plugins" element={<SuperadminPlugins />} />
                       <Route path="chat" element={<SuperadminChat />} />
                       <Route path="activity" element={<SuperadminActivity />} />
                       <Route path="settings" element={<SuperadminSettings />} />
@@ -74,6 +77,7 @@ const App = () => (
                         element={<Navigate to="knowledge-base" replace />}
                       />
                       <Route path="users" element={<UserAdminUsers />} />
+                      <Route path="plugins" element={<UserAdminPlugins />} />
                       <Route path="knowledge-base" element={<UserAdminDashboard />} />
                       <Route path="chat" element={<UserAdminChat />} />
                       <Route path="settings" element={<UserAdminSettings />} />

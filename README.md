@@ -656,6 +656,28 @@ cd chatbot_backend
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+### Worker Configuration for Concurrency
+
+The chatbot system can handle multiple concurrent requests by adjusting the number of workers. The optimal number depends on your server's CPU cores and available memory:
+
+```bash
+# For development (1 worker)
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# For production (configure workers based on CPU cores)
+# Rule of thumb: 1-2 workers per CPU core
+# Example: 4-core CPU → 4-8 workers
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+**Worker Sizing Guidelines:**
+- **Development**: 1 worker (default)
+- **Production**: 1-2 workers per CPU core
+- **High Load**: More workers for I/O bound applications like chatbots
+- **Memory Consideration**: Each worker consumes RAM, so balance based on available memory
+
+You can also configure workers in the [uvicorn_config.py](file:///c:/Users/nivin/Documents/Chatbot_RAG_System_UI_1/chatbot_backend/uvicorn_config.py) file for persistent settings.
+
 ---
 
 ## 🔧 **Post-Setup Steps & Troubleshooting**
@@ -738,7 +760,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 Create a `.env` file in the backend directory:
 
-```env
+``env
 # Claude AI Configuration
 CLAUDE_API_KEY=your_claude_api_key_here
 CLAUDE_API_URL=https://api.anthropic.com/v1/messages

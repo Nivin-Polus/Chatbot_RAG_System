@@ -68,6 +68,62 @@ def get_current_user(
         logger.error(f"Authentication error: {e}")
         raise AuthenticationError()
 
+
+def get_plugin_user_from_token(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+) -> User:
+    """Get plugin user from plugin token"""
+    try:
+        # First try to decode as a plugin token
+        from app.core.auth import decode_plugin_user_token
+        token_payload = decode_plugin_user_token(credentials.credentials)
+        
+        # Get user from database
+        user = db.query(User).filter(
+            User.username == token_payload["username"],
+            User.role == "plugin_user",
+            User.is_active == True
+        ).first()
+        
+        if user is None:
+            raise AuthenticationError("Plugin user not found or inactive")
+            
+        # Verify the token matches what's stored
+        if user.plugin_token != credentials.credentials:
+            raise AuthenticationError("Plugin token has been rotated")
+            
+        return user
+        
+    except ValueError as e:
+        # Not a valid plugin token, re-raise as authentication error
+        raise AuthenticationError(str(e))
+    except Exception as e:
+        logger.error(f"Plugin authentication error: {e}")
+        raise AuthenticationError()
+
+
+def get_current_user_or_plugin(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+) -> User:
+    """Get current user from either regular JWT token or plugin token"""
+    # First try standard user authentication
+    try:
+        return get_current_user(credentials, db)
+    except AuthenticationError:
+        # If that fails, try plugin user authentication
+        try:
+            return get_plugin_user_from_token(credentials, db)
+        except AuthenticationError:
+            # If both fail, raise authentication error
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+
 def require_super_admin(current_user: User = Depends(get_current_user)) -> User:
     """Require super admin role"""
     if not current_user.is_super_admin():

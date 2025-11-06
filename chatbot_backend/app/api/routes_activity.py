@@ -23,13 +23,24 @@ class ActivityLogRequest(BaseModel):
 # ------------------------
 @router.get("/recent")
 async def get_recent_activities(
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     since_hours: Optional[int] = Query(None, ge=1, le=24 * 180),
+    activity_type: Optional[str] = Query(None),
+    username: Optional[str] = Query(None),
+    collection_id: Optional[str] = Query(None),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get recent activities"""
+    """Get recent activities with pagination and filtering support"""
     try:
-        activities = activity_tracker.get_recent_activities(limit, since_hours)
+        activities = activity_tracker.get_recent_activities(
+            limit=limit, 
+            offset=offset,
+            since_hours=since_hours,
+            activity_type=activity_type,
+            username=username,
+            collection_id=collection_id
+        )
         return {
             "activities": activities,
             "count": len(activities)

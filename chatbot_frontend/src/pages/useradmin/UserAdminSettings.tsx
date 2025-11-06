@@ -35,7 +35,7 @@ export default function UserAdminSettings() {
 
     try {
       const response = await apiPost(
-        `${import.meta.env.VITE_API_BASE_URL}/users/reset-password`,
+        `${import.meta.env.VITE_API_BASE_URL}/auth/change-password`,
         {
           current_password: passwordData.currentPassword,
           new_password: passwordData.newPassword,

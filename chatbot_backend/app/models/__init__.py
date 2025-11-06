@@ -10,6 +10,7 @@ from .chat_tracking import ChatSession, ChatQuery, ChatSessionCreate, ChatQueryC
 from .vector_database import VectorDatabase, VectorDatabaseCreate, VectorDatabaseUpdate, VectorDatabaseResponse
 from .system_prompt import SystemPrompt, SystemPromptCreate, SystemPromptUpdate, SystemPromptResponse
 from .collection import Collection, CollectionUser, CollectionWebsite
+from .plugin_integration import PluginIntegration
 from .activity_log import ActivityLog
 from .activity_stats import ActivityStats
 
@@ -28,6 +29,7 @@ __all__ = [
     "Collection",
     "CollectionUser",
     "CollectionWebsite",
+    "PluginIntegration",
     "ActivityLog",
     "ActivityStats",
 ]

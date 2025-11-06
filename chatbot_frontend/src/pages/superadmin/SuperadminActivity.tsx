@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 
 type ActivityDetails = Record<string, unknown> | null | undefined;
 
@@ -39,6 +40,12 @@ export default function SuperadminActivity() {
   const [stats, setStats] = useState<ActivityStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<'all' | '24h' | '7d' | '30d'>('24h');
+  const [activityTypeFilter, setActivityTypeFilter] = useState<string>('all');
+  const [userFilter, setUserFilter] = useState<string>('');
+  const [collectionFilter, setCollectionFilter] = useState<string>('');
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [totalActivities, setTotalActivities] = useState(0);
 
   const normalizeTimestamp = (rawTimestamp: any): string => {
     if (!rawTimestamp) {
@@ -81,8 +88,28 @@ export default function SuperadminActivity() {
   const fetchActivityData = useCallback(async () => {
     setIsLoading(true);
     try {
+      // Calculate since_hours based on timeFilter
+      let sinceHours: number | undefined;
+      if (timeFilter === '24h') {
+        sinceHours = 24;
+      } else if (timeFilter === '7d') {
+        sinceHours = 24 * 7; // 168 hours
+      } else if (timeFilter === '30d') {
+        sinceHours = 24 * 30; // 720 hours
+      }
+      // For 'all', sinceHours remains undefined to fetch all activities
+
+      const queryParams = new URLSearchParams({
+        limit: '100',
+        offset: offset.toString(),
+        ...(sinceHours !== undefined && { since_hours: sinceHours.toString() }),
+        ...(activityTypeFilter && activityTypeFilter !== 'all' && { activity_type: activityTypeFilter }),
+        ...(userFilter && { username: userFilter }),
+        ...(collectionFilter && { collection_id: collectionFilter })
+      });
+
       const [recentResponse, statsResponse] = await Promise.all([
-        fetch(`${import.meta.env.VITE_API_BASE_URL}/activity/recent?limit=50`, {
+        fetch(`${import.meta.env.VITE_API_BASE_URL}/activity/recent?${queryParams}`, {
           headers: {
             Authorization: `Bearer ${user?.access_token}`,
           },
@@ -103,9 +130,22 @@ export default function SuperadminActivity() {
           : [];
 
         const normalized = rawActivities.map(normalizeActivityItem);
-        setActivities(normalized);
+        
+        // If offset is 0, replace activities, otherwise append
+        if (offset === 0) {
+          setActivities(normalized);
+        } else {
+          setActivities(prev => [...prev, ...normalized]);
+        }
+        
+        // Check if there are more activities to load
+        setHasMore(rawActivities.length === 100);
+        setTotalActivities(recentData.count || rawActivities.length);
       } else {
-        setActivities([]);
+        if (offset === 0) {
+          setActivities([]);
+        }
+        setHasMore(false);
       }
 
       if (statsResponse.ok) {
@@ -128,25 +168,32 @@ export default function SuperadminActivity() {
       console.error('Error fetching activity data:', error);
       toast.error('Failed to fetch activity data');
       // Ensure activities is always an array even on error
-      setActivities([]);
+      if (offset === 0) {
+        setActivities([]);
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [user?.access_token]);
+  }, [user?.access_token, offset, timeFilter, activityTypeFilter, userFilter, collectionFilter]);
 
   useEffect(() => {
+    // Reset offset when filters change
+    setOffset(0);
     fetchActivityData().catch(() => undefined);
-  }, [fetchActivityData]);
+  }, [fetchActivityData, timeFilter, activityTypeFilter, userFilter, collectionFilter]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
-      fetchActivityData().catch(() => undefined);
+      // Only refresh if we're at the first page
+      if (offset === 0) {
+        fetchActivityData().catch(() => undefined);
+      }
     }, 60000);
 
     return () => {
       window.clearInterval(interval);
     };
-  }, [fetchActivityData]);
+  }, [fetchActivityData, offset]);
 
   const normalizeActivityItem = (raw: any): ActivityItem => {
     const id = raw?.id || raw?.activity_id || crypto.randomUUID();
@@ -293,24 +340,21 @@ export default function SuperadminActivity() {
     return `${Math.floor(diffInSeconds / 86400)}d ago`;
   };
 
-  const filteredActivities = useMemo(() => {
-    if (timeFilter === 'all') {
-      return activities;
-    }
+  const handleLoadMore = () => {
+    setOffset(prev => prev + 100);
+  };
 
-    const now = Date.now();
-    const windowMs =
-      timeFilter === '24h'
-        ? 24 * 60 * 60 * 1000
-        : timeFilter === '7d'
-        ? 7 * 24 * 60 * 60 * 1000
-        : 30 * 24 * 60 * 60 * 1000;
+  const handleRefresh = () => {
+    setOffset(0);
+    fetchActivityData();
+  };
 
-    return activities.filter((activity) => {
-      const timestamp = new Date(activity.timestamp).getTime();
-      return Number.isFinite(timestamp) && now - timestamp <= windowMs;
-    });
-  }, [activities, timeFilter]);
+  const handleClearFilters = () => {
+    setActivityTypeFilter('all');
+    setUserFilter('');
+    setCollectionFilter('');
+    setTimeFilter('24h');
+  };
 
   return (
     <DashboardLayout>
@@ -318,26 +362,87 @@ export default function SuperadminActivity() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">Activity Dashboard</h1>
-            
           </div>
           <div className="flex items-center space-x-2">
-            <Select value={timeFilter} onValueChange={(value: 'all' | '24h' | '7d' | '30d') => setTimeFilter(value)}>
-              <SelectTrigger className="w-36">
-                <SelectValue placeholder="Time range" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="24h">Last 24 hours</SelectItem>
-                <SelectItem value="7d">Last 7 days</SelectItem>
-                <SelectItem value="30d">Last 30 days</SelectItem>
-                <SelectItem value="all">All time</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button variant="outline" onClick={fetchActivityData} disabled={isLoading}>
+            <Button variant="outline" onClick={handleRefresh} disabled={isLoading}>
               <RefreshCw className="mr-2 h-4 w-4" />
               Refresh
             </Button>
           </div>
         </div>
+
+        {/* Filters */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="h-5 w-5" />
+              Filters
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div>
+                <label className="text-sm font-medium mb-1 block">Time Range</label>
+                <Select value={timeFilter} onValueChange={(value: 'all' | '24h' | '7d' | '30d') => setTimeFilter(value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Time range" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="24h">Last 24 hours</SelectItem>
+                    <SelectItem value="7d">Last 7 days</SelectItem>
+                    <SelectItem value="30d">Last 30 days</SelectItem>
+                    <SelectItem value="all">All time</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <label className="text-sm font-medium mb-1 block">Activity Type</label>
+                <Select value={activityTypeFilter} onValueChange={setActivityTypeFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All types" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All types</SelectItem>
+                    <SelectItem value="file_upload">File Upload</SelectItem>
+                    <SelectItem value="file_download">File Download</SelectItem>
+                    <SelectItem value="file_delete">File Delete</SelectItem>
+                    <SelectItem value="user_login">User Login</SelectItem>
+                    <SelectItem value="chat_session_start">Chat Session Start</SelectItem>
+                    <SelectItem value="chat_query">Chat Query</SelectItem>
+                    <SelectItem value="collection_created">Collection Created</SelectItem>
+                    <SelectItem value="user_created">User Created</SelectItem>
+                    <SelectItem value="system_reset">System Reset</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <label className="text-sm font-medium mb-1 block">User</label>
+                <Input 
+                  placeholder="Filter by user" 
+                  value={userFilter}
+                  onChange={(e) => setUserFilter(e.target.value)}
+                />
+              </div>
+              
+              <div>
+                <label className="text-sm font-medium mb-1 block">Collection</label>
+                <Input 
+                  placeholder="Filter by collection" 
+                  value={collectionFilter}
+                  onChange={(e) => setCollectionFilter(e.target.value)}
+                />
+              </div>
+              
+              <div className="flex items-end">
+                <Button variant="outline" onClick={handleClearFilters} className="w-full">
+                  Clear Filters
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Statistics Cards */}
         {stats && (
@@ -391,21 +496,23 @@ export default function SuperadminActivity() {
             <CardTitle className="flex items-center gap-2">
               <Activity className="h-5 w-5" />
               Recent Activity
+              <span className="text-sm font-normal text-muted-foreground ml-2">
+                {activities.length} of {totalActivities} activities
+              </span>
             </CardTitle>
-            
           </CardHeader>
           <CardContent>
-            {isLoading ? (
+            {isLoading && offset === 0 ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
               </div>
-            ) : !filteredActivities || filteredActivities.length === 0 ? (
+            ) : !activities || activities.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
-                No activity found for the selected range
+                No activity found for the selected filters
               </div>
             ) : (
               <div className="space-y-3">
-                {filteredActivities.map((activity) => (
+                {activities.map((activity) => (
                   <div
                     key={activity.id}
                     className="rounded-xl border bg-card/60 backdrop-blur p-4 transition-colors hover:bg-card"
@@ -450,6 +557,25 @@ export default function SuperadminActivity() {
                     </div>
                   </div>
                 ))}
+                
+                {hasMore && (
+                  <div className="flex justify-center py-4">
+                    <Button 
+                      onClick={handleLoadMore} 
+                      disabled={isLoading}
+                      variant="outline"
+                    >
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Loading...
+                        </>
+                      ) : (
+                        'Load More'
+                      )}
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </CardContent>
