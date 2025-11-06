@@ -199,10 +199,6 @@ export default function SuperadminUsers() {
           username: formData.username,
           email: formData.email,
           full_name: formData.full_name,
-          password:
-            formData.password && editingUser.user_id !== authUser?.user_id
-              ? formData.password
-              : undefined,
           role: formData.role === 'useradmin' ? 'user_admin' : formData.role,
           collection_ids: formData.collection_ids,
           is_active: editingUser.is_active, // Preserve active status
@@ -210,6 +206,25 @@ export default function SuperadminUsers() {
       });
 
       if (!response.ok) throw new Error('Failed to update user');
+
+      // If a new password is provided for another user, reset it via the proper endpoint
+      if (formData.password && editingUser.user_id !== authUser?.user_id) {
+        const resetResponse = await fetch(`${import.meta.env.VITE_API_BASE_URL}/users/reset-password`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authUser?.access_token}`,
+          },
+          body: JSON.stringify({
+            user_id: editingUser.user_id,
+            new_password: formData.password,
+          }),
+        });
+        if (!resetResponse.ok) {
+          const errText = await resetResponse.text();
+          throw new Error(errText || 'Failed to reset password');
+        }
+      }
 
       toast.success('User updated successfully');
       setIsDialogOpen(false);
