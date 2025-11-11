@@ -55,6 +55,7 @@ origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",")]
 methods = [method.strip() for method in settings.CORS_METHODS.split(",")]
 headers = [header.strip() for header in settings.CORS_HEADERS.split(",")]
 
+print("DEBUG: SETTINGS.CORS_ORIGINS =", settings.CORS_ORIGINS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
