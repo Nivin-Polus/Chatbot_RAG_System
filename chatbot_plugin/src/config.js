@@ -1,7 +1,27 @@
 // config.js
 
 async function getConfig() {
-  const response = await fetch("../dist/assets/config.json");
+  let configUrl = "../dist/assets/config.json";
+
+  if (typeof document !== "undefined") {
+    let script =
+      document.currentScript ||
+      document.querySelector('script[src*="chatbot.min.js"]') ||
+      document.querySelector('script[src*="chatbot.js"]');
+
+    if (script?.src) {
+      try {
+        const scriptUrl = new URL(script.src, window.location.href);
+        scriptUrl.search = "";
+        scriptUrl.hash = "";
+        configUrl = new URL("assets/config.json", scriptUrl).href;
+      } catch (error) {
+        console.warn("Unable to resolve config URL from script src:", error);
+      }
+    }
+  }
+
+  const response = await fetch(configUrl);
   if (!response.ok) {
     throw new Error(`Failed to load config.json: ${response.status}`);
   }

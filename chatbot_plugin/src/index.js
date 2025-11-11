@@ -436,7 +436,7 @@ import "./styles.css";
 
   function renderAssistantContent(message) {
     if (message.formatted) {
-      const html = renderAssistantText(message.text, message.sources || [], !message.isTyping);
+      const html = renderAssistantText(message.text, message.sources || []);
       return `<div class="plugin-msg-content msg-content text-sm"><div class="plugin-prose prose prose-sm max-w-none">${html}</div></div>`;
     }
     return `<div class="plugin-msg-content msg-content">${escapeHtml(message.text)}</div>`;
@@ -448,28 +448,6 @@ import "./styles.css";
 
     const button = triggerEl;
     const initialLabel = button?.textContent;
-    const apiBase = (CONFIG.apiBase || "").replace(/\/+$/, "");
-    const windowOrigin = typeof window !== "undefined" && window.location?.origin
-      ? window.location.origin.replace(/\/+$/, "")
-      : "";
-    const downloadBase = apiBase || windowOrigin || "";
-
-    const extractIdentifier = (value) => {
-      const trimmed = (value || "").trim();
-      if (!trimmed) return "";
-      try {
-        const url = new URL(trimmed, `${downloadBase || "https://placeholder.local"}/`);
-        const segments = url.pathname.split("/").filter(Boolean);
-        if (!segments.length) return "";
-        const downloadIndex = segments.findIndex((segment) => segment === "download");
-        if (downloadIndex > -1 && downloadIndex + 1 < segments.length) {
-          return decodeURIComponent(segments[downloadIndex + 1]);
-        }
-        return decodeURIComponent(segments[segments.length - 1]);
-      } catch {
-        return trimmed;
-      }
-    };
 
     try {
       if (button) {
@@ -485,28 +463,14 @@ import "./styles.css";
       const headers = { Authorization: `Bearer ${token}` };
       const normalizedName = (downloadName || "").trim();
       const ref = (sourceRef || "").trim();
+      const base = (CONFIG.apiBase || "").replace(/\/+$/, "");
 
       if (!ref && !normalizedName) {
         throw new Error("Missing file reference");
       }
 
-      let identifier = extractIdentifier(ref);
-      if (!identifier) {
-        identifier = extractIdentifier(normalizedName);
-      }
-      if (!identifier) {
-        identifier = ref || normalizedName;
-      }
-      if (!identifier) {
-        throw new Error("Missing file identifier");
-      }
-
-      if (!downloadBase) {
-        throw new Error("Missing download base URL");
-      }
-
-      const encodedRef = encodeURIComponent(identifier);
-      const downloadUrl = `${downloadBase}/files/download/${encodedRef}`;
+      const encodedRef = encodeURIComponent(ref || normalizedName);
+      const downloadUrl = `${base}/files/download/${encodedRef}`;
 
       const response = await fetch(downloadUrl, { headers });
       if (!response.ok) {
@@ -514,7 +478,7 @@ import "./styles.css";
       }
 
       const blob = await response.blob();
-      const filename = normalizedName || identifier || "source";
+      const filename = normalizedName || ref || "source";
       triggerBrowserDownload(blob, filename);
       return;
     } catch (err) {
@@ -573,23 +537,8 @@ import "./styles.css";
   }
 
   // --- MAIN TEXT RENDERER ---
-function renderAssistantText(text, sources = [], includeSources = true) {
+function renderAssistantText(text, sources = []) {
   if (!text) return "";
-
-  const basicFormat = (input) => {
-    let safe = escapeHtml(input);
-    safe = safe.replace(/\r\n/g, "\n");
-    safe = safe.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
-    safe = safe.replace(/^\s*-\s+/gm, "• ");
-    safe = safe.replace(/\n\d+\./g, "<br/>$&");
-    safe = safe.replace(/\n-\s*/g, "<br/>• ");
-    safe = safe.replace(/\n/g, "<br/>");
-    return safe;
-  };
-
-  if (!includeSources) {
-    return basicFormat(text);
-  }
 
   // Normalize label like "Source 4: Leave_Policy.pdf" to match file_name
   function normalizeFileName(label) {
@@ -600,56 +549,6 @@ function renderAssistantText(text, sources = [], includeSources = true) {
   // API returns: sources: [{ file_name: "...", file_id: "...", chunk_indices: [...] }]
   const fileNameToIdMap = {};
   const fileIdToNameMap = {};
-  const normalizedFileNameToIdMap = {};
-  const sourceEntries = Array.isArray(sources)
-    ? sources
-        .filter((source) => source?.file_id && source?.file_name)
-        .map((source) => ({
-          id: source.file_id.trim(),
-          name: source.file_name.trim()
-        }))
-    : [];
-  const usedSourceIds = new Set();
-  const recordedSourceIds = new Set();
-  const recordedSourceNames = new Set();
-  const collectedSources = [];
-  const normalizeKey = (value) => {
-    if (typeof value !== "string") return "";
-    const trimmed = value.trim().toLowerCase();
-    if (!trimmed) return "";
-    const withoutExt = trimmed.replace(/\.[a-z0-9]+$/, "");
-    return withoutExt.replace(/[^a-z0-9]/g, "");
-  };
-  const markSourceUsed = (id) => {
-    if (!id) return;
-    const trimmedId = id.trim();
-    if (!trimmedId) return;
-    usedSourceIds.add(trimmedId);
-  };
-  const takeNextUnusedSource = () => {
-    for (let i = 0; i < sourceEntries.length; i += 1) {
-      const entry = sourceEntries[i];
-      if (entry?.id && !usedSourceIds.has(entry.id)) {
-        usedSourceIds.add(entry.id);
-        return entry;
-      }
-    }
-    return null;
-  };
-  const recordSource = (fileId, fileName) => {
-    const id = (fileId || "").trim();
-    const name = (fileName || "").trim();
-    const key = id || name;
-    if (!key) return;
-    if (id && recordedSourceIds.has(id)) return;
-    if (!id && name && recordedSourceNames.has(name)) return;
-    if (id) recordedSourceIds.add(id);
-    if (name) recordedSourceNames.add(name);
-    collectedSources.push({
-      id,
-      name: name || id || "Source"
-    });
-  };
   
   if (Array.isArray(sources)) {
     sources.forEach(source => {
@@ -658,114 +557,27 @@ function renderAssistantText(text, sources = [], includeSources = true) {
         const fileId = source.file_id.trim();
         fileNameToIdMap[fileName] = fileId;
         fileIdToNameMap[fileId] = fileName;
-        normalizedFileNameToIdMap[normalizeKey(fileName)] = fileId;
       }
     });
   }
 
-  const extractIdentifierFromUrl = (value) => {
-    const trimmed = (value || "").trim();
-    if (!trimmed) return "";
-    try {
-      const url = new URL(trimmed, "https://placeholder.local/");
-      const segments = url.pathname.split("/").filter(Boolean);
-      if (!segments.length) return "";
-      const downloadIndex = segments.findIndex((segment) => segment === "download");
-      if (downloadIndex > -1 && downloadIndex + 1 < segments.length) {
-        return decodeURIComponent(segments[downloadIndex + 1]);
-      }
-      return decodeURIComponent(segments[segments.length - 1]);
-    } catch {
-      return trimmed;
-    }
-  };
-
-  const resolveSourceInfo = (labelName, refValue) => {
-    const normalizedLabel = (labelName || "").trim();
-    const normalizedRef = (refValue || "").trim();
-    const labelKey = normalizeKey(normalizedLabel);
-    const refKey = normalizeKey(normalizedRef);
-
-    let fileId = "";
-    let fileName = "";
-
-    if (normalizedLabel && normalizedFileNameToIdMap[labelKey]) {
-      fileId = normalizedFileNameToIdMap[labelKey];
-    }
-
-    const refIdentifier = extractIdentifierFromUrl(normalizedRef);
-    const refIdentifierKey = normalizeKey(refIdentifier);
-
-    if (!fileId) {
-      if (refIdentifier && fileIdToNameMap[refIdentifier]) {
-        fileId = refIdentifier;
-      } else if (refIdentifier && normalizedFileNameToIdMap[refIdentifierKey]) {
-        fileId = normalizedFileNameToIdMap[refIdentifierKey];
-      } else if (normalizedRef && normalizedFileNameToIdMap[refKey]) {
-        fileId = normalizedFileNameToIdMap[refKey];
-      }
-    }
-
-    if (!fileName && fileId && fileIdToNameMap[fileId]) {
-      fileName = fileIdToNameMap[fileId];
-    }
-
-    if (!fileName && normalizedLabel) {
-      fileName = normalizedLabel;
-    } else if (!fileName && normalizedRef) {
-      const maybeName = normalizeFileName(normalizedRef);
-      fileName = fileNameToIdMap[maybeName] ? maybeName : normalizedRef;
-    } else if (!fileName && refIdentifier && fileIdToNameMap[refIdentifier]) {
-      fileName = fileIdToNameMap[refIdentifier];
-    }
-
-    if (!fileName && fileId) {
-      const entry = sourceEntries.find((source) => source.id === fileId);
-      if (entry?.name) {
-        fileName = entry.name;
-      }
-    }
-
-    if (!fileId && fileName && normalizedFileNameToIdMap[normalizeKey(fileName)]) {
-      fileId = normalizedFileNameToIdMap[normalizeKey(fileName)];
-    }
-
-    if (!fileId) {
-      const fallback = takeNextUnusedSource();
-      if (fallback) {
-        fileId = fallback.id;
-        if (!fileName) {
-          fileName = fallback.name;
-        }
-      }
-    } else {
-      markSourceUsed(fileId);
-    }
-
-    if (!fileName && fileId && fileIdToNameMap[fileId]) {
-      fileName = fileIdToNameMap[fileId];
-    }
-
-    const resolvedId = fileId || refIdentifier || normalizedRef || normalizedLabel;
-    const resolvedName = fileName || normalizedLabel || normalizedRef || refIdentifier || "Source";
-
-    return {
-      fileId: resolvedId,
-      fileName: resolvedName
-    };
-  };
-
+  const linkTokens = [];
   const tableTokens = [];
 
   // Process markdown links [Label](ref)
   let processed = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, ref) => {
     const extraction = extractDownloadName(label);
     const normalized = normalizeFileName(extraction.downloadName);
-    const { fileId, fileName } = resolveSourceInfo(normalized, ref);
-    recordSource(fileId, fileName || extraction.displayLabel || normalized || ref.trim());
-    return "";
+    const fileRef = fileNameToIdMap[normalized] || ref.trim(); // Use file_id from API
+    const dataRef = escapeAttribute(fileRef);
+    const dataName = escapeAttribute(normalized);
+    const buttonLabel = escapeHtml(extraction.displayLabel);
+    const token = `__SOURCE_LINK_${linkTokens.length}__`;
+    linkTokens.push(`<button type="button" class="source-download" data-source-ref="${dataRef}" data-source-name="${dataName}">${buttonLabel}</button>`);
+    return token;
   });
 
+  const plainSourceTokens = [];
   const lines = processed.split(/\n/);
   let inSourcesSection = false;
 
@@ -773,19 +585,21 @@ function renderAssistantText(text, sources = [], includeSources = true) {
     const trimmed = lines[i].trim();
     if (/^Sources?:/i.test(trimmed)) {
       inSourcesSection = true;
-      lines[i] = "";
       continue;
     }
     if (!inSourcesSection) continue;
     if (!trimmed) continue;
+    if (trimmed.includes("__SOURCE_LINK_")) continue;
 
     const match = lines[i].match(/^(\s*[-•]?\s*)(.+?\.[A-Za-z0-9]{2,12})(\s*)$/);
     if (match) {
       const rawName = match[2].trim();
       const normalized = normalizeFileName(rawName);
-      const { fileId, fileName } = resolveSourceInfo(normalized, normalized);
-      recordSource(fileId, fileName || normalized);
-      lines[i] = "";
+      const fileRef = fileNameToIdMap[normalized] || normalized; // Use file_id from API
+      const displayName = normalized;
+      const token = `__PLAIN_SOURCE_${plainSourceTokens.length}__`;
+      plainSourceTokens.push({ token, fileId: fileRef, displayName });
+      lines[i] = `${match[1]}${token}${match[3]}`;
       continue;
     }
 
@@ -793,9 +607,11 @@ function renderAssistantText(text, sources = [], includeSources = true) {
     if (fallback) {
       const rawName = fallback[2].trim();
       const normalized = normalizeFileName(rawName);
-      const { fileId, fileName } = resolveSourceInfo(normalized, normalized);
-      recordSource(fileId, fileName || normalized);
-      lines[i] = "";
+      const fileRef = fileNameToIdMap[normalized] || normalized; // Use file_id from API
+      const displayName = normalized;
+      const token = `__PLAIN_SOURCE_${plainSourceTokens.length}__`;
+      plainSourceTokens.push({ token, fileId: fileRef, displayName });
+      lines[i] = `${fallback[1]}${token}${fallback[3]}`;
       continue;
     }
 
@@ -829,49 +645,27 @@ function renderAssistantText(text, sources = [], includeSources = true) {
     return token;
   });
 
-  let safe = basicFormat(processed);
+  let safe = escapeHtml(processed);
+  safe = safe.replace(/\r\n/g, "\n");
+  linkTokens.forEach((html, index) => { safe = safe.replace(`__SOURCE_LINK_${index}__`, html); });
+  plainSourceTokens.forEach(({ token, fileId, displayName }) => {
+    const dataRef = escapeAttribute(fileId);
+    const dataName = escapeAttribute(displayName);
+    const buttonHtml = `<button type="button" class="source-download" data-source-ref="${dataRef}" data-source-name="${dataName}">${escapeHtml(displayName)}</button>`;
+    safe = safe.replace(token, buttonHtml);
+  });
+
+  safe = safe.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+  safe = safe.replace(/(^|\n)Sources?:/g, (match) => `<div class="source-section-title">${match.trim()}</div>`);
+  safe = safe.replace(/^\s*-\s+/gm, "• ");
+  safe = safe.replace(/\n\d+\./g, "<br/>$&");
+  safe = safe.replace(/\n-\s*/g, "<br/>• ");
+  safe = safe.replace(/\n/g, "<br/>");
 
   tableTokens.forEach((html, index) => {
     const token = `__TABLE_BLOCK_${index}__`;
     safe = safe.replace(token, html);
   });
-
-  const remainingSources = sourceEntries.filter((entry) => {
-    if (!entry?.id) return false;
-    const trimmedId = entry.id.trim();
-    if (!trimmedId) return false;
-    return !recordedSourceIds.has(trimmedId);
-  });
-
-  const finalSources = [...collectedSources];
-  remainingSources.forEach((entry) => {
-    if (!entry?.id) return;
-    const trimmedId = entry.id.trim();
-    if (!trimmedId) return;
-    const alreadyPresent = finalSources.some(
-      (item) => item.id && item.id === trimmedId
-    );
-    if (!alreadyPresent) {
-      finalSources.push({
-        id: trimmedId,
-        name: entry.name || trimmedId
-      });
-    }
-  });
-
-  if (finalSources.length) {
-    const sourcesMarkup = finalSources
-      .map(({ id, name }) => {
-        const dataRef = escapeAttribute(id);
-        const dataName = escapeAttribute(name || id);
-        const label = escapeHtml(name || id);
-        return `<button type="button" class="source-download" data-source-ref="${dataRef}" data-source-name="${dataName}">${label}</button>`;
-      })
-      .join("<br/>");
-
-    safe = safe.replace(/(<br\/>)*$/, "");
-    safe += `<div class="source-section-title">Sources:</div><div class="source-links">${sourcesMarkup}</div>`;
-  }
 
   return safe;
 }
