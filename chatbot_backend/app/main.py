@@ -25,6 +25,7 @@ from app.core.database import init_database, create_database_if_not_exists, get_
 from app.config import settings
 from app.core.auth import get_token_from_credentials, get_password_hash
 from app.services.health_monitor import HealthMonitorService
+print("DEBUG: SETTINGS.CORS_ORIGINS =", settings.CORS_ORIGINS)
 
 
 class TokenRequest(BaseModel):
