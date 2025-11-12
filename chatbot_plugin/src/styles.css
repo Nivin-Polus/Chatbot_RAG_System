@@ -505,7 +505,7 @@ button {
 }
 
 .text-sm {
-  font-size: 0.875rem;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -526,11 +526,11 @@ button {
 .prose div,
 .prose p,
 .prose br {
-  margin: 0.35rem 0;
+  margin: 5.6px 0;
 }
 
 .prose-sm {
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 
 .prose-sm strong {
