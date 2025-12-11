@@ -63,6 +63,62 @@ class PublicChatRequest(ChatRequest):
     website_url: str
 
 
+def _is_generic_query(question: str) -> bool:
+    """Check if the question is a generic greeting or small talk."""
+    if not question:
+        return False
+    
+    normalized = question.strip().lower()
+    # Remove punctuation for better matching
+    normalized = normalized.rstrip("!?.,")
+    
+    small_talk_phrases = {
+        "hi", "hello", "hey", "hi there", "hello there",
+        "good morning", "good evening", "good afternoon",
+        "how are you", "how are you doing", "what's up", "whats up",
+        "thanks", "thank you", "bye", "goodbye", "see you",
+        "ok", "okay", "cool", "nice", "great",
+    }
+    
+    return normalized in small_talk_phrases
+
+
+def _is_generic_response(answer: str) -> bool:
+    """Check if the answer indicates inability to help or is a generic greeting response."""
+    if not answer:
+        return False
+    
+    normalized = answer.strip().lower()
+    
+    # Patterns indicating "I don't know" type responses
+    generic_patterns = [
+        "i wasn't able to retrieve",
+        "i wasn't able to find",
+        "i couldn't find",
+        "i don't have information",
+        "i don't have enough information",
+        "i cannot find",
+        "unfortunately, i don't",
+        "unfortunately i don't",
+        "i'm not able to",
+        "i am not able to",
+        "i'm unable to",
+        "i am unable to",
+        "no relevant information",
+        "please refine your question",
+        "could you clarify",
+        "could you provide more",
+        "i'm here to help with questions about your knowledge base",
+        "let me know what you'd like to learn",
+    ]
+    
+    for pattern in generic_patterns:
+        if pattern in normalized:
+            return True
+    
+    return False
+
+
 def _process_chat_request(
     *,
     question: str,
@@ -151,7 +207,8 @@ def _process_chat_request(
         if cached_answer:
             answer_text = cached_answer.decode("utf-8")
             logger.info(f"[CACHE HIT] User: {identity_username}, Question: {question}")
-            return ChatResponse(answer=answer_text, session_id=effective_session_id, sources=[])
+            is_generic = _is_generic_query(question) or _is_generic_response(answer_text)
+            return ChatResponse(answer=answer_text, session_id=effective_session_id, is_generic=is_generic, sources=[])
 
     logger.info(f"[RAG QUERY] User: {identity_username}, Question: {question}, top_k: {top_k}")
 
@@ -216,6 +273,7 @@ def _process_chat_request(
         return ChatResponse(
             answer="I wasn't able to retrieve a confident answer, please refine your question.",
             session_id=effective_session_id,
+            is_generic=True,
             sources=[],
         )
 
@@ -240,6 +298,7 @@ def _process_chat_request(
         return ChatResponse(
             answer="I encountered an error while processing your question. Please try again.",
             session_id=effective_session_id,
+            is_generic=True,
             sources=sources_payload,
         )
 
@@ -317,7 +376,10 @@ def _process_chat_request(
     except Exception as e:
         logger.error(f"Failed to log chat history to file: {str(e)}")
 
-    return ChatResponse(answer=answer_text, session_id=effective_session_id, sources=sources_payload)
+    # Determine if response is generic (greeting or "I don't know" type)
+    is_generic = _is_generic_query(question) or _is_generic_response(answer_text)
+    
+    return ChatResponse(answer=answer_text, session_id=effective_session_id, is_generic=is_generic, sources=sources_payload)
 
 
 # Chat endpoint

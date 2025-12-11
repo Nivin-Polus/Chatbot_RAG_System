@@ -19,13 +19,13 @@ class CrawlConfig:
     collection_id: str
     
     # Crawl limits
-    max_pages: int = 100
-    max_depth: int = 5
+    max_pages: int = 0  # 0 = unlimited (no default limit)
+    max_depth: int = 10  # Increased from 5 for larger sites
     
-    # Rate limiting - optimized for speed
-    min_delay_seconds: float = 0.3   # Reduced from 1.0 for faster crawling
-    max_delay_seconds: float = 2.0   # Reduced from 5.0
-    concurrent_requests: int = 3     # Number of pages to crawl simultaneously
+    # Rate limiting - optimized for speed while respecting server limits
+    min_delay_seconds: float = 0.2   # Reduced for faster crawling
+    max_delay_seconds: float = 3.0   # Slightly increased for rate limit recovery
+    concurrent_requests: int = 5     # Increased from 3 for faster crawling
     
     # Content settings
     chunk_size: int = 800  # tokens per chunk for RAG

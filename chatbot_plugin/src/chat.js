@@ -165,14 +165,16 @@ export class ChatService {
 
       const data = await response.json();
       const formattedResponse = this.formatResponse(data.answer);
-      
+      const isGeneric = Boolean(data.generic || data.is_generic);
+
       // Add assistant response to history
       this.addToHistory('assistant', data.answer);
-      
-      // Return both formatted text and sources
+
+      // Return formatted text, sources, and generic flag
       return {
         text: formattedResponse,
-        sources: data.sources || []
+        sources: data.sources || [],
+        generic: isGeneric
       };
     } catch (err) {
       if (err?.name === 'AbortError') {
@@ -203,7 +205,10 @@ formatResponse(text) {
 
   if (isGenericResponse) {
     // Remove "Sources:" and everything after it only for generic replies
-    normalized = normalized.replace(/(\n|\r)*Sources:([\s\S]*)$/i, "").trim();
+    normalized = normalized
+      // Handle variants like "**Sources:**", "- Sources:", "> Sources"
+      .replace(/(\r?\n)+[\s>*-]*\**\s*Sources?\s*:?\s*\**[\s\S]*$/i, "")
+      .trim();
   }
 
   return normalized;

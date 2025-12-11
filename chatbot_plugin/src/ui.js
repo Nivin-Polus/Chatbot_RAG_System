@@ -90,10 +90,10 @@ export class ChatbotUI {
                  maxlength="500"/>
           <span class="plugin-custom-placeholder custom-placeholder">${welcomeMessage}</span>
         </div>
-        <button id="chat-stop" title="Stop" style="display:none" aria-label="Stop">
+        <button type="button" id="chat-stop" title="Stop" style="display:none" aria-label="Stop">
           <span class="plugin-icon icon" style="--icon-url: url('${CONFIG.ui.apiBase}/dist/assets/close.svg');" aria-hidden="true"></span>
         </button>
-        <button id="chat-send" title="Send">
+        <button type="button" id="chat-send" title="Send">
           <img src="${CONFIG.ui.iconsBaseUrl}/send.svg" alt="Send" class="plugin-icon icon"/>
         </button>
       </div>

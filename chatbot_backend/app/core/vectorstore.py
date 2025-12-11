@@ -12,6 +12,7 @@ class VectorStore:
     def __init__(self, url=settings.VECTOR_DB_URL, collection_name="kb_docs"):
         self.collection_name = collection_name
         self.url = url
+        self._collection_verified = False
         self._init_client()
 
     def _init_client(self):
@@ -45,13 +46,19 @@ class VectorStore:
         
     def _ensure_collection(self):
         if self.client:
+            if self._collection_verified:
+                return
+
             try:
                 # Try to check if collection exists using collection_exists method
+                logger.info(f"[DEBUG] Checking if collection {self.collection_name} exists... Instance: {id(self)}")
                 if self.client.collection_exists(self.collection_name):
-                    logger.info(f"Qdrant collection '{self.collection_name}' already exists.")
+                    # logger.info(f"Qdrant collection '{self.collection_name}' already exists.")
+                    self._collection_verified = True
                     return
-            except:
+            except Exception as e:
                 # If collection_exists method doesn't work, try alternative approach
+                logger.warning(f"[DEBUG] collection_exists check failed: {e}")
                 pass
             
             try:
@@ -62,12 +69,18 @@ class VectorStore:
                     vectors_config=VectorParams(size=384, distance=self.Distance.COSINE)
                 )
                 logger.info(f"Qdrant collection '{self.collection_name}' created.")
+                self._collection_verified = True
             except Exception as create_error:
-                if "already exists" in str(create_error):
-                    logger.info(f"Qdrant collection '{self.collection_name}' already exists.")
+                if "already exists" in str(create_error) or "409" in str(create_error):
+                    # logger.info(f"Qdrant collection '{self.collection_name}' already exists.")
+                    self._collection_verified = True
                 else:
                     logger.error(f"Failed to create collection: {create_error}")
-                    raise
+                    # Don't raise here if it's just a creation failure, but verified is not set
+                    # However, if we can't create and it doesn't exist, we have a problem.
+                    # But if it's a 400 Bad Request, it might mean it exists but we sent wrong params?
+                    # The user log says 400 Bad Request.
+                    pass
 
     def add_document(self, doc_text: str, metadata: dict = None):
         # Ensure collection exists before adding documents

@@ -250,9 +250,11 @@ class CrawlerEngine:
             logger.error("Playwright not installed. Install with: pip install playwright && playwright install chromium")
             raise RuntimeError("Playwright not installed")
         
-        # Concurrency settings - use 3 concurrent pages by default
-        max_concurrent = getattr(self.config, 'concurrent_requests', 3) or 3
+        # Concurrency settings - use 5 concurrent pages for faster crawling
+        max_concurrent = getattr(self.config, 'concurrent_requests', 5) or 5
         semaphore = asyncio.Semaphore(max_concurrent)
+        
+        logger.info(f"Starting crawl with {max_concurrent} concurrent workers")
         
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
@@ -262,16 +264,24 @@ class CrawlerEngine:
             )
             
             try:
+                # Track active tasks for cleanup
+                active_tasks = set()
+                
                 # Worker function to process a single URL
                 async def process_url_worker(url: str, depth: int):
                     async with semaphore:
                         if self._cancelled:
                             return
-                        if self.stats.pages_crawled >= self.config.max_pages:
+                        # Skip limit check if max_pages is 0 (unlimited)
+                        if self.config.max_pages > 0 and self.stats.pages_crawled >= self.config.max_pages:
                             return
                         
                         # Create a new page for this worker
                         page = await context.new_page()
+                        
+                        # Handle downloads by cancelling them (we don't process files yet)
+                        page.on("download", lambda download: download.cancel())
+                        
                         try:
                             self.stats.current_url = url
                             success = await self._process_page(page, url, depth)
@@ -279,26 +289,46 @@ class CrawlerEngine:
                             if success:
                                 self.stats.pages_crawled += 1
                                 self.consecutive_errors = 0
+                                self._decrease_delay()  # Speed up on success
                             else:
                                 self.stats.pages_failed += 1
                                 self.consecutive_errors += 1
+                                if self.consecutive_errors >= 5:
+                                    self._increase_delay()
                             
                             self._notify_progress()
                             
-                            # Reduced delay for concurrent crawling
-                            await asyncio.sleep(max(0.3, self.current_delay / 2))
+                            # Adaptive delay - reduce delay when successful
+                            delay = max(0.2, self.current_delay / max_concurrent)
+                            await asyncio.sleep(delay)
+                        except Exception as e:
+                            # Log but don't crash - continue with other URLs
+                            logger.error(f"Worker error processing {url}: {e}")
+                            self.stats.pages_failed += 1
                         finally:
-                            await page.close()
+                            try:
+                                await page.close()
+                            except Exception:
+                                pass
                 
-                # Process URLs in batches for better control
-                while self.to_visit and not self._cancelled:
-                    # Check limits
-                    if self.stats.pages_crawled >= self.config.max_pages:
+                # Process URLs - continue until all processed or limits reached
+                processed_count = 0
+                while not self._cancelled:
+                    # Check limits - skip if max_pages is 0 (unlimited)
+                    if self.config.max_pages > 0 and self.stats.pages_crawled >= self.config.max_pages:
                         logger.info(f"Reached max pages limit: {self.config.max_pages}")
                         break
                     
+                    # If no more URLs to process, we're done
+                    if not self.to_visit:
+                        # Wait a moment for any new URLs from in-progress pages
+                        await asyncio.sleep(0.5)
+                        if not self.to_visit:
+                            logger.info("No more URLs to process")
+                            break
+                    
                     # Get batch of URLs to process
-                    batch_size = min(max_concurrent, len(self.to_visit))
+                    batch_size = min(max_concurrent * 2, len(self.to_visit))  # Larger batches for efficiency
                     batch = []
                     
                     for _ in range(batch_size):
@@ -312,30 +342,78 @@ class CrawlerEngine:
                     if not batch:
                         continue
                     
-                    # Process batch concurrently
+                    # Process batch concurrently - use return_exceptions to not fail on single errors
                     tasks = [process_url_worker(url, depth) for url, depth in batch]
-                    await asyncio.gather(*tasks, return_exceptions=True)
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    
+                    # Log any exceptions (but continue processing)
+                    for i, result in enumerate(results):
+                        if isinstance(result, Exception):
+                            logger.warning(f"Batch task failed: {result}")
+                    
+                    processed_count += len(batch)
+                    
+                    # Log progress periodically
+                    if processed_count % 50 == 0:
+                        logger.info(f"Progress: {self.stats.pages_crawled} crawled, {self.stats.pages_failed} failed, {len(self.to_visit)} queued")
                     
             finally:
                 await browser.close()
+
     
-    async def _process_page(self, page, url: str, depth: int) -> bool:
+    async def _process_page(self, page, url: str, depth: int, retry_count: int = 0) -> bool:
         """
-        Process a single page.
+        Process a single page with retry mechanism.
         
         Args:
             page: Playwright page object
             url: URL to process
             depth: Current crawl depth
+            retry_count: Current retry attempt (0-2)
             
         Returns:
             True if successful, False otherwise
         """
+        # Define fallback strategies: try different wait conditions and timeouts
+        strategies = [
+            ('networkidle', 30000),  # First try: wait for network idle, 30s
+            ('domcontentloaded', 20000),  # Fallback 1: DOM ready, 20s
+            ('load', 15000),  # Fallback 2: basic load, 15s
+        ]
+        
+        current_strategy = strategies[min(retry_count, len(strategies) - 1)]
+        wait_until, timeout = current_strategy
+        
         try:
-            # Navigate with timeout
-            response = await page.goto(url, wait_until='networkidle', timeout=30000)
+            # Navigate with current strategy
+            logger.debug(f"Processing {url} (attempt {retry_count + 1}, wait_until={wait_until}, timeout={timeout}ms)")
+            response = await page.goto(url, wait_until=wait_until, timeout=timeout)
             
-            # Check status
+            # Check for rate limiting (HTTP 429)
+            if response and response.status == 429:
+                logger.warning(f"Rate limited on {url}, waiting before retry...")
+                await asyncio.sleep(5)  # Wait 5 seconds before retry
+                if retry_count < 2:
+                    return await self._process_page(page, url, depth, retry_count + 1)
+                self.failed_urls.append({
+                    "url": url,
+                    "reason": "Rate limited (HTTP 429)"
+                })
+                return False
+            
+            # Check for server errors (5xx) - may be temporary
+            if response and response.status >= 500:
+                logger.warning(f"Server error {response.status} on {url}")
+                if retry_count < 2:
+                    await asyncio.sleep(2)  # Brief wait before retry
+                    return await self._process_page(page, url, depth, retry_count + 1)
+                self.failed_urls.append({
+                    "url": url,
+                    "reason": f"HTTP {response.status}"
+                })
+                return False
+            
+            # Check for client errors (4xx) - don't retry these
             if response and response.status >= 400:
                 self.failed_urls.append({
                     "url": url,
@@ -343,8 +421,8 @@ class CrawlerEngine:
                 })
                 return False
             
-            # Wait for content
-            await page.wait_for_timeout(1000)
+            # Wait for content to stabilize
+            await page.wait_for_timeout(800)
             
             # Scroll if enabled (to trigger lazy loading)
             if self.config.scroll_page:
@@ -418,11 +496,43 @@ class CrawlerEngine:
             
             return True
             
-        except Exception as e:
-            logger.warning(f"Error processing {url}: {e}")
+        except asyncio.TimeoutError as e:
+            # Timeout - try with fallback strategy
+            logger.warning(f"Timeout on {url} (attempt {retry_count + 1}): {e}")
+            if retry_count < 2:
+                return await self._process_page(page, url, depth, retry_count + 1)
             self.stats.failed_urls.append({
                 "url": url,
-                "reason": str(e)[:200]
+                "reason": f"Timeout after {retry_count + 1} attempts"
+            })
+            return False
+            
+        except Exception as e:
+            error_msg = str(e)
+            
+            # Check for download error (Playwright)
+            if "Download is starting" in error_msg:
+                logger.info(f"Skipping file download: {url}")
+                self.stats.pages_skipped += 1
+                self.stats.skipped_urls.append({
+                    "url": url,
+                    "reason": "File download (PDF/Doc)"
+                })
+                # Decrement failure count since this is expected for files
+                if retry_count == 0:
+                   self.stats.pages_failed = max(0, self.stats.pages_failed) 
+                return False
+
+            logger.warning(f"Error processing {url} (attempt {retry_count + 1}): {error_msg[:100]}")
+            
+            # Retry for certain recoverable errors
+            if retry_count < 2 and any(err in error_msg.lower() for err in ['timeout', 'connection', 'network', 'navigation']):
+                await asyncio.sleep(1)  # Brief pause before retry
+                return await self._process_page(page, url, depth, retry_count + 1)
+            
+            self.stats.failed_urls.append({
+                "url": url,
+                "reason": error_msg[:200]
             })
             return False
     

@@ -114,8 +114,8 @@ export default function SuperadminCrawler() {
   // Form state
   const [targetUrl, setTargetUrl] = useState('');
   const [selectedCollection, setSelectedCollection] = useState('');
-  const [maxPages, setMaxPages] = useState(100);
-  const [maxDepth, setMaxDepth] = useState(5);
+  const [maxPages, setMaxPages] = useState(0); // 0 = unlimited
+  const [maxDepth, setMaxDepth] = useState(10);
   const [useSitemap, setUseSitemap] = useState(true);
   const [excludePatterns, setExcludePatterns] = useState('/login\n/admin\n/cart');
   const [includeKeywords, setIncludeKeywords] = useState('');
@@ -503,14 +503,14 @@ export default function SuperadminCrawler() {
             {showAdvanced && (
               <div className="grid gap-4 md:grid-cols-2 p-4 bg-muted/50 rounded-lg">
                 <div className="space-y-2">
-                  <Label htmlFor="max-pages">Max Pages</Label>
+                  <Label htmlFor="max-pages">Max Pages (0 = unlimited)</Label>
                   <Input
                     id="max-pages"
                     type="number"
-                    min={1}
-                    max={1000}
+                    min={0}
                     value={maxPages}
-                    onChange={(e) => setMaxPages(parseInt(e.target.value) || 100)}
+                    onChange={(e) => setMaxPages(parseInt(e.target.value) || 0)}
+                    placeholder="0 for unlimited"
                   />
                 </div>
                 <div className="space-y-2">
@@ -519,9 +519,9 @@ export default function SuperadminCrawler() {
                     id="max-depth"
                     type="number"
                     min={1}
-                    max={10}
+                    max={15}
                     value={maxDepth}
-                    onChange={(e) => setMaxDepth(parseInt(e.target.value) || 5)}
+                    onChange={(e) => setMaxDepth(parseInt(e.target.value) || 10)}
                   />
                 </div>
                 <div className="space-y-2 md:col-span-2">

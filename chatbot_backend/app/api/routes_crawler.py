@@ -34,8 +34,8 @@ class StartCrawlRequest(BaseModel):
     collection_id: str = Field(..., description="Target knowledge base collection")
     
     # Optional settings
-    max_pages: int = Field(default=100, ge=1, le=1000, description="Maximum pages to crawl")
-    max_depth: int = Field(default=5, ge=1, le=10, description="Maximum link depth")
+    max_pages: int = Field(default=0, ge=0, le=100000, description="Maximum pages to crawl (0 = unlimited)")
+    max_depth: int = Field(default=10, ge=1, le=15, description="Maximum link depth")
     use_sitemap: bool = Field(default=True, description="Use sitemap for URL discovery")
     
     exclude_patterns: Optional[List[str]] = Field(
@@ -142,7 +142,7 @@ async def start_crawl(
     
     - **target_url**: The starting URL for the crawl
     - **collection_id**: Target knowledge base to store extracted content
-    - **max_pages**: Maximum number of pages to crawl (1-1000)
+    - **max_pages**: Maximum number of pages to crawl (1-10000)
     - **max_depth**: Maximum link depth to follow (1-10)
     - **use_sitemap**: Whether to use sitemap.xml for URL discovery
     - **exclude_patterns**: List of URL patterns to exclude
@@ -386,8 +386,8 @@ async def recrawl(
         user_id=current_user.user_id,
         collection_id=original_job.collection_id,
         target_url=original_job.target_url,
-        max_pages=config.get('max_pages', 100),
-        max_depth=config.get('max_depth', 5),
+        max_pages=config.get('max_pages', 0),  # 0 = unlimited
+        max_depth=config.get('max_depth', 10),  # Updated from 5 to 10
         use_sitemap=config.get('use_sitemap', True),
         exclude_patterns=config.get('exclude_patterns'),
         include_keywords=config.get('include_keywords')

@@ -33,6 +33,43 @@ import "./styles.css";
   let inFlight = false;
   let abortController = null;
   let currentTypingFinish = null;
+  let currentRequestId = null; // Track current request to prevent old responses from updating UI
+  let originalSendBtnHTML = null; // Store original send button HTML
+
+  // LocalStorage keys for chat history
+  const CHAT_HISTORY_KEY = 'chatbot_chat_history';
+  const CHAT_SESSION_KEY = 'chatbot_chat_session_id';
+  const downloadRegistry = {
+    byName: new Map(),
+    byId: new Map(),
+    register(name, id, canonicalName) {
+      if (!name || !id) return;
+      const trimmedName = name.trim();
+      const trimmedId = id.trim();
+      if (!trimmedName || !trimmedId) return;
+      this.byName.set(trimmedName.toLowerCase(), trimmedId);
+      const canonical = canonicalName && canonicalName.trim() ? canonicalName.trim() : trimmedName;
+      this.byId.set(trimmedId, canonical);
+    },
+    lookup(name) {
+      if (!name) return null;
+      const key = name.trim().toLowerCase();
+      if (!key) return null;
+      return this.byName.get(key) || null;
+    },
+    getDisplayName(id) {
+      if (!id) return null;
+      const key = id.trim();
+      if (!key) return null;
+      return this.byId.get(key) || null;
+    }
+  };
+
+  function scrollChatToBottom() {
+    if (chatBox) {
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+  }
 
   await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -42,7 +79,20 @@ import "./styles.css";
   sendBtn = document.getElementById("chat-send");
   stopBtn = document.getElementById("chat-stop");
 
-  initializeMessages();
+  // Store original send button HTML for restoration
+  if (sendBtn) {
+    originalSendBtnHTML = sendBtn.innerHTML;
+    // Fallback if original HTML is empty or invalid
+    if (!originalSendBtnHTML || originalSendBtnHTML.trim() === '') {
+      originalSendBtnHTML = `<img src="${CONFIG.ui.iconsBaseUrl}/send.svg" alt="Send" class="plugin-icon icon"/>`;
+    }
+  }
+
+  // Try to load chat history from localStorage
+  const historyLoaded = loadChatHistory();
+  if (!historyLoaded) {
+    initializeMessages();
+  }
 
   if (CONFIG?.ui) {
     const root = document.documentElement;
@@ -201,76 +251,168 @@ import "./styles.css";
     const downloadBtn = e.target.closest(".source-download");
     if (downloadBtn) {
       e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
       await handleDownloadSource(
         downloadBtn.dataset.sourceRef,
         downloadBtn.dataset.sourceName,
         downloadBtn
       );
-      return;
+      return false;
     }
 
-    if (e.target.id === "chat-send") {
+    const sendEl = e.target.closest("#chat-send");
+    const stopEl = e.target.closest("#chat-stop");
+    const newChatEl = e.target.closest("#new-chat-btn");
+
+    if (sendEl) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
       await handleSendMessage();
-    } else if (e.target.id === "chat-stop") {
+      return false;
+    } else if (stopEl) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
       handleStop();
-    } else if (e.target.id === "new-chat-btn" || e.target.closest("#new-chat-btn")) {
+      return false;
+    } else if (newChatEl) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
       handleNewChat();
+      return false;
     }
-  });
+  }, true);
 
-  document.addEventListener("keypress", async (e) => {
+  // Guard against any host-page form submission triggered from within the plugin UI
+  document.addEventListener("submit", (e) => {
+    const panel = document.querySelector(".plugin-chat-panel");
+    if (panel && e.target && panel.contains(e.target)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+
+  document.addEventListener("keydown", async (e) => {
     if (e.target.id === "chat-message" && e.key === "Enter") {
       e.preventDefault();
-      if (token) {
-        await handleSendMessage();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      await handleSendMessage();
+      return false;
+    }
+  }, true);
+
+  // Extra guard: older pages may listen to keypress instead of keydown
+  document.addEventListener("keypress", (e) => {
+    if (e.target && e.key === "Enter") {
+      const panel = document.querySelector(".plugin-chat-panel");
+      if (panel && panel.contains(e.target)) {
+        e.preventDefault();
+        e.stopPropagation();
       }
     }
-  });
+  }, true);
+
+  function showSendButton() {
+    if (sendBtn && originalSendBtnHTML) {
+      sendBtn.disabled = false;
+      sendBtn.innerHTML = originalSendBtnHTML;
+      sendBtn.style.display = "";
+    }
+    if (stopBtn) {
+      stopBtn.style.display = "none";
+    }
+  }
+
+  function showProcessingState() {
+    if (sendBtn) {
+      sendBtn.disabled = true;
+      sendBtn.innerHTML = "⏳";
+      sendBtn.style.display = "none";
+    }
+    if (stopBtn) {
+      stopBtn.style.display = "inline-flex";
+    }
+  }
 
   async function handleSendMessage() {
     // Double-check that we're not already processing a message
     if (inFlight) {
       return;
     }
-    
+
     const userMsg = input.value.trim();
     if (!userMsg) {
       return;
     }
 
+    // Generate unique request ID for this request
+    const requestId = Date.now() + Math.random();
+    currentRequestId = requestId;
+
     // Set inFlight flag and disable UI elements
     inFlight = true;
     abortController = new AbortController();
-    
+
     try {
       input.disabled = true;
-      if (sendBtn) {
-        sendBtn.disabled = true;
-        sendBtn.innerHTML = "⏳";
-      }
-      if (stopBtn) stopBtn.style.display = "none";
+      showProcessingState();
 
       addMessage({ user: true, text: userMsg, formatted: false });
+      scrollChatToBottom();
       input.value = "";
       input.dispatchEvent(new Event("input", { bubbles: true }));
 
       const typingIndicator = showTypingIndicator();
+      scrollChatToBottom();
 
+      console.log('[ChatPlugin] Sending message to API...');
       const reply = await chatService.sendMessage(userMsg, { signal: abortController.signal });
+      console.log('[ChatPlugin] Got response from API:', reply ? 'success' : 'null');
+
+      // Check if this request is still valid (new chat might have been clicked)
+      if (currentRequestId !== requestId) {
+        // Reset send button before returning
+        showSendButton();
+        if (input) input.disabled = false;
+        return; // Request was cancelled by new chat, don't update UI
+      }
+
       removeTypingIndicator(typingIndicator);
       input.disabled = false;
       if (stopBtn) stopBtn.style.display = "inline-flex";
-      await typeAssistantMessage(reply.text, reply.sources).then(() => {
-        ui.updateContextIndicator(chatService.getContextInfo());
+
+      // Check again before typing the message
+      if (currentRequestId !== requestId) {
+        // Reset send button before returning
+        showSendButton();
+        return; // Request was cancelled by new chat, don't update UI
+      }
+
+      await typeAssistantMessage(reply.text, reply.sources, requestId, Boolean(reply?.generic)).then(() => {
+        // Final check before updating context indicator
+        if (currentRequestId === requestId) {
+          ui.updateContextIndicator(chatService.getContextInfo());
+          // Save chat history after assistant message is fully typed
+          saveChatHistory();
+        }
       });
     } catch (error) {
+      // Check if this request is still valid
+      if (currentRequestId !== requestId) {
+        // Reset send button before returning
+        showSendButton();
+        if (input) input.disabled = false;
+        return; // Request was cancelled by new chat, don't update UI
+      }
+
       // Re-enable input and send button on error
       input.disabled = false;
-      if (sendBtn) {
-        sendBtn.disabled = false;
-        sendBtn.innerHTML = "➤";
-      }
-      
+      showSendButton();
+
       if (error?.name !== 'AbortError') {
         addMessage({
           user: false,
@@ -280,13 +422,13 @@ import "./styles.css";
         });
       }
     } finally {
-      // Ensure send button is re-enabled even if there was an error
-      if (sendBtn) {
-        sendBtn.disabled = false;
-        sendBtn.innerHTML = "➤";
+      // Only reset if this is still the current request
+      if (currentRequestId === requestId) {
+        // Ensure send button is re-enabled even if there was an error
+        showSendButton();
+        inFlight = false;
+        abortController = null;
       }
-      inFlight = false;
-      abortController = null;
     }
   }
 
@@ -303,14 +445,51 @@ import "./styles.css";
     if (!ui.canTriggerNewChat()) return;
     ui.startNewChatCooldown();
 
-    clearInterval(typingInterval);
-    typingInterval = null;
-    inFlight = false;
-    if (stopBtn) stopBtn.style.display = "none";
-    abortController = null;
+    // Abort any ongoing fetch request
+    if (abortController) {
+      abortController.abort();
+      abortController = null;
+    }
 
+    // Stop any typing animation
+    if (typeof currentTypingFinish === 'function') {
+      clearInterval(typingInterval);
+      typingInterval = null;
+      currentTypingFinish();
+      currentTypingFinish = null;
+    } else {
+      clearInterval(typingInterval);
+      typingInterval = null;
+    }
+
+    // Invalidate current request ID so old responses won't update UI
+    currentRequestId = null;
+
+    // Remove any typing indicators
+    const typingIndicators = messages.filter(msg => msg.isTypingIndicator || msg.isTyping);
+    typingIndicators.forEach(indicator => {
+      const index = messages.indexOf(indicator);
+      if (index !== -1) {
+        messages.splice(index, 1);
+      }
+    });
+
+    // Reset state flags
+    inFlight = false;
+
+    // Re-enable UI elements
+    if (input) {
+      input.disabled = false;
+    }
+    showSendButton();
+
+    // Clear context and messages
     chatService.clearContext();
     initializeMessages();
+
+    // Clear chat history from localStorage
+    clearChatHistory();
+
     ui.updateContextIndicator(chatService.getContextInfo());
     input.value = "";
     input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -330,11 +509,19 @@ import "./styles.css";
     };
     messages.push(storedMessage);
     renderMessages();
+
+    // Save to localStorage (only if not a typing indicator)
+    if (!storedMessage.isTypingIndicator) {
+      saveChatHistory();
+    }
+
     return storedMessage;
   }
 
   function showTypingIndicator() {
-    return addMessage({ user: false, text: "", formatted: false, isTypingIndicator: true });
+    const indicator = addMessage({ user: false, text: "", formatted: false, isTypingIndicator: true });
+    scrollChatToBottom();
+    return indicator;
   }
 
   function removeTypingIndicator(messageRef) {
@@ -345,23 +532,82 @@ import "./styles.css";
     }
   }
 
-  function typeAssistantMessage(fullText, sources = []) {
+  // Maximum number of sources to surface in the UI
+  const MAX_DISPLAY_SOURCES = 3;
+
+  // Helper function to detect generic responses
+  function isGenericResponse(text) {
+    if (!text) return false;
+    const normalized = text.trim();
+    const genericPattern = /I apologize|I'm limited to providing information|not have any information|outside of my scope|I'm afraid I don't have enough information|I don't have access to information|I don't have any information about|I'm here to help with questions about your knowledge base documents/i;
+    return genericPattern.test(normalized);
+  }
+
+  function typeAssistantMessage(fullText, sources = [], requestId = null, isGenericFlag = false) {
     return new Promise((resolve) => {
+      // Check if this request is still valid
+      if (requestId !== null && currentRequestId !== requestId) {
+        resolve();
+        return;
+      }
+
       clearInterval(typingInterval);
 
-      const typingMessage = addMessage({ user: false, text: "", formatted: true, isTyping: true, sources });
+      // Determine if message is generic - if so, don't show sources
+      const isGeneric = Boolean(isGenericFlag) || isGenericResponse(fullText);
+      const effectiveSources = isGeneric ? [] : sources;
+
+      // Only append sources section if sources are provided and message is not generic
+      let enhancedText = fullText || "";
+      if (!isGeneric && Array.isArray(effectiveSources) && effectiveSources.length > 0) {
+        // Remove existing Sources section if present (handles various formats from LLM)
+        // Matches: "Sources:", "**Sources:**", "> Sources:", "- Sources:", etc.
+        enhancedText = enhancedText
+          .replace(/\r?\n+[\s>*-]*\*{0,2}\s*Sources?\s*:?\s*\*{0,2}\s*[\s\S]*$/i, '')
+          .replace(/\r?\n+Sources?\s*:[\s\S]*$/i, '')
+          .trim();
+
+        // Append fresh sources section
+        enhancedText += "\n\nSources:\n";
+        // Limit displayed sources to the first N to avoid overwhelming the UI
+        effectiveSources.slice(0, MAX_DISPLAY_SOURCES).forEach(source => {
+          if (source.file_name) {
+            enhancedText += `- ${source.file_name}\n`;
+          }
+        });
+      }
+
+      // Check again before adding message
+      if (requestId !== null && currentRequestId !== requestId) {
+        resolve();
+        return;
+      }
+
+      const typingMessage = addMessage({ user: false, text: "", formatted: true, isTyping: true, sources: effectiveSources });
+      scrollChatToBottom();
       let completed = false;
 
       const finishTyping = () => {
         if (completed) return;
+
+        // Check if this request is still valid before finishing
+        if (requestId !== null && currentRequestId !== requestId) {
+          // Remove the typing message if request was cancelled
+          const index = messages.indexOf(typingMessage);
+          if (index !== -1) {
+            messages.splice(index, 1);
+            renderMessages();
+          }
+          resolve();
+          return;
+        }
+
         completed = true;
-        typingMessage.text = fullText || "";
+        typingMessage.text = enhancedText;
         typingMessage.isTyping = false;
         renderMessages();
         resolve();
-        if (stopBtn) stopBtn.style.display = "none";
-        sendBtn.disabled = false;
-        sendBtn.innerHTML = "➤";
+        showSendButton();
         inFlight = false;
         abortController = null;
         currentTypingFinish = null;
@@ -369,13 +615,21 @@ import "./styles.css";
         if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
       };
 
-      if (!fullText || document.hidden) {
+      if (!enhancedText || document.hidden) {
         finishTyping();
         return;
       }
 
       let index = 0;
       typingInterval = setInterval(() => {
+        // Check if request was cancelled
+        if (requestId !== null && currentRequestId !== requestId) {
+          clearInterval(typingInterval);
+          typingInterval = null;
+          finishTyping();
+          return;
+        }
+
         if (document.hidden) {
           clearInterval(typingInterval);
           typingInterval = null;
@@ -384,10 +638,10 @@ import "./styles.css";
         }
 
         index += 1;
-        typingMessage.text = fullText.slice(0, index);
+        typingMessage.text = enhancedText.slice(0, index);
         renderMessages();
 
-        if (index >= fullText.length) {
+        if (index >= enhancedText.length) {
           clearInterval(typingInterval);
           typingInterval = null;
           finishTyping();
@@ -395,6 +649,21 @@ import "./styles.css";
       }, 15);
       currentTypingFinish = finishTyping;
     });
+  }
+
+  // Save chat history to localStorage (disabled)
+  function saveChatHistory() {
+    return; // Disabled per request
+  }
+
+  // Load chat history from localStorage
+  function loadChatHistory() {
+    return false; // Disabled per request
+  }
+
+  // Clear chat history from localStorage
+  function clearChatHistory() {
+    return; // Disabled per request
   }
 
   function initializeMessages() {
@@ -464,12 +733,15 @@ import "./styles.css";
       const normalizedName = (downloadName || "").trim();
       const ref = (sourceRef || "").trim();
       const base = (CONFIG.apiBase || "").replace(/\/+$/, "");
+      const datasetId = (button?.dataset?.sourceId || "").trim();
+      const registryId = downloadRegistry.lookup(normalizedName);
+      const effectiveRef = datasetId || registryId || ref || normalizedName;
 
-      if (!ref && !normalizedName) {
+      if (!effectiveRef) {
         throw new Error("Missing file reference");
       }
 
-      const encodedRef = encodeURIComponent(ref || normalizedName);
+      const encodedRef = encodeURIComponent(effectiveRef);
       const downloadUrl = `${base}/files/download/${encodedRef}`;
 
       const response = await fetch(downloadUrl, { headers });
@@ -537,138 +809,247 @@ import "./styles.css";
   }
 
   // --- MAIN TEXT RENDERER ---
-function renderAssistantText(text, sources = []) {
-  if (!text) return "";
+  // --- MAIN TEXT RENDERER ---
+  function renderAssistantText(text, sources = []) {
+    if (!text) return "";
 
-  // Normalize label like "Source 4: Leave_Policy.pdf" to match file_name
-  function normalizeFileName(label) {
-    return label.replace(/^Source\s*\d+:\s*/, "").trim();
-  }
+    // Normalize label like "Source 4: Leave_Policy.pdf" to match file_name
+    function normalizeFileName(label) {
+      return label.replace(/^Source\s*\d+:\s*/, "").trim();
+    }
 
-  // Build map of file_name => file_id from the API response
-  // API returns: sources: [{ file_name: "...", file_id: "...", chunk_indices: [...] }]
-  const fileNameToIdMap = {};
-  const fileIdToNameMap = {};
-  
-  if (Array.isArray(sources)) {
-    sources.forEach(source => {
-      if (source.file_name && source.file_id) {
-        const fileName = source.file_name.trim();
-        const fileId = source.file_id.trim();
-        fileNameToIdMap[fileName] = fileId;
-        fileIdToNameMap[fileId] = fileName;
+    // Build map of file_name => file_id from the API response
+    // API returns: sources: [{ file_name: "...", file_id: "...", chunk_indices: [...], source_type: "...", url: "..." }]
+    const fileNameToIdMap = {};
+    const sourceMetadataMap = {}; // Store source_type and url for each source
+    const storeFileMapping = (name, id, canonicalName, metadata = {}) => {
+      if (!name) return;
+      const trimmedName = name.trim();
+      if (!trimmedName) return;
+      const trimmedId = id ? id.trim() : null;
+      if (trimmedId) {
+        fileNameToIdMap[trimmedName] = trimmedId;
+        fileNameToIdMap[trimmedName.toLowerCase()] = trimmedId;
+        downloadRegistry.register(trimmedName, trimmedId, canonicalName);
+      }
+      // Store metadata (source_type, url) by name
+      if (!sourceMetadataMap[trimmedName.toLowerCase()]) {
+        sourceMetadataMap[trimmedName.toLowerCase()] = metadata;
+      }
+    };
+    const lookupFileId = (name) => {
+      if (!name) return null;
+      const trimmedName = name.trim();
+      if (!trimmedName) return null;
+      return fileNameToIdMap[trimmedName] || fileNameToIdMap[trimmedName.toLowerCase()] || null;
+    };
+    const lookupSourceMetadata = (name) => {
+      if (!name) return null;
+      const trimmedName = name.trim();
+      if (!trimmedName) return null;
+      return sourceMetadataMap[trimmedName.toLowerCase()] || null;
+    };
+
+    if (Array.isArray(sources)) {
+      sources.forEach(source => {
+        if (source.file_name) {
+          const fileName = source.file_name.trim();
+          const fileId = source.file_id ? source.file_id.trim() : null;
+          if (!fileName) return;
+          const metadata = {
+            source_type: source.source_type || 'file',
+            url: source.url || null,
+            file_id: fileId
+          };
+          storeFileMapping(fileName, fileId, fileName, metadata);
+          const normalizedFileName = normalizeFileName(fileName);
+          if (normalizedFileName && normalizedFileName !== fileName) {
+            storeFileMapping(normalizedFileName, fileId, fileName, metadata);
+          }
+        }
+      });
+    }
+
+    const linkTokens = [];
+    const tableTokens = [];
+
+    // Process markdown links [Label](ref)
+    let processed = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, ref) => {
+      const extraction = extractDownloadName(label);
+      const normalized = normalizeFileName(extraction.downloadName);
+      const fileId = lookupFileId(normalized);
+      const metadata = lookupSourceMetadata(normalized);
+      const fallbackRef = (ref || "").trim();
+      const fileRef = fileId || fallbackRef;
+      const canonicalName = fileId ? downloadRegistry.getDisplayName(fileId) : null;
+      const resolvedName = canonicalName || normalized || extraction.displayLabel || fallbackRef;
+      const displayName = resolvedName || "";
+      const dataRef = escapeAttribute(fileRef);
+      const dataName = escapeAttribute(displayName);
+      const buttonLabel = escapeHtml(displayName || extraction.displayLabel);
+      const idAttribute = fileId ? ` data-source-id="${escapeAttribute(fileId)}"` : "";
+
+      // Check if this is a web crawl source
+      const isWebCrawl = (metadata && (metadata.source_type === 'web_crawl' || metadata.url)) ||
+        fallbackRef.startsWith('http://') || fallbackRef.startsWith('https://');
+
+      if (isWebCrawl) {
+        // Web crawl source - render as anchor tag that opens in new tab
+        const url = (metadata && metadata.url) || fallbackRef;
+        const href = url.startsWith('http') ? url : `https://${url}`;
+        const token = `__SOURCE_LINK_${linkTokens.length}__`;
+        linkTokens.push(`<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer" class="source-link">${buttonLabel} ↗</a>`);
+        return token;
+      } else {
+        // File source - render as download button
+        const token = `__SOURCE_LINK_${linkTokens.length}__`;
+        linkTokens.push(`<button type="button" class="source-download"${idAttribute} data-source-ref="${dataRef}" data-source-name="${dataName}">${buttonLabel}</button>`);
+        return token;
       }
     });
+
+    const plainSourceTokens = [];
+    const lines = processed.split(/\n/);
+    let inSourcesSection = false;
+    let collectedSourceTokens = [];
+    let sourcesSectionToken = null;
+
+    for (let i = 0; i < lines.length; i += 1) {
+      const trimmed = lines[i].trim();
+
+      if (/^Sources?:/i.test(trimmed)) {
+        inSourcesSection = true;
+        sourcesSectionToken = `__SOURCES_SECTION_BLOCK__`;
+        lines[i] = sourcesSectionToken;
+        continue;
+      }
+
+      if (!inSourcesSection) continue;
+      if (!trimmed) {
+        lines[i] = "";
+        continue;
+      }
+
+      // Check if it's a bullet point or if it is a token line (e.g. from a link)
+      const isBullet = /^[-•]/.test(trimmed);
+      const isTokenLine = trimmed.includes("__SOURCE_LINK_");
+
+      if (isBullet || isTokenLine) {
+        // If it's a pre-tokenized link
+        const linkMatch = trimmed.match(/__SOURCE_LINK_\d+__/);
+        if (linkMatch) {
+          collectedSourceTokens.push(linkMatch[0]);
+          lines[i] = "";
+          continue;
+        }
+
+        // Plain source parsing
+        let match = lines[i].match(/^(\s*[-•]?\s*)(.+?\.[A-Za-z0-9]{2,12})(\s*)$/);
+        if (!match) {
+          match = lines[i].match(/^(\s*[-•]?\s*)(.+?)(\s*)$/);
+        }
+
+        if (match) {
+          const rawName = match[2].trim();
+          const normalized = normalizeFileName(rawName) || rawName;
+          const fileId = lookupFileId(normalized);
+          const metadata = lookupSourceMetadata(normalized);
+          const canonicalName = fileId ? downloadRegistry.getDisplayName(fileId) : null;
+          const displayName = canonicalName || rawName || normalized;
+          const fileRef = fileId || normalized || rawName;
+          const token = `__PLAIN_SOURCE_${plainSourceTokens.length}__`;
+
+          const isWebCrawl = metadata && (metadata.source_type === 'web_crawl' || metadata.url);
+          plainSourceTokens.push({ token, fileRef, displayName, fileId, isWebCrawl, url: metadata?.url });
+          collectedSourceTokens.push(token);
+          lines[i] = "";
+          continue;
+        }
+      }
+
+      // If we reach here, it's not a source line
+      inSourcesSection = false;
+    }
+
+    processed = lines.join("\n");
+
+    // Tables
+    processed = processed.replace(/(^|\n)((?:\s*\|[^\n]*\n){2,})/g, (m, lead, block) => {
+      const rows = block.trim().split(/\n/).map(r => r.trim());
+      if (rows.length < 2) return m;
+      const header = rows[0];
+      const divider = rows[1];
+      if (!/^\|?\s*:?[-\s|:]+:?\s*\|?$/.test(divider)) return m;
+      const bodyRows = rows.slice(2);
+      const parseRow = (row) => row.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+      const ths = parseRow(header).map(h => `<th>${escapeHtml(h)}</th>`).join('');
+      const trs = bodyRows.map(r => `<tr>${parseRow(r).map(c => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('');
+      const html = `<table class="plugin-table chat-table"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
+      const token = `__TABLE_BLOCK_${tableTokens.length}__`;
+      tableTokens.push(html);
+      return `${lead}${token}\n`;
+    });
+
+    processed = processed.replace(/<table[\s\S]*?<\/table>/gi, (tbl) => {
+      const unsafeTag = /<(?!\/?(?:table|thead|tbody|tr|th|td)(\b|>))/i.test(tbl);
+      if (unsafeTag) return escapeHtml(tbl);
+      const token = `__TABLE_BLOCK_${tableTokens.length}__`;
+      tableTokens.push(tbl);
+      return token;
+    });
+
+    let safe = escapeHtml(processed);
+    safe = safe.replace(/\r\n/g, "\n");
+
+    // Inject Sources Section
+    if (sourcesSectionToken) {
+      let sourcesHtml = `<div class="sources-section-wrapper"><div class="source-section-title">Sources:</div>`;
+      if (collectedSourceTokens.length > 0) {
+        const limitedTokens = collectedSourceTokens.slice(0, MAX_DISPLAY_SOURCES);
+        const overflowCount = Math.max(collectedSourceTokens.length - MAX_DISPLAY_SOURCES, 0);
+        sourcesHtml += `<div class="sources-container">${limitedTokens.join('')}`;
+        if (overflowCount > 0) {
+          sourcesHtml += `<span class="sources-overflow">+${overflowCount} more</span>`;
+        }
+        sourcesHtml += `</div>`;
+      }
+      sourcesHtml += `</div>`;
+      // Replace the token and remove any trailing newlines/whitespace after it
+      safe = safe.replace(new RegExp(sourcesSectionToken + '\\s*', 'g'), sourcesHtml);
+    }
+
+    linkTokens.forEach((html, index) => { safe = safe.replace(`__SOURCE_LINK_${index}__`, html); });
+    plainSourceTokens.forEach(({ token, fileRef, displayName, fileId, isWebCrawl, url }) => {
+      if (isWebCrawl && url) {
+        // Web crawl source - render as anchor tag that opens in new tab
+        const href = url.startsWith('http') ? url : `https://${url}`;
+        const linkHtml = `<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer" class="source-link">${escapeHtml(displayName)} ↗</a>`;
+        safe = safe.replace(token, linkHtml);
+      } else {
+        // File source - render as download button
+        const dataRef = escapeAttribute(fileRef);
+        const dataName = escapeAttribute(displayName);
+        const idAttribute = fileId ? ` data-source-id="${escapeAttribute(fileId)}"` : "";
+        const buttonHtml = `<button type="button" class="source-download"${idAttribute} data-source-ref="${dataRef}" data-source-name="${dataName}">${escapeHtml(displayName)}</button>`;
+        safe = safe.replace(token, buttonHtml);
+      }
+    });
+
+    safe = safe.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+    // safe = safe.replace(/(^|\n)Sources?:/g, (match) => `<div class="source-section-title">${match.trim()}</div>`); // Already handled by block token
+    safe = safe.replace(/^\s*-\s+/gm, "• ");
+    // Stop replacing newlines with <br/> to avoid huge gaps with pre-wrap
+    // safe = safe.replace(/\n\d+\./g, "<br/>$&");
+    // safe = safe.replace(/\n-\s*/g, "<br/>• ");
+    // safe = safe.replace(/\n/g, "<br/>");
+
+    tableTokens.forEach((html, index) => {
+      const token = `__TABLE_BLOCK_${index}__`;
+      safe = safe.replace(token, html);
+    });
+
+    return safe;
   }
-
-  const linkTokens = [];
-  const tableTokens = [];
-
-  // Process markdown links [Label](ref)
-  let processed = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, ref) => {
-    const extraction = extractDownloadName(label);
-    const normalized = normalizeFileName(extraction.downloadName);
-    const fileRef = fileNameToIdMap[normalized] || ref.trim(); // Use file_id from API
-    const dataRef = escapeAttribute(fileRef);
-    const dataName = escapeAttribute(normalized);
-    const buttonLabel = escapeHtml(extraction.displayLabel);
-    const token = `__SOURCE_LINK_${linkTokens.length}__`;
-    linkTokens.push(`<button type="button" class="source-download" data-source-ref="${dataRef}" data-source-name="${dataName}">${buttonLabel}</button>`);
-    return token;
-  });
-
-  const plainSourceTokens = [];
-  const lines = processed.split(/\n/);
-  let inSourcesSection = false;
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const trimmed = lines[i].trim();
-    if (/^Sources?:/i.test(trimmed)) {
-      inSourcesSection = true;
-      continue;
-    }
-    if (!inSourcesSection) continue;
-    if (!trimmed) continue;
-    if (trimmed.includes("__SOURCE_LINK_")) continue;
-
-    const match = lines[i].match(/^(\s*[-•]?\s*)(.+?\.[A-Za-z0-9]{2,12})(\s*)$/);
-    if (match) {
-      const rawName = match[2].trim();
-      const normalized = normalizeFileName(rawName);
-      const fileRef = fileNameToIdMap[normalized] || normalized; // Use file_id from API
-      const displayName = normalized;
-      const token = `__PLAIN_SOURCE_${plainSourceTokens.length}__`;
-      plainSourceTokens.push({ token, fileId: fileRef, displayName });
-      lines[i] = `${match[1]}${token}${match[3]}`;
-      continue;
-    }
-
-    const fallback = lines[i].match(/^(\s*[-•]?\s*)(.+?)(\s*)$/);
-    if (fallback) {
-      const rawName = fallback[2].trim();
-      const normalized = normalizeFileName(rawName);
-      const fileRef = fileNameToIdMap[normalized] || normalized; // Use file_id from API
-      const displayName = normalized;
-      const token = `__PLAIN_SOURCE_${plainSourceTokens.length}__`;
-      plainSourceTokens.push({ token, fileId: fileRef, displayName });
-      lines[i] = `${fallback[1]}${token}${fallback[3]}`;
-      continue;
-    }
-
-    if (!/^\s*[-•]/.test(lines[i])) inSourcesSection = false;
-  }
-
-  processed = lines.join("\n");
-
-  // Tables
-  processed = processed.replace(/(^|\n)((?:\s*\|[^\n]*\n){2,})/g, (m, lead, block) => {
-    const rows = block.trim().split(/\n/).map(r => r.trim());
-    if (rows.length < 2) return m;
-    const header = rows[0];
-    const divider = rows[1];
-    if (!/^\|?\s*:?[-\s|:]+:?\s*\|?$/.test(divider)) return m;
-    const bodyRows = rows.slice(2);
-    const parseRow = (row) => row.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
-    const ths = parseRow(header).map(h => `<th>${escapeHtml(h)}</th>`).join('');
-    const trs = bodyRows.map(r => `<tr>${parseRow(r).map(c => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('');
-    const html = `<table class="plugin-table chat-table"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
-    const token = `__TABLE_BLOCK_${tableTokens.length}__`;
-    tableTokens.push(html);
-    return `${lead}${token}\n`;
-  });
-
-  processed = processed.replace(/<table[\s\S]*?<\/table>/gi, (tbl) => {
-    const unsafeTag = /<(?!\/?(?:table|thead|tbody|tr|th|td)(\b|>))/i.test(tbl);
-    if (unsafeTag) return escapeHtml(tbl);
-    const token = `__TABLE_BLOCK_${tableTokens.length}__`;
-    tableTokens.push(tbl);
-    return token;
-  });
-
-  let safe = escapeHtml(processed);
-  safe = safe.replace(/\r\n/g, "\n");
-  linkTokens.forEach((html, index) => { safe = safe.replace(`__SOURCE_LINK_${index}__`, html); });
-  plainSourceTokens.forEach(({ token, fileId, displayName }) => {
-    const dataRef = escapeAttribute(fileId);
-    const dataName = escapeAttribute(displayName);
-    const buttonHtml = `<button type="button" class="source-download" data-source-ref="${dataRef}" data-source-name="${dataName}">${escapeHtml(displayName)}</button>`;
-    safe = safe.replace(token, buttonHtml);
-  });
-
-  safe = safe.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
-  safe = safe.replace(/(^|\n)Sources?:/g, (match) => `<div class="source-section-title">${match.trim()}</div>`);
-  safe = safe.replace(/^\s*-\s+/gm, "• ");
-  safe = safe.replace(/\n\d+\./g, "<br/>$&");
-  safe = safe.replace(/\n-\s*/g, "<br/>• ");
-  safe = safe.replace(/\n/g, "<br/>");
-
-  tableTokens.forEach((html, index) => {
-    const token = `__TABLE_BLOCK_${index}__`;
-    safe = safe.replace(token, html);
-  });
-
-  return safe;
-}
 
 
 })();
