@@ -6,7 +6,11 @@ from .file_binary import FileBinary
 from .file_metadata import FileMetadata, FileMetadataCreate, FileMetadataUpdate, FileMetadataResponse
 from .user_file_access import UserFileAccess, UserFileAccessCreate, UserFileAccessUpdate, UserFileAccessResponse
 from .query_log import QueryLog, QueryLogCreate, QueryLogResponse
-from .chat_tracking import ChatSession, ChatQuery, ChatSessionCreate, ChatQueryCreate, ChatMessage, ChatMessageCreate
+from .chat_tracking import (
+    ChatSession, ChatQuery, ChatMessageHistory,
+    ChatSessionCreate, ChatQueryCreate, ChatMessage, ChatMessageCreate,
+    ChatMessageHistoryCreate, ChatMessageHistoryResponse, ChatHistorySaveRequest, ChatHistoryResponse
+)
 from .vector_database import VectorDatabase, VectorDatabaseCreate, VectorDatabaseUpdate, VectorDatabaseResponse
 from .system_prompt import SystemPrompt, SystemPromptCreate, SystemPromptUpdate, SystemPromptResponse
 from .collection import Collection, CollectionUser, CollectionWebsite
@@ -24,6 +28,7 @@ __all__ = [
     "QueryLog",
     "ChatSession",
     "ChatQuery",
+    "ChatMessageHistory",
     "VectorDatabase",
     "SystemPrompt",
     "Collection",

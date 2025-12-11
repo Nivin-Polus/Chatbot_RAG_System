@@ -173,6 +173,9 @@ def _process_chat_request(
         file_id = chunk.get("file_id")
         file_name = chunk.get("file_name") or "Unknown File"
         chunk_index = chunk.get("chunk_index")
+        # Get source type and URL for web crawl sources
+        source_type = chunk.get("source_type", "file")
+        url = chunk.get("url") or chunk.get("canonical_url", "")
 
         record_key = file_id or file_name
         if not record_key:
@@ -184,6 +187,8 @@ def _process_chat_request(
                 "file_name": file_name,
                 "file_id": file_id,
                 "chunk_indices": [],
+                "source_type": source_type,
+                "url": url,
             }
             source_records[record_key] = record
 
@@ -199,6 +204,11 @@ def _process_chat_request(
             payload["file_id"] = record["file_id"]
         if record.get("chunk_indices"):
             payload["chunk_indices"] = record["chunk_indices"]
+        # Add source_type and url for web crawl sources
+        if record.get("source_type"):
+            payload["source_type"] = record["source_type"]
+        if record.get("url"):
+            payload["url"] = record["url"]
         sources_payload.append(payload)
 
     if not chunks:
@@ -491,3 +501,151 @@ async def delete_session(session_id: str, current_user: dict = Depends(get_curre
         return {"message": f"Session {session_id} deleted successfully"}
     else:
         raise HTTPException(status_code=404, detail="Session not found")
+
+
+@router.post("/history/save")
+async def save_chat_history(
+    request: Dict,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Save full chat history (all messages) for a session"""
+    from app.models.chat_tracking import ChatSession
+    from app.models.collection import Collection, CollectionUser
+    
+    session_id = request.get("session_id")
+    collection_id = request.get("collection_id")
+    messages = request.get("messages", [])
+    
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    
+    if not isinstance(messages, list):
+        raise HTTPException(status_code=400, detail="messages must be a list")
+    
+    user_id = current_user.get("user_id")
+    user_role = current_user.get("role")
+    
+    # Check permissions
+    if user_role != "super_admin":
+        # Verify session belongs to user or user has access to collection
+        session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+        if session:
+            if session.user_id != user_id:
+                raise HTTPException(status_code=403, detail="Access denied")
+            
+            if collection_id and session.collection_id != collection_id:
+                # Verify user has access to the collection
+                if user_role == "user_admin":
+                    collection = db.query(Collection).filter(
+                        Collection.collection_id == collection_id,
+                        Collection.admin_user_id == user_id
+                    ).first()
+                    if not collection:
+                        raise HTTPException(status_code=403, detail="Access denied to collection")
+                else:
+                    membership = db.query(CollectionUser).filter(
+                        CollectionUser.collection_id == collection_id,
+                        CollectionUser.user_id == user_id
+                    ).first()
+                    if not membership:
+                        raise HTTPException(status_code=403, detail="Access denied to collection")
+    
+    success = chat_service.save_chat_history(session_id, user_id, collection_id, messages, db)
+    if success:
+        return {"message": "Chat history saved successfully", "session_id": session_id}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to save chat history")
+
+
+@router.get("/history/{session_id}")
+async def get_chat_history(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get full chat history (all messages) for a session"""
+    from app.models.chat_tracking import ChatSession
+    from app.models.collection import Collection, CollectionUser
+    
+    # Check if session exists
+    session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    user_id = current_user.get("user_id")
+    user_role = current_user.get("role")
+    
+    # Check permissions
+    if user_role != "super_admin":
+        # Check if user owns the session
+        if session.user_id != user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Check if user has access to the collection
+        if session.collection_id:
+            if user_role == "user_admin":
+                collection = db.query(Collection).filter(
+                    Collection.collection_id == session.collection_id,
+                    Collection.admin_user_id == user_id
+                ).first()
+                if not collection:
+                    raise HTTPException(status_code=403, detail="Access denied to collection")
+            else:
+                membership = db.query(CollectionUser).filter(
+                    CollectionUser.collection_id == session.collection_id,
+                    CollectionUser.user_id == user_id
+                ).first()
+                if not membership:
+                    raise HTTPException(status_code=403, detail="Access denied to collection")
+    
+    messages = chat_service.get_chat_history(session_id, db)
+    return {"session_id": session_id, "messages": messages}
+
+
+@router.delete("/history/{session_id}")
+async def clear_chat_history(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Clear chat history for a session (delete all messages)"""
+    from app.models.chat_tracking import ChatSession
+    from app.models.collection import Collection, CollectionUser
+    
+    # Check if session exists
+    session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    user_id = current_user.get("user_id")
+    user_role = current_user.get("role")
+    
+    # Check permissions
+    if user_role != "super_admin":
+        # Check if user owns the session
+        if session.user_id != user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Check if user has access to the collection
+        if session.collection_id:
+            if user_role == "user_admin":
+                collection = db.query(Collection).filter(
+                    Collection.collection_id == session.collection_id,
+                    Collection.admin_user_id == user_id
+                ).first()
+                if not collection:
+                    raise HTTPException(status_code=403, detail="Access denied to collection")
+            else:
+                membership = db.query(CollectionUser).filter(
+                    CollectionUser.collection_id == session.collection_id,
+                    CollectionUser.user_id == user_id
+                ).first()
+                if not membership:
+                    raise HTTPException(status_code=403, detail="Access denied to collection")
+    
+    success = chat_service.clear_chat_history(session_id, db)
+    if success:
+        return {"message": "Chat history cleared successfully", "session_id": session_id}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to clear chat history")

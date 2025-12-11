@@ -15,6 +15,7 @@ import { ChatMessage, ChatSource } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost } from '@/utils/api';
 import { getAssetUrl } from '@/utils/assets';
+import { saveChatHistory, loadChatHistory, clearChatHistory } from '@/utils/chatStorage';
 
 type CollectionSummary = {
   collection_id: string;
@@ -39,6 +40,7 @@ export default function SuperadminChat() {
   const [isAutoScroll, setIsAutoScroll] = useState(true);
   const isAutoScrollRef = useRef(true);
   const hasMessages = messages.length > 0;
+  const saveTimeoutRef = useRef<number | null>(null);
 
   const disableAutoScroll = useCallback(() => {
     if (!isAutoScrollRef.current) {
@@ -80,12 +82,48 @@ export default function SuperadminChat() {
     });
   }, []);
 
+  // Initialize sessionId if not set
   useEffect(() => {
     if (!sessionId) {
       const newSessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
       setSessionId(newSessionId);
     }
   }, [sessionId]);
+
+  // Load chat history from localStorage when collection changes
+  useEffect(() => {
+    if (selectedCollection && user?.user_id) {
+      const localStored = loadChatHistory(selectedCollection, user.user_id, user.role || 'superadmin');
+      if (localStored && localStored.messages.length > 0) {
+        setMessages(localStored.messages);
+        if (localStored.sessionId) {
+          setSessionId(localStored.sessionId);
+        }
+      } else {
+        setMessages([]);
+      }
+    } else if (!selectedCollection) {
+      // Clear messages when no collection is selected
+      setMessages([]);
+    }
+  }, [selectedCollection, user?.user_id, user?.role]);
+
+  // Save chat history to localStorage once after assistant finishes streaming
+  useEffect(() => {
+    if (!isStreaming && selectedCollection && user?.user_id && messages.length > 0 && sessionId) {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+      saveTimeoutRef.current = window.setTimeout(() => {
+        saveChatHistory(messages, sessionId, selectedCollection, user.user_id, user.role || 'superadmin');
+      }, 1000);
+    }
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [isStreaming, messages, sessionId, selectedCollection, user?.user_id, user?.role]);
 
   useEffect(() => {
     if (isAutoScrollRef.current) {
@@ -301,8 +339,8 @@ export default function SuperadminChat() {
           typeof data === 'string'
             ? data
             : typeof data === 'object' && data !== null
-            ? data.detail || data.message || data.error || ''
-            : '';
+              ? data.detail || data.message || data.error || ''
+              : '';
         const normalizedMessage = apiMessage.toString().toLowerCase();
 
         if (response.status === 401 && normalizedMessage.includes('session') && normalizedMessage.includes('expired')) {
@@ -356,22 +394,26 @@ export default function SuperadminChat() {
 
       const sources: ChatSource[] | undefined = Array.isArray(dataResponse.sources)
         ? dataResponse.sources
-            .map((item: any) => {
-              if (!item || typeof item !== 'object') {
-                return null;
-              }
-              const fileName = typeof item.file_name === 'string' ? item.file_name : undefined;
-              const fileId = typeof item.file_id === 'string' ? item.file_id : undefined;
+          .map((item: any) => {
+            if (!item || typeof item !== 'object') {
+              return null;
+            }
+            const fileName = typeof item.file_name === 'string' ? item.file_name : undefined;
+            const fileId = typeof item.file_id === 'string' ? item.file_id : undefined;
+            const sourceType = typeof item.source_type === 'string' ? item.source_type as 'file' | 'web_crawl' : undefined;
+            const url = typeof item.url === 'string' ? item.url : undefined;
 
-              if (!fileName) {
-                return null;
-              }
-              return {
-                file_name: fileName,
-                file_id: fileId,
-              } satisfies ChatSource;
-            })
-            .filter((value): value is ChatSource => value !== null)
+            if (!fileName) {
+              return null;
+            }
+            return {
+              file_name: fileName,
+              file_id: fileId,
+              source_type: sourceType,
+              url: url,
+            } satisfies ChatSource;
+          })
+          .filter((value): value is ChatSource => value !== null)
         : undefined;
 
       await streamAssistantResponse(assistantContent, sources);
@@ -407,10 +449,16 @@ export default function SuperadminChat() {
     }
   };
 
-  const clearChat = () => {
+  const clearChat = async () => {
     if (stopStreamingRef.current) {
       stopStreamingRef.current();
     }
+
+    // Clear from localStorage
+    if (selectedCollection && user?.user_id) {
+      clearChatHistory(selectedCollection, user.user_id, user.role || 'superadmin');
+    }
+
     setMessages([]);
     setSessionId(null);
     enableAutoScroll();
@@ -476,13 +524,22 @@ export default function SuperadminChat() {
       const nextKey = () => `${messageId}-node-${keyCounter++}`;
 
       const sourceIdLookup = new Map<string, string>();
+      const sourceMetadataLookup = new Map<string, { url?: string; source_type?: string; file_id?: string }>();
       if (Array.isArray(messageSources)) {
         for (const source of messageSources) {
-          if (!source || !source.file_name || !source.file_id) continue;
+          if (!source || !source.file_name) continue;
           const normalized = source.file_name.trim().toLowerCase();
           if (!normalized) continue;
-          if (!sourceIdLookup.has(normalized)) {
+          if (!sourceIdLookup.has(normalized) && source.file_id) {
             sourceIdLookup.set(normalized, source.file_id);
+          }
+          // Store full metadata for the source
+          if (!sourceMetadataLookup.has(normalized)) {
+            sourceMetadataLookup.set(normalized, {
+              url: source.url,
+              source_type: source.source_type,
+              file_id: source.file_id,
+            });
           }
         }
       }
@@ -494,11 +551,22 @@ export default function SuperadminChat() {
         let displayText = raw.trim();
         let downloadName: string | null = null;
         let sourceRef: string | null = null;
+        let sourceType: 'file' | 'web_crawl' = 'file';
 
         const linkMatch = raw.match(/\[([^\]]+)\]\(([^)]+)\)/);
         if (linkMatch) {
           displayText = linkMatch[1].trim() || displayText;
-          sourceRef = linkMatch[2].trim();
+          let linkTarget = linkMatch[2].trim();
+
+          // Parse source_type from format: reference|source_type
+          if (linkTarget.includes('|')) {
+            const parts = linkTarget.split('|');
+            linkTarget = parts[0];
+            if (parts[1] === 'web_crawl') {
+              sourceType = 'web_crawl';
+            }
+          }
+          sourceRef = linkTarget;
         }
 
         const fromMatch = raw.match(/\(from\s+(.+?)\)$/i);
@@ -537,11 +605,17 @@ export default function SuperadminChat() {
         const normalizedDisplay = displayText.trim().toLowerCase();
         const matchedFileId = normalizedDisplay ? sourceIdLookup.get(normalizedDisplay) : undefined;
 
+        // Detect web_crawl from URL pattern if not already set
+        if (sourceRef && sourceRef.startsWith('http') && sourceType === 'file') {
+          sourceType = 'web_crawl';
+        }
+
         return {
           displayText,
           downloadName,
           sourceRef,
           matchedFileId,
+          sourceType,
         };
       };
 
@@ -564,21 +638,49 @@ export default function SuperadminChat() {
             pushText(line.slice(lastIndex, match.index));
           }
 
-          const [, label, linkTarget] = match;
-          const { displayText, downloadName, matchedFileId } = extractSourceInfo(label);
-          // linkTarget is the file_id from backend format: [filename](file_id)
+          const [, label, rawLinkTarget] = match;
+          const { displayText, downloadName, matchedFileId, sourceType } = extractSourceInfo(`[${label}](${rawLinkTarget})`);
+
+          // Parse source_type from linkTarget if present
+          let linkTarget = rawLinkTarget;
+          let detectedSourceType = sourceType;
+          if (rawLinkTarget.includes('|')) {
+            const parts = rawLinkTarget.split('|');
+            linkTarget = parts[0];
+            if (parts[1] === 'web_crawl') {
+              detectedSourceType = 'web_crawl';
+            }
+          }
+
           const fileId = matchedFileId ?? linkTarget;
           const fileName = downloadName || displayText || label;
-          elements.push(
-            <button
-              key={nextKey()}
-              type="button"
-              className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2`}
-              onClick={() => handleDownloadSource(fileId, fileName)}
-            >
-              {displayText.trim() || 'Download source'}
-            </button>
-          );
+
+          if (detectedSourceType === 'web_crawl') {
+            // Web crawl source - open URL in new tab
+            elements.push(
+              <a
+                key={nextKey()}
+                href={linkTarget.startsWith('http') ? linkTarget : `https://${linkTarget}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer`}
+              >
+                {displayText.trim() || 'View source'} ↗
+              </a>
+            );
+          } else {
+            // File source - trigger download
+            elements.push(
+              <button
+                key={nextKey()}
+                type="button"
+                className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer`}
+                onClick={() => handleDownloadSource(fileId, fileName)}
+              >
+                {displayText.trim() || 'Download source'}
+              </button>
+            );
+          }
 
           lastIndex = match.index + match[0].length;
         }
@@ -700,43 +802,138 @@ export default function SuperadminChat() {
           const label = trimmed.replace(/^-\s*/, '');
           // Parse markdown link format: [filename](file_id)
           const linkMatch = label.match(/\[([^\]]+)\]\(([^)]+)\)/);
-          
+
+          // Extract source name for metadata lookup
+          let sourceName = label;
           if (linkMatch) {
-            const [, fileName, linkTarget] = linkMatch;
-            const normalizedName = fileName.trim().toLowerCase();
-            const matchedFileId = normalizedName ? sourceIdLookup.get(normalizedName) : undefined;
-            const resolvedFileId = matchedFileId ?? linkTarget;
+            sourceName = linkMatch[1];
+          }
+          const normalizedName = sourceName.trim().toLowerCase();
+          const metadata = sourceMetadataLookup.get(normalizedName);
+
+          // Check if we have metadata from API response
+          if (metadata && (metadata.source_type === 'web_crawl' || metadata.url)) {
+            // Web crawl source - open URL in new tab
+            const url = metadata.url || '';
+            nodes.push(
+              <a
+                key={nextKey()}
+                href={url.startsWith('http') ? url : `https://${url}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+              >
+                {sourceName} ↗
+              </a>
+            );
+          } else if (metadata && metadata.file_id) {
+            // File source with known file_id - trigger download
             nodes.push(
               <button
                 key={nextKey()}
                 type="button"
-                className="block text-left text-primary underline underline-offset-2"
-                onClick={() => handleDownloadSource(resolvedFileId, fileName)}
+                className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                onClick={() => handleDownloadSource(metadata.file_id!, sourceName)}
               >
-                {fileName}
+                {sourceName}
               </button>
             );
-          } else {
-            // Fallback for old format
-            const { displayText, downloadName, sourceRef, matchedFileId } = extractSourceInfo(label);
-            const reference = matchedFileId ?? sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
-            if (reference) {
+          } else if (linkMatch) {
+            const [, fileName, rawLinkTarget] = linkMatch;
+            const matchedFileId = normalizedName ? sourceIdLookup.get(normalizedName) : undefined;
+
+            // Parse source_type from linkTarget
+            let linkTarget = rawLinkTarget;
+            let sourceType: 'file' | 'web_crawl' = 'file';
+            if (rawLinkTarget.includes('|')) {
+              const parts = rawLinkTarget.split('|');
+              linkTarget = parts[0];
+              if (parts[1] === 'web_crawl') {
+                sourceType = 'web_crawl';
+              }
+            }
+            // Also detect from URL pattern
+            if (linkTarget.startsWith('http')) {
+              sourceType = 'web_crawl';
+            }
+
+            const resolvedFileId = matchedFileId ?? linkTarget;
+
+            if (sourceType === 'web_crawl') {
+              // Web crawl source - open URL in new tab
+              nodes.push(
+                <a
+                  key={nextKey()}
+                  href={linkTarget.startsWith('http') ? linkTarget : `https://${linkTarget}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                >
+                  {fileName} ↗
+                </a>
+              );
+            } else {
+              // File source - trigger download
               nodes.push(
                 <button
                   key={nextKey()}
                   type="button"
-                  className="block text-left text-primary underline underline-offset-2"
-                  onClick={() => handleDownloadSource(reference, downloadName ?? displayText)}
+                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                  onClick={() => handleDownloadSource(resolvedFileId, fileName)}
                 >
-                  {displayText}
+                  {fileName}
+                </button>
+              );
+            }
+          } else {
+            // Plain text source - try to find in metadata lookup
+            const plainMetadata = sourceMetadataLookup.get(label.trim().toLowerCase());
+            if (plainMetadata && (plainMetadata.source_type === 'web_crawl' || plainMetadata.url)) {
+              const url = plainMetadata.url || '';
+              nodes.push(
+                <a
+                  key={nextKey()}
+                  href={url.startsWith('http') ? url : `https://${url}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                >
+                  {label} ↗
+                </a>
+              );
+            } else if (plainMetadata && plainMetadata.file_id) {
+              nodes.push(
+                <button
+                  key={nextKey()}
+                  type="button"
+                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                  onClick={() => handleDownloadSource(plainMetadata.file_id!, label)}
+                >
+                  {label}
                 </button>
               );
             } else {
-              nodes.push(
-                <span key={nextKey()} className="block whitespace-pre-wrap">
-                  {label}
-                </span>
-              );
+              // Fallback for old format
+              const { displayText, downloadName, sourceRef, matchedFileId } = extractSourceInfo(label);
+              const reference = matchedFileId ?? sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
+              if (reference) {
+                nodes.push(
+                  <button
+                    key={nextKey()}
+                    type="button"
+                    className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                    onClick={() => handleDownloadSource(reference, downloadName ?? displayText)}
+                  >
+                    {displayText}
+                  </button>
+                );
+              } else {
+                nodes.push(
+                  <span key={nextKey()} className="block whitespace-pre-wrap">
+                    {label}
+                  </span>
+                );
+              }
             }
           }
           continue;
@@ -803,7 +1000,7 @@ export default function SuperadminChat() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-foreground dark:text-white">Leto Chat</h1>
-            
+
           </div>
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2">
@@ -869,20 +1066,18 @@ export default function SuperadminChat() {
                           className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
                         >
                           <div
-                            className={`rounded-xl px-4 py-3 shadow-sm ${
-                              isUser
-                                ? 'bg-primary text-primary-foreground max-w-[65%] dark:text-white'
-                                : 'bg-muted border border-border/60 text-foreground max-w-[80%] dark:bg-gray-800 dark:text-gray-100'
-                            }`}
+                            className={`rounded-xl px-4 py-3 shadow-sm ${isUser
+                              ? 'bg-primary text-primary-foreground max-w-[65%] dark:text-white'
+                              : 'bg-muted border border-border/60 text-foreground max-w-[80%] dark:bg-gray-800 dark:text-gray-100'
+                              }`}
                           >
                             <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                               <div className="flex items-center gap-2.5">
                                 <div
-                                  className={`flex h-8 w-8 items-center justify-center rounded-full ${
-                                    isUser
-                                      ? 'bg-primary-foreground/20 text-primary-foreground'
-                                      : 'bg-white text-foreground shadow-sm dark:bg-gray-900/80 dark:text-gray-100'
-                                  }`}
+                                  className={`flex h-8 w-8 items-center justify-center rounded-full ${isUser
+                                    ? 'bg-primary-foreground/20 text-primary-foreground'
+                                    : 'bg-white text-foreground shadow-sm dark:bg-gray-900/80 dark:text-gray-100'
+                                    }`}
                                 >
                                   {isUser ? (
                                     <User className="h-4 w-4" />
@@ -891,19 +1086,17 @@ export default function SuperadminChat() {
                                   )}
                                 </div>
                                 <span
-                                  className={`text-sm font-semibold leading-none ${
-                                    isUser ? 'text-primary-foreground dark:text-white' : 'text-foreground dark:text-gray-100'
-                                  }`}
+                                  className={`text-sm font-semibold leading-none ${isUser ? 'text-primary-foreground dark:text-white' : 'text-foreground dark:text-gray-100'
+                                    }`}
                                 >
                                   {isUser ? 'You' : 'Leto Assistant'}
                                 </span>
                               </div>
                               <p
-                                className={`text-xs ${
-                                  isUser
-                                    ? 'text-primary-foreground/70 dark:text-white/70'
-                                    : 'text-muted-foreground dark:text-gray-400'
-                                }`}
+                                className={`text-xs ${isUser
+                                  ? 'text-primary-foreground/70 dark:text-white/70'
+                                  : 'text-muted-foreground dark:text-gray-400'
+                                  }`}
                               >
                                 {formatTime(message.timestamp)}
                               </p>

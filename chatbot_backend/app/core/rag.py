@@ -1,6 +1,7 @@
 from typing import List, Dict, Optional
 import requests
 import json
+import re
 
 try:
     import boto3
@@ -150,7 +151,10 @@ class RAG:
                 "text": payload.get("text", ""),
                 "file_name": payload.get("file_name", "Unknown File"),
                 "file_id": payload.get("file_id", ""),
-                "chunk_index": payload.get("chunk_index", 0)
+                "chunk_index": payload.get("chunk_index", 0),
+                "source_type": payload.get("source_type", "file"),
+                "url": payload.get("url", ""),
+                "canonical_url": payload.get("canonical_url", "")
             })
         return chunks_with_sources
 
@@ -243,13 +247,17 @@ class RAG:
 
         # Build context with source information
         context_parts = []
-        source_files = {}  # Changed to dict to store file_id with file_name
+        source_files = {}  # Dict to store source metadata (file_id, source_type, url)
         
         for i, chunk in enumerate(chunks_with_sources):
             context_parts.append(f"Source {i+1} (from {chunk['file_name']}):\n{chunk['text']}")
-            # Store file_id with file_name for download links
+            # Store source metadata for frontend rendering
             if chunk['file_name'] not in source_files:
-                source_files[chunk['file_name']] = chunk.get('file_id', '')
+                source_files[chunk['file_name']] = {
+                    'file_id': chunk.get('file_id', ''),
+                    'source_type': chunk.get('source_type', 'file'),
+                    'url': chunk.get('url', '') or chunk.get('canonical_url', '')
+                }
         
         context = "\n\n---\n\n".join(context_parts)
         
@@ -271,11 +279,24 @@ Answer:"""
         
         answer = self.call_ai(enhanced_prompt, model=model_value, max_tokens=max_tokens_value, temperature=temperature_value)
         
-        # Ensure sources are included if not already present
-        # Format: [file_name](file_id) for easy parsing in frontend
-        if "Sources:" not in answer and "sources:" not in answer.lower():
-            source_list = "\n".join([f"- [{file_name}]({file_id})" for file_name, file_id in sorted(source_files.items())])
-            answer += f"\n\n**Sources:**\n{source_list}"
+        # ALWAYS add formatted sources - remove any AI-generated sources section first
+        # Format: [file_name](reference|source_type) for frontend parsing
+        # reference = file_id for files, url for web_crawl
+        # Remove any existing sources section (case-insensitive)
+        answer = re.sub(r'\n+\**\s*[Ss]ources?:?\s*\**[\s\S]*$', '', answer).strip()
+        
+        # Build and append formatted sources
+        source_list = []
+        for file_name, info in sorted(source_files.items()):
+            source_type = info.get('source_type', 'file')
+            if source_type == 'web_crawl' and info.get('url'):
+                reference = info['url']
+            else:
+                reference = info.get('file_id', '')
+            source_list.append(f"- [{file_name}]({reference}|{source_type})")
+        
+        if source_list:
+            answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
 
         return answer
 
@@ -315,13 +336,17 @@ Answer:"""
 
         # Build context with source information
         context_parts = []
-        source_files = {}  # Changed to dict to store file_id with file_name
+        source_files = {}  # Dict to store source metadata (file_id, source_type, url)
         
         for i, chunk in enumerate(chunks_with_sources):
             context_parts.append(f"Source {i+1} (from {chunk['file_name']}):\n{chunk['text']}")
-            # Store file_id with file_name for download links
+            # Store source metadata for frontend rendering
             if chunk['file_name'] not in source_files:
-                source_files[chunk['file_name']] = chunk.get('file_id', '')
+                source_files[chunk['file_name']] = {
+                    'file_id': chunk.get('file_id', ''),
+                    'source_type': chunk.get('source_type', 'file'),
+                    'url': chunk.get('url', '') or chunk.get('canonical_url', '')
+                }
         
         context = "\n\n---\n\n".join(context_parts)
         
@@ -346,10 +371,23 @@ Answer:"""
         
         answer = self.call_ai(enhanced_prompt, model=model_value, max_tokens=max_tokens_value, temperature=temperature_value)
         
-        # Ensure sources are included if not already present
-        # Format: [file_name](file_id) for easy parsing in frontend
-        if "Sources:" not in answer and "sources:" not in answer.lower():
-            source_list = "\n".join([f"- [{file_name}]({file_id})" for file_name, file_id in sorted(source_files.items())])
-            answer += f"\n\n**Sources:**\n{source_list}"
+        # ALWAYS add formatted sources - remove any AI-generated sources section first
+        # Format: [file_name](reference|source_type) for frontend parsing
+        # reference = file_id for files, url for web_crawl
+        # Remove any existing sources section (case-insensitive)
+        answer = re.sub(r'\n+\**\s*[Ss]ources?:?\s*\**[\s\S]*$', '', answer).strip()
+        
+        # Build and append formatted sources
+        source_list = []
+        for file_name, info in sorted(source_files.items()):
+            source_type = info.get('source_type', 'file')
+            if source_type == 'web_crawl' and info.get('url'):
+                reference = info['url']
+            else:
+                reference = info.get('file_id', '')
+            source_list.append(f"- [{file_name}]({reference}|{source_type})")
+        
+        if source_list:
+            answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
 
         return answer

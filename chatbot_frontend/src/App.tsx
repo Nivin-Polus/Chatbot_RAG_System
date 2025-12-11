@@ -19,6 +19,7 @@ import SuperadminChat from "./pages/superadmin/SuperadminChat";
 import SuperadminActivity from "./pages/superadmin/SuperadminActivity";
 import SuperadminSettings from "./pages/superadmin/SuperadminSettings";
 import SuperadminPlugins from "./pages/superadmin/SuperadminPlugins";
+import SuperadminCrawler from "./pages/superadmin/SuperadminCrawler";
 import KnowledgeBaseDetails from "./pages/superadmin/KnowledgeBaseDetails";
 import UserDashboard from "./pages/user/UserDashboard";
 import UserChat from "./pages/user/UserChat";
@@ -27,6 +28,7 @@ import UserAdminChat from "./pages/useradmin/UserAdminChat";
 import UserAdminSettings from "./pages/useradmin/UserAdminSettings";
 import UserAdminUsers from "./pages/useradmin/UserAdminUsers";
 import UserAdminPlugins from "./pages/useradmin/UserAdminPlugins";
+import UserAdminCrawler from "./pages/useradmin/UserAdminCrawler";
 
 const queryClient = new QueryClient();
 
@@ -58,6 +60,7 @@ const App = () => (
                       <Route path="prompts" element={<SuperadminPrompts />} />
                       <Route path="users" element={<SuperadminUsers />} />
                       <Route path="plugins" element={<SuperadminPlugins />} />
+                      <Route path="crawler" element={<SuperadminCrawler />} />
                       <Route path="chat" element={<SuperadminChat />} />
                       <Route path="activity" element={<SuperadminActivity />} />
                       <Route path="settings" element={<SuperadminSettings />} />
@@ -78,6 +81,7 @@ const App = () => (
                       />
                       <Route path="users" element={<UserAdminUsers />} />
                       <Route path="plugins" element={<UserAdminPlugins />} />
+                      <Route path="crawler" element={<UserAdminCrawler />} />
                       <Route path="knowledge-base" element={<UserAdminDashboard />} />
                       <Route path="chat" element={<UserAdminChat />} />
                       <Route path="settings" element={<UserAdminSettings />} />
@@ -113,4 +117,3 @@ const App = () => (
 );
 
 export default App;
- 

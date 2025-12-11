@@ -170,6 +170,35 @@ class VectorStore:
             logger.info(f"Deleted {len(to_delete)} chunks for file {file_id} from memory")
             return len(to_delete)
 
+    def delete_documents_by_crawl_job_id(self, crawl_job_id: str) -> int:
+        """Delete all document chunks belonging to a specific crawl job"""
+        if self.client:
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            # Delete all points with matching crawl_job_id in payload
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=Filter(
+                    must=[
+                        FieldCondition(
+                            key="crawl_job_id",
+                            match=MatchValue(value=crawl_job_id)
+                        )
+                    ]
+                )
+            )
+            logger.info(f"All chunks for crawl job {crawl_job_id} deleted from Qdrant")
+            return -1  # Qdrant doesn't return count
+        else:
+            # For fallback storage, delete all documents with matching crawl_job_id
+            to_delete = []
+            for doc_id, doc_data in self.documents.items():
+                if doc_data["payload"].get("crawl_job_id") == crawl_job_id:
+                    to_delete.append(doc_id)
+            for doc_id in to_delete:
+                del self.documents[doc_id]
+            logger.info(f"Deleted {len(to_delete)} chunks for crawl job {crawl_job_id} from memory")
+            return len(to_delete)
+
     def search(self, query: str, top_k: int = 5, collection_id: Optional[str] = None):
         query_vector = self.embeddings.encode(query)
         

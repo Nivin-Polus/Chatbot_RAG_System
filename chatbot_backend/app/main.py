@@ -20,6 +20,7 @@ from app.api import (
     routes_websites,
     routes_vector_databases,
     routes_plugins,
+    routes_crawler,
 )
 from app.core.database import init_database, create_database_if_not_exists, get_db
 from app.config import settings
@@ -78,6 +79,7 @@ api_router.include_router(routes_vector_databases.router, prefix="/vector-databa
 api_router.include_router(routes_prompts.router, prefix="/prompts", tags=["System Prompts"])
 api_router.include_router(routes_collections.router, tags=["Collections"])
 api_router.include_router(routes_plugins.router, tags=["Plugins"])
+api_router.include_router(routes_crawler.router, prefix="/crawler", tags=["Web Crawler"])
 
 app.include_router(api_router)
 
@@ -106,6 +108,14 @@ async def startup_event():
 
         # Initialize default users if needed
         await _initialize_default_users()
+
+        # Start the crawler scheduler for recurring crawls
+        try:
+            from app.services.crawler_scheduler import start_scheduler
+            start_scheduler()
+            logging.info("✅ Crawler scheduler started")
+        except Exception as e:
+            logging.warning(f"⚠️ Crawler scheduler not started: {e}")
 
         logging.info("✅ Application startup completed successfully")
     except Exception as e:
