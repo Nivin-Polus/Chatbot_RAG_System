@@ -2,7 +2,7 @@
 """Backfill CollectionUser rows for existing collection administrators.
 
 Usage:
-    python scripts/backfill_collection_access.py
+    python scripts/backfill_collection_access.pys
 
 This script assigns the `CollectionUser` role='admin' to any user who has been
 marked as the `admin_user_id` for a collection but does not yet have an entry
