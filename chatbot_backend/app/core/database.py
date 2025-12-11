@@ -62,13 +62,14 @@ def init_database():
         from app.models.file_metadata import FileMetadata
         from app.models.user_file_access import UserFileAccess
         from app.models.query_log import QueryLog
-        from app.models.chat_tracking import ChatSession, ChatQuery
+        from app.models.chat_tracking import ChatSession, ChatQuery, ChatMessageHistory
         from app.models.collection import Collection, CollectionUser
         from app.models.plugin_integration import PluginIntegration
         from app.models.system_prompt import SystemPrompt
         from app.models.vector_database import VectorDatabase
         from app.models.activity_log import ActivityLog
         from app.models.activity_stats import ActivityStats
+        from app.models.crawler_job import CrawlerJob
         
         # Configure mappers to ensure relationships are properly set up
         from sqlalchemy.orm import configure_mappers

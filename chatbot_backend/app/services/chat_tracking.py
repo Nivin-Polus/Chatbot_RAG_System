@@ -1,7 +1,8 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from app.models.chat_tracking import ChatSession, ChatQuery
-from typing import Optional, List, Dict
+from app.models.chat_tracking import ChatSession, ChatQuery, ChatMessageHistory
+from typing import Optional, List, Dict, Any
+from datetime import datetime
 import logging
 import time
 
@@ -180,7 +181,7 @@ class ChatTrackingService:
         try:
             session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
             if session:
-                db.delete(session)  # Cascade will delete related queries
+                db.delete(session)  # Cascade will delete related queries and message history
                 db.commit()
                 logger.info(f"Deleted session: {session_id}")
                 return True
@@ -188,5 +189,110 @@ class ChatTrackingService:
             
         except Exception as e:
             logger.error(f"Failed to delete session {session_id}: {str(e)}")
+            db.rollback()
+            return False
+    
+    def save_chat_history(self, session_id: str, user_id: str, collection_id: Optional[str], 
+                         messages: List[Dict[str, Any]], db: Session) -> bool:
+        """Save full chat history (all messages) for a session"""
+        try:
+            try:
+                from dateutil import parser as dateutil_parser
+            except ImportError:
+                # Fallback to datetime if dateutil not available
+                dateutil_parser = None
+            
+            # Ensure session exists
+            session = self.create_or_get_session(session_id, user_id, collection_id, db)
+            
+            # Delete existing message history for this session
+            db.query(ChatMessageHistory).filter(
+                ChatMessageHistory.session_id == session_id
+            ).delete()
+            
+            # Insert new messages with preserved timestamps and order
+            for index, msg in enumerate(messages):
+                # Parse timestamp from message
+                msg_timestamp = None
+                if msg.get("timestamp"):
+                    try:
+                        if isinstance(msg["timestamp"], str):
+                            if dateutil_parser:
+                                msg_timestamp = dateutil_parser.parse(msg["timestamp"])
+                            else:
+                                # Fallback to datetime.fromisoformat for ISO strings
+                                msg_timestamp = datetime.fromisoformat(msg["timestamp"].replace('Z', '+00:00'))
+                        elif isinstance(msg["timestamp"], datetime):
+                            msg_timestamp = msg["timestamp"]
+                    except Exception as e:
+                        logger.warning(f"Could not parse timestamp for message {index}: {e}, using current time")
+                        msg_timestamp = datetime.utcnow()
+                
+                # Use current time as fallback
+                if not msg_timestamp:
+                    msg_timestamp = datetime.utcnow()
+                
+                message = ChatMessageHistory(
+                    original_message_id=msg.get("id"),  # Preserve original message ID
+                    session_id=session_id,
+                    collection_id=collection_id,
+                    user_id=user_id,
+                    role=msg.get("role", "user"),
+                    content=msg.get("content", ""),
+                    sources=msg.get("sources"),
+                    message_timestamp=msg_timestamp,  # Use original timestamp
+                    message_order=index  # Store order in conversation
+                )
+                db.add(message)
+            
+            # Update session timestamp
+            session.updated_at = datetime.utcnow()
+            
+            db.commit()
+            logger.info(f"Saved {len(messages)} messages for session {session_id} in correct order")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to save chat history for session {session_id}: {str(e)}")
+            db.rollback()
+            return False
+    
+    def get_chat_history(self, session_id: str, db: Session) -> List[Dict[str, Any]]:
+        """Get full chat history (all messages) for a session in correct order"""
+        try:
+            # Order by message_order first (if available), then by message_timestamp, then by created_at
+            # Use COALESCE to handle NULL values in ordering
+            from sqlalchemy import case
+            
+            messages = db.query(ChatMessageHistory).filter(
+                ChatMessageHistory.session_id == session_id
+            ).order_by(
+                case(
+                    (ChatMessageHistory.message_order.is_(None), 999999),
+                    else_=ChatMessageHistory.message_order
+                ).asc(),
+                ChatMessageHistory.message_timestamp.asc(),
+                ChatMessageHistory.created_at.asc()
+            ).all()
+            
+            return [msg.to_dict() for msg in messages]
+            
+        except Exception as e:
+            logger.error(f"Failed to get chat history for session {session_id}: {str(e)}")
+            return []
+    
+    def clear_chat_history(self, session_id: str, db: Session) -> bool:
+        """Clear chat history for a session (delete all messages)"""
+        try:
+            deleted = db.query(ChatMessageHistory).filter(
+                ChatMessageHistory.session_id == session_id
+            ).delete()
+            
+            db.commit()
+            logger.info(f"Cleared {deleted} messages for session {session_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to clear chat history for session {session_id}: {str(e)}")
             db.rollback()
             return False

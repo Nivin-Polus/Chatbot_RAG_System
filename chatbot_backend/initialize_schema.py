@@ -145,6 +145,232 @@ def _perform_schema_migrations(engine) -> None:
 
     # Ensure plugin integrations table exists (created via ORM metadata). Nothing else yet.
 
+    # Add crawler_jobs table if missing
+    if not inspector.has_table("crawler_jobs"):
+        LOGGER.info("Creating 'crawler_jobs' table...")
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE crawler_jobs (
+                    job_id VARCHAR(36) PRIMARY KEY,
+                    collection_id VARCHAR(36) NOT NULL,
+                    user_id VARCHAR(36) NOT NULL,
+                    target_url VARCHAR(2048) NOT NULL,
+                    status VARCHAR(50) NOT NULL DEFAULT 'pending',
+                    pages_discovered INT DEFAULT 0,
+                    pages_crawled INT DEFAULT 0,
+                    pages_skipped INT DEFAULT 0,
+                    pages_failed INT DEFAULT 0,
+                    chunks_created INT DEFAULT 0,
+                    total_characters INT DEFAULT 0,
+                    content_hash VARCHAR(64) NULL,
+                    chunks_added INT DEFAULT 0,
+                    chunks_updated INT DEFAULT 0,
+                    chunks_deleted INT DEFAULT 0,
+                    current_url VARCHAR(2048) NULL,
+                    config JSON NULL,
+                    is_scheduled TINYINT(1) DEFAULT 0,
+                    schedule_interval_hours FLOAT NULL,
+                    next_run_at DATETIME NULL,
+                    last_successful_run DATETIME NULL,
+                    run_count INT DEFAULT 0,
+                    error_message TEXT NULL,
+                    consecutive_failures INT DEFAULT 0,
+                    crawled_urls JSON NULL,
+                    failed_urls JSON NULL,
+                    skipped_urls JSON NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    started_at DATETIME NULL,
+                    completed_at DATETIME NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX idx_crawler_jobs_collection (collection_id),
+                    INDEX idx_crawler_jobs_user (user_id),
+                    INDEX idx_crawler_jobs_status (status),
+                    INDEX idx_crawler_jobs_scheduled (is_scheduled),
+                    INDEX idx_crawler_jobs_next_run (next_run_at),
+                    FOREIGN KEY (collection_id) REFERENCES collections(collection_id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                )
+            """))
+            conn.commit()
+        LOGGER.info("Created 'crawler_jobs' table")
+    else:
+        # Migrate existing crawler_jobs table to add missing columns
+        _migrate_crawler_jobs_table(engine, inspector)
+
+    # Add chat_message_history table if missing
+    if not inspector.has_table("chat_message_history"):
+        LOGGER.info("Creating 'chat_message_history' table...")
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE chat_message_history (
+                    message_id VARCHAR(36) PRIMARY KEY,
+                    original_message_id VARCHAR(100) NULL,
+                    session_id VARCHAR(36) NOT NULL,
+                    collection_id VARCHAR(50) NULL,
+                    user_id VARCHAR(36) NOT NULL,
+                    role VARCHAR(20) NOT NULL,
+                    content TEXT NOT NULL,
+                    sources JSON NULL,
+                    message_timestamp DATETIME NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    message_order INT NULL,
+                    INDEX idx_chat_message_history_session (session_id),
+                    INDEX idx_chat_message_history_collection (collection_id),
+                    INDEX idx_chat_message_history_user (user_id),
+                    INDEX idx_chat_message_history_created (created_at),
+                    INDEX idx_chat_message_history_timestamp (message_timestamp),
+                    INDEX idx_chat_message_history_order (message_order),
+                    INDEX idx_chat_message_history_original_id (original_message_id),
+                    FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id) ON DELETE CASCADE,
+                    FOREIGN KEY (collection_id) REFERENCES collections(collection_id) ON DELETE SET NULL,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                )
+            """))
+            conn.commit()
+        LOGGER.info("Created 'chat_message_history' table")
+    else:
+        # Migrate existing chat_message_history table to add missing columns
+        _migrate_chat_message_history_table(engine, inspector)
+
+
+def _migrate_chat_message_history_table(engine, inspector):
+    """Migrate existing chat_message_history table to add missing columns"""
+    try:
+        if not inspector.has_table("chat_message_history"):
+            return
+        
+        existing_columns = {col["name"] for col in inspector.get_columns("chat_message_history")}
+        alterations = []
+        
+        # Add missing columns
+        if "original_message_id" not in existing_columns:
+            alterations.append("ADD COLUMN original_message_id VARCHAR(100) NULL")
+        if "message_timestamp" not in existing_columns:
+            alterations.append("ADD COLUMN message_timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP")
+        if "message_order" not in existing_columns:
+            alterations.append("ADD COLUMN message_order INT NULL")
+        
+        if alterations:
+            LOGGER.info("Migrating 'chat_message_history' table: adding missing columns...")
+            alter_statement = "ALTER TABLE chat_message_history " + ", ".join(alterations)
+            with engine.connect() as conn:
+                conn.execute(text(alter_statement))
+                conn.commit()
+            LOGGER.info(f"✅ Added {len(alterations)} columns to 'chat_message_history' table")
+        
+        # Add missing indexes
+        existing_indexes = {idx["name"] for idx in inspector.get_indexes("chat_message_history")}
+        index_additions = []
+        
+        if "idx_chat_message_history_timestamp" not in existing_indexes:
+            try:
+                with engine.connect() as conn:
+                    conn.execute(text("CREATE INDEX idx_chat_message_history_timestamp ON chat_message_history(message_timestamp)"))
+                    conn.commit()
+                index_additions.append("idx_chat_message_history_timestamp")
+            except Exception as e:
+                LOGGER.warning(f"Could not create index idx_chat_message_history_timestamp: {e}")
+        
+        if "idx_chat_message_history_order" not in existing_indexes:
+            try:
+                with engine.connect() as conn:
+                    conn.execute(text("CREATE INDEX idx_chat_message_history_order ON chat_message_history(message_order)"))
+                    conn.commit()
+                index_additions.append("idx_chat_message_history_order")
+            except Exception as e:
+                LOGGER.warning(f"Could not create index idx_chat_message_history_order: {e}")
+        
+        if "idx_chat_message_history_original_id" not in existing_indexes:
+            try:
+                with engine.connect() as conn:
+                    conn.execute(text("CREATE INDEX idx_chat_message_history_original_id ON chat_message_history(original_message_id)"))
+                    conn.commit()
+                index_additions.append("idx_chat_message_history_original_id")
+            except Exception as e:
+                LOGGER.warning(f"Could not create index idx_chat_message_history_original_id: {e}")
+        
+        if index_additions:
+            LOGGER.info(f"✅ Added {len(index_additions)} indexes to 'chat_message_history' table")
+            
+    except Exception as e:
+        LOGGER.error(f"Failed to migrate chat_message_history table: {e}")
+        # Don't raise - allow script to continue
+
+
+def _migrate_crawler_jobs_table(engine, inspector):
+    """Migrate existing crawler_jobs table to add missing columns"""
+    try:
+        if not inspector.has_table("crawler_jobs"):
+            return
+        
+        existing_columns = {col["name"] for col in inspector.get_columns("crawler_jobs")}
+        alterations = []
+        
+        # Add missing columns
+        if "content_hash" not in existing_columns:
+            alterations.append("ADD COLUMN content_hash VARCHAR(64) NULL")
+        if "chunks_added" not in existing_columns:
+            alterations.append("ADD COLUMN chunks_added INT DEFAULT 0")
+        if "chunks_updated" not in existing_columns:
+            alterations.append("ADD COLUMN chunks_updated INT DEFAULT 0")
+        if "chunks_deleted" not in existing_columns:
+            alterations.append("ADD COLUMN chunks_deleted INT DEFAULT 0")
+        if "is_scheduled" not in existing_columns:
+            alterations.append("ADD COLUMN is_scheduled TINYINT(1) DEFAULT 0")
+        if "schedule_interval_hours" not in existing_columns:
+            alterations.append("ADD COLUMN schedule_interval_hours FLOAT NULL")
+        if "next_run_at" not in existing_columns:
+            alterations.append("ADD COLUMN next_run_at DATETIME NULL")
+        if "last_successful_run" not in existing_columns:
+            alterations.append("ADD COLUMN last_successful_run DATETIME NULL")
+        if "run_count" not in existing_columns:
+            alterations.append("ADD COLUMN run_count INT DEFAULT 0")
+        if "consecutive_failures" not in existing_columns:
+            alterations.append("ADD COLUMN consecutive_failures INT DEFAULT 0")
+        if "crawled_urls" not in existing_columns:
+            alterations.append("ADD COLUMN crawled_urls JSON NULL")
+        if "failed_urls" not in existing_columns:
+            alterations.append("ADD COLUMN failed_urls JSON NULL")
+        if "skipped_urls" not in existing_columns:
+            alterations.append("ADD COLUMN skipped_urls JSON NULL")
+        
+        if alterations:
+            LOGGER.info("Migrating 'crawler_jobs' table: adding missing columns...")
+            alter_statement = "ALTER TABLE crawler_jobs " + ", ".join(alterations)
+            with engine.connect() as conn:
+                conn.execute(text(alter_statement))
+                conn.commit()
+            LOGGER.info(f"✅ Added {len(alterations)} columns to 'crawler_jobs' table")
+        
+        # Add missing indexes
+        existing_indexes = {idx["name"] for idx in inspector.get_indexes("crawler_jobs")}
+        index_additions = []
+        
+        if "idx_crawler_jobs_scheduled" not in existing_indexes:
+            try:
+                with engine.connect() as conn:
+                    conn.execute(text("CREATE INDEX idx_crawler_jobs_scheduled ON crawler_jobs(is_scheduled)"))
+                    conn.commit()
+                index_additions.append("idx_crawler_jobs_scheduled")
+            except Exception as e:
+                LOGGER.warning(f"Could not create index idx_crawler_jobs_scheduled: {e}")
+        
+        if "idx_crawler_jobs_next_run" not in existing_indexes:
+            try:
+                with engine.connect() as conn:
+                    conn.execute(text("CREATE INDEX idx_crawler_jobs_next_run ON crawler_jobs(next_run_at)"))
+                    conn.commit()
+                index_additions.append("idx_crawler_jobs_next_run")
+            except Exception as e:
+                LOGGER.warning(f"Could not create index idx_crawler_jobs_next_run: {e}")
+        
+        if index_additions:
+            LOGGER.info(f"✅ Added {len(index_additions)} indexes to 'crawler_jobs' table")
+            
+    except Exception as e:
+        LOGGER.error(f"Failed to migrate crawler_jobs table: {e}")
+        # Don't raise - allow script to continue
+
 
 def _ensure_default_website(db) -> Website:
     website = db.query(Website).filter_by(domain=DEFAULT_WEBSITE_DOMAIN).first()

@@ -63,6 +63,62 @@ class PublicChatRequest(ChatRequest):
     website_url: str
 
 
+def _is_generic_query(question: str) -> bool:
+    """Check if the question is a generic greeting or small talk."""
+    if not question:
+        return False
+    
+    normalized = question.strip().lower()
+    # Remove punctuation for better matching
+    normalized = normalized.rstrip("!?.,")
+    
+    small_talk_phrases = {
+        "hi", "hello", "hey", "hi there", "hello there",
+        "good morning", "good evening", "good afternoon",
+        "how are you", "how are you doing", "what's up", "whats up",
+        "thanks", "thank you", "bye", "goodbye", "see you",
+        "ok", "okay", "cool", "nice", "great",
+    }
+    
+    return normalized in small_talk_phrases
+
+
+def _is_generic_response(answer: str) -> bool:
+    """Check if the answer indicates inability to help or is a generic greeting response."""
+    if not answer:
+        return False
+    
+    normalized = answer.strip().lower()
+    
+    # Patterns indicating "I don't know" type responses
+    generic_patterns = [
+        "i wasn't able to retrieve",
+        "i wasn't able to find",
+        "i couldn't find",
+        "i don't have information",
+        "i don't have enough information",
+        "i cannot find",
+        "unfortunately, i don't",
+        "unfortunately i don't",
+        "i'm not able to",
+        "i am not able to",
+        "i'm unable to",
+        "i am unable to",
+        "no relevant information",
+        "please refine your question",
+        "could you clarify",
+        "could you provide more",
+        "i'm here to help with questions about your knowledge base",
+        "let me know what you'd like to learn",
+    ]
+    
+    for pattern in generic_patterns:
+        if pattern in normalized:
+            return True
+    
+    return False
+
+
 def _process_chat_request(
     *,
     question: str,
@@ -151,7 +207,8 @@ def _process_chat_request(
         if cached_answer:
             answer_text = cached_answer.decode("utf-8")
             logger.info(f"[CACHE HIT] User: {identity_username}, Question: {question}")
-            return ChatResponse(answer=answer_text, session_id=effective_session_id, sources=[])
+            is_generic = _is_generic_query(question) or _is_generic_response(answer_text)
+            return ChatResponse(answer=answer_text, session_id=effective_session_id, is_generic=is_generic, sources=[])
 
     logger.info(f"[RAG QUERY] User: {identity_username}, Question: {question}, top_k: {top_k}")
 
@@ -173,6 +230,9 @@ def _process_chat_request(
         file_id = chunk.get("file_id")
         file_name = chunk.get("file_name") or "Unknown File"
         chunk_index = chunk.get("chunk_index")
+        # Get source type and URL for web crawl sources
+        source_type = chunk.get("source_type", "file")
+        url = chunk.get("url") or chunk.get("canonical_url", "")
 
         record_key = file_id or file_name
         if not record_key:
@@ -184,6 +244,8 @@ def _process_chat_request(
                 "file_name": file_name,
                 "file_id": file_id,
                 "chunk_indices": [],
+                "source_type": source_type,
+                "url": url,
             }
             source_records[record_key] = record
 
@@ -199,6 +261,11 @@ def _process_chat_request(
             payload["file_id"] = record["file_id"]
         if record.get("chunk_indices"):
             payload["chunk_indices"] = record["chunk_indices"]
+        # Add source_type and url for web crawl sources
+        if record.get("source_type"):
+            payload["source_type"] = record["source_type"]
+        if record.get("url"):
+            payload["url"] = record["url"]
         sources_payload.append(payload)
 
     if not chunks:
@@ -206,6 +273,7 @@ def _process_chat_request(
         return ChatResponse(
             answer="I wasn't able to retrieve a confident answer, please refine your question.",
             session_id=effective_session_id,
+            is_generic=True,
             sources=[],
         )
 
@@ -230,6 +298,7 @@ def _process_chat_request(
         return ChatResponse(
             answer="I encountered an error while processing your question. Please try again.",
             session_id=effective_session_id,
+            is_generic=True,
             sources=sources_payload,
         )
 
@@ -307,7 +376,10 @@ def _process_chat_request(
     except Exception as e:
         logger.error(f"Failed to log chat history to file: {str(e)}")
 
-    return ChatResponse(answer=answer_text, session_id=effective_session_id, sources=sources_payload)
+    # Determine if response is generic (greeting or "I don't know" type)
+    is_generic = _is_generic_query(question) or _is_generic_response(answer_text)
+    
+    return ChatResponse(answer=answer_text, session_id=effective_session_id, is_generic=is_generic, sources=sources_payload)
 
 
 # Chat endpoint
@@ -491,3 +563,151 @@ async def delete_session(session_id: str, current_user: dict = Depends(get_curre
         return {"message": f"Session {session_id} deleted successfully"}
     else:
         raise HTTPException(status_code=404, detail="Session not found")
+
+
+@router.post("/history/save")
+async def save_chat_history(
+    request: Dict,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Save full chat history (all messages) for a session"""
+    from app.models.chat_tracking import ChatSession
+    from app.models.collection import Collection, CollectionUser
+    
+    session_id = request.get("session_id")
+    collection_id = request.get("collection_id")
+    messages = request.get("messages", [])
+    
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    
+    if not isinstance(messages, list):
+        raise HTTPException(status_code=400, detail="messages must be a list")
+    
+    user_id = current_user.get("user_id")
+    user_role = current_user.get("role")
+    
+    # Check permissions
+    if user_role != "super_admin":
+        # Verify session belongs to user or user has access to collection
+        session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+        if session:
+            if session.user_id != user_id:
+                raise HTTPException(status_code=403, detail="Access denied")
+            
+            if collection_id and session.collection_id != collection_id:
+                # Verify user has access to the collection
+                if user_role == "user_admin":
+                    collection = db.query(Collection).filter(
+                        Collection.collection_id == collection_id,
+                        Collection.admin_user_id == user_id
+                    ).first()
+                    if not collection:
+                        raise HTTPException(status_code=403, detail="Access denied to collection")
+                else:
+                    membership = db.query(CollectionUser).filter(
+                        CollectionUser.collection_id == collection_id,
+                        CollectionUser.user_id == user_id
+                    ).first()
+                    if not membership:
+                        raise HTTPException(status_code=403, detail="Access denied to collection")
+    
+    success = chat_service.save_chat_history(session_id, user_id, collection_id, messages, db)
+    if success:
+        return {"message": "Chat history saved successfully", "session_id": session_id}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to save chat history")
+
+
+@router.get("/history/{session_id}")
+async def get_chat_history(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get full chat history (all messages) for a session"""
+    from app.models.chat_tracking import ChatSession
+    from app.models.collection import Collection, CollectionUser
+    
+    # Check if session exists
+    session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    user_id = current_user.get("user_id")
+    user_role = current_user.get("role")
+    
+    # Check permissions
+    if user_role != "super_admin":
+        # Check if user owns the session
+        if session.user_id != user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Check if user has access to the collection
+        if session.collection_id:
+            if user_role == "user_admin":
+                collection = db.query(Collection).filter(
+                    Collection.collection_id == session.collection_id,
+                    Collection.admin_user_id == user_id
+                ).first()
+                if not collection:
+                    raise HTTPException(status_code=403, detail="Access denied to collection")
+            else:
+                membership = db.query(CollectionUser).filter(
+                    CollectionUser.collection_id == session.collection_id,
+                    CollectionUser.user_id == user_id
+                ).first()
+                if not membership:
+                    raise HTTPException(status_code=403, detail="Access denied to collection")
+    
+    messages = chat_service.get_chat_history(session_id, db)
+    return {"session_id": session_id, "messages": messages}
+
+
+@router.delete("/history/{session_id}")
+async def clear_chat_history(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Clear chat history for a session (delete all messages)"""
+    from app.models.chat_tracking import ChatSession
+    from app.models.collection import Collection, CollectionUser
+    
+    # Check if session exists
+    session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    user_id = current_user.get("user_id")
+    user_role = current_user.get("role")
+    
+    # Check permissions
+    if user_role != "super_admin":
+        # Check if user owns the session
+        if session.user_id != user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Check if user has access to the collection
+        if session.collection_id:
+            if user_role == "user_admin":
+                collection = db.query(Collection).filter(
+                    Collection.collection_id == session.collection_id,
+                    Collection.admin_user_id == user_id
+                ).first()
+                if not collection:
+                    raise HTTPException(status_code=403, detail="Access denied to collection")
+            else:
+                membership = db.query(CollectionUser).filter(
+                    CollectionUser.collection_id == session.collection_id,
+                    CollectionUser.user_id == user_id
+                ).first()
+                if not membership:
+                    raise HTTPException(status_code=403, detail="Access denied to collection")
+    
+    success = chat_service.clear_chat_history(session_id, db)
+    if success:
+        return {"message": "Chat history cleared successfully", "session_id": session_id}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to clear chat history")

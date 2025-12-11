@@ -104,6 +104,8 @@ export interface ChatSource {
   file_name: string;
   file_id?: string;
   chunk_indices?: number[];
+  source_type?: 'file' | 'web_crawl';
+  url?: string;
 }
 
 export interface ChatMessage {

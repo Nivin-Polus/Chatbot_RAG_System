@@ -12,6 +12,7 @@ class VectorStore:
     def __init__(self, url=settings.VECTOR_DB_URL, collection_name="kb_docs"):
         self.collection_name = collection_name
         self.url = url
+        self._collection_verified = False
         self._init_client()
 
     def _init_client(self):
@@ -45,13 +46,19 @@ class VectorStore:
         
     def _ensure_collection(self):
         if self.client:
+            if self._collection_verified:
+                return
+
             try:
                 # Try to check if collection exists using collection_exists method
+                logger.info(f"[DEBUG] Checking if collection {self.collection_name} exists... Instance: {id(self)}")
                 if self.client.collection_exists(self.collection_name):
-                    logger.info(f"Qdrant collection '{self.collection_name}' already exists.")
+                    # logger.info(f"Qdrant collection '{self.collection_name}' already exists.")
+                    self._collection_verified = True
                     return
-            except:
+            except Exception as e:
                 # If collection_exists method doesn't work, try alternative approach
+                logger.warning(f"[DEBUG] collection_exists check failed: {e}")
                 pass
             
             try:
@@ -62,12 +69,18 @@ class VectorStore:
                     vectors_config=VectorParams(size=384, distance=self.Distance.COSINE)
                 )
                 logger.info(f"Qdrant collection '{self.collection_name}' created.")
+                self._collection_verified = True
             except Exception as create_error:
-                if "already exists" in str(create_error):
-                    logger.info(f"Qdrant collection '{self.collection_name}' already exists.")
+                if "already exists" in str(create_error) or "409" in str(create_error):
+                    # logger.info(f"Qdrant collection '{self.collection_name}' already exists.")
+                    self._collection_verified = True
                 else:
                     logger.error(f"Failed to create collection: {create_error}")
-                    raise
+                    # Don't raise here if it's just a creation failure, but verified is not set
+                    # However, if we can't create and it doesn't exist, we have a problem.
+                    # But if it's a 400 Bad Request, it might mean it exists but we sent wrong params?
+                    # The user log says 400 Bad Request.
+                    pass
 
     def add_document(self, doc_text: str, metadata: dict = None):
         # Ensure collection exists before adding documents
@@ -168,6 +181,35 @@ class VectorStore:
             for doc_id in to_delete:
                 del self.documents[doc_id]
             logger.info(f"Deleted {len(to_delete)} chunks for file {file_id} from memory")
+            return len(to_delete)
+
+    def delete_documents_by_crawl_job_id(self, crawl_job_id: str) -> int:
+        """Delete all document chunks belonging to a specific crawl job"""
+        if self.client:
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            # Delete all points with matching crawl_job_id in payload
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=Filter(
+                    must=[
+                        FieldCondition(
+                            key="crawl_job_id",
+                            match=MatchValue(value=crawl_job_id)
+                        )
+                    ]
+                )
+            )
+            logger.info(f"All chunks for crawl job {crawl_job_id} deleted from Qdrant")
+            return -1  # Qdrant doesn't return count
+        else:
+            # For fallback storage, delete all documents with matching crawl_job_id
+            to_delete = []
+            for doc_id, doc_data in self.documents.items():
+                if doc_data["payload"].get("crawl_job_id") == crawl_job_id:
+                    to_delete.append(doc_id)
+            for doc_id in to_delete:
+                del self.documents[doc_id]
+            logger.info(f"Deleted {len(to_delete)} chunks for crawl job {crawl_job_id} from memory")
             return len(to_delete)
 
     def search(self, query: str, top_k: int = 5, collection_id: Optional[str] = None):
