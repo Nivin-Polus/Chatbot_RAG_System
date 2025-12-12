@@ -389,32 +389,55 @@ export default function SuperadminChat() {
 
       const dataResponse = data ?? {};
 
-      const assistantContent =
+      let assistantContent =
         dataResponse.response || dataResponse.answer || dataResponse.content || 'I was unable to generate a response.';
 
-      const sources: ChatSource[] | undefined = Array.isArray(dataResponse.sources)
-        ? dataResponse.sources
-          .map((item: any) => {
-            if (!item || typeof item !== 'object') {
-              return null;
-            }
-            const fileName = typeof item.file_name === 'string' ? item.file_name : undefined;
-            const fileId = typeof item.file_id === 'string' ? item.file_id : undefined;
-            const sourceType = typeof item.source_type === 'string' ? item.source_type as 'file' | 'web_crawl' : undefined;
-            const url = typeof item.url === 'string' ? item.url : undefined;
+      // Check if response is marked as generic (no relevant info found) - if so, don't show sources
+      const isGeneric = Boolean(dataResponse.is_generic);
 
-            if (!fileName) {
-              return null;
-            }
-            return {
-              file_name: fileName,
-              file_id: fileId,
-              source_type: sourceType,
-              url: url,
-            } satisfies ChatSource;
-          })
-          .filter((value): value is ChatSource => value !== null)
-        : undefined;
+      // Strip embedded sources section from answer text when generic
+      // Or limit to max 4 sources when not generic
+      // Match pattern: **Sources:** followed by lines starting with - [ ]( )
+      const sourcesMatch = assistantContent.match(/(\n*\*{0,2}Sources?\*{0,2}:?\s*\n)((?:\s*-\s*\[[^\]]*\]\([^)]*\)\s*\n?)+)/i);
+      if (sourcesMatch) {
+        if (isGeneric) {
+          // Remove entire sources section for generic responses
+          assistantContent = assistantContent.replace(sourcesMatch[0], '').trim();
+        } else {
+          // Limit to max 4 sources
+          const sourcesHeader = sourcesMatch[1];
+          const sourceLines = sourcesMatch[2].split('\n').filter((line: string) => line.trim().startsWith('-'));
+          const limitedSourceLines = sourceLines.slice(0, 4);
+          assistantContent = assistantContent.replace(sourcesMatch[0], sourcesHeader + limitedSourceLines.join('\n')).trim();
+        }
+      }
+
+      const sources: ChatSource[] | undefined = isGeneric
+        ? undefined
+        : Array.isArray(dataResponse.sources)
+          ? dataResponse.sources
+            .map((item: any) => {
+              if (!item || typeof item !== 'object') {
+                return null;
+              }
+              const fileName = typeof item.file_name === 'string' ? item.file_name : undefined;
+              const fileId = typeof item.file_id === 'string' ? item.file_id : undefined;
+              const sourceType = typeof item.source_type === 'string' ? item.source_type as 'file' | 'web_crawl' : undefined;
+              const url = typeof item.url === 'string' ? item.url : undefined;
+
+              if (!fileName) {
+                return null;
+              }
+              return {
+                file_name: fileName,
+                file_id: fileId,
+                source_type: sourceType,
+                url: url,
+              } satisfies ChatSource;
+            })
+            .filter((value): value is ChatSource => value !== null)
+            .slice(0, 4) // Limit to 4 most relevant sources
+          : undefined;
 
       await streamAssistantResponse(assistantContent, sources);
       setIsLoading(false);

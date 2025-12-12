@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, Tuple
 
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
@@ -123,46 +123,52 @@ class ActivityTracker:
 
     def get_recent_activities(self, limit: int = 100, offset: int = 0, since_hours: Optional[int] = None, 
                              activity_type: Optional[str] = None, username: Optional[str] = None, 
-                             collection_id: Optional[str] = None) -> List[Dict]:
-        """Return the most recent activities, optionally filtered by a time window and other criteria."""
+                             collection_id: Optional[str] = None) -> Tuple[List[Dict], int]:
+        """Return the most recent activities, optionally filtered by a time window and other criteria.
+        Returns tuple of (activities_list, total_count)."""
         session = self._get_session()
         try:
-            query = session.query(ActivityLog).order_by(desc(ActivityLog.created_at))
+            # Build base query for counting and fetching
+            base_query = session.query(ActivityLog)
 
             # Apply time filter
             if since_hours is not None and since_hours > 0:
                 cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
-                query = query.filter(ActivityLog.created_at >= cutoff)
+                base_query = base_query.filter(ActivityLog.created_at >= cutoff)
 
             # Apply activity type filter
             if activity_type:
-                query = query.filter(ActivityLog.activity_type == activity_type)
+                base_query = base_query.filter(ActivityLog.activity_type == activity_type)
 
             # Apply username filter
             if username:
-                query = query.filter(ActivityLog.username == username)
+                base_query = base_query.filter(ActivityLog.username == username)
 
-            # Apply collection filter by checking details field
+            # For collection_id, we need to filter by JSON field
+            # Since we can't efficiently filter JSON in SQL, we need to fetch and filter in Python
             if collection_id:
-                # We need to filter by collection_id in the details JSON field
-                # This is a bit tricky with SQLAlchemy, so we'll do it in Python after fetching
-                pass
-
-            # Apply pagination
-            query = query.offset(offset).limit(limit)
-            
-            records = query.all()
-            
-            # Post-filter by collection_id if needed
-            if collection_id:
+                # Get all matching records (we need to fetch all to filter properly)
+                # This is less efficient but necessary for accurate filtering
+                all_records = base_query.order_by(desc(ActivityLog.created_at)).all()
+                
+                # Filter by collection_id
                 filtered_records = []
-                for record in records:
+                for record in all_records:
                     details = record._safe_json_load(record.details) or {}
                     if details.get('collection_id') == collection_id or details.get('collection_name') == collection_id:
                         filtered_records.append(record)
-                records = filtered_records
+                
+                total_count = len(filtered_records)
+                
+                # Apply pagination after filtering
+                paginated_records = filtered_records[offset:offset + limit]
+            else:
+                # No collection filter - can use efficient database pagination
+                total_count = base_query.count()
+                query = base_query.order_by(desc(ActivityLog.created_at)).offset(offset).limit(limit)
+                paginated_records = query.all()
             
-            return [activity.to_dict() for activity in records]
+            return ([activity.to_dict() for activity in paginated_records], total_count)
         finally:
             session.close()
 

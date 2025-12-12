@@ -97,6 +97,9 @@ def _is_generic_response(answer: str) -> bool:
         "i couldn't find",
         "i don't have information",
         "i don't have enough information",
+        "i don't have any information",
+        "i do not have any information",
+        "i do not have information",
         "i cannot find",
         "unfortunately, i don't",
         "unfortunately i don't",
@@ -110,6 +113,22 @@ def _is_generic_response(answer: str) -> bool:
         "could you provide more",
         "i'm here to help with questions about your knowledge base",
         "let me know what you'd like to learn",
+        # Patterns for "no information in context" responses
+        "the provided context does not contain",
+        "does not contain any information",
+        "do not have enough details",
+        "do not have enough context",
+        "without any relevant information",
+        "there are no sources that discuss",
+        "i do not have enough details to provide",
+        "my role is to assist based on the provided information",
+        # Apology patterns for inability to answer
+        "i apologize, but i do not have",
+        "i apologize but i do not have",
+        "i apologize, but i don't have",
+        "i apologize but i don't have",
+        "is not relevant to answering",
+        "that is relevant to answering",
     ]
     
     for pattern in generic_patterns:
@@ -378,6 +397,10 @@ def _process_chat_request(
 
     # Determine if response is generic (greeting or "I don't know" type)
     is_generic = _is_generic_query(question) or _is_generic_response(answer_text)
+    
+    # Don't send sources for generic responses
+    if is_generic:
+        sources_payload = []
     
     return ChatResponse(answer=answer_text, session_id=effective_session_id, is_generic=is_generic, sources=sources_payload)
 

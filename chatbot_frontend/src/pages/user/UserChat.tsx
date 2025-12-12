@@ -330,6 +330,7 @@ export default function UserChat() {
             } satisfies ChatSource;
           })
           .filter((value): value is ChatSource => value !== null)
+          .slice(0, 4) // Limit to 4 most relevant sources
         : undefined;
 
       await streamAssistantResponse(assistantContent, sources);

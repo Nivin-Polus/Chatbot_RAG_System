@@ -1,0 +1,16 @@
+{
+    "apiBase": "http://10.199.100.54:8000/rag",
+    "apiBase1": "https://chatbot.polussolutions.com/",
+    "logoUrl": "https://chatbot.polussolutions.com/dist/assets/logo.svg",
+    "logoAlt": "Company Logo",
+    "placeholderLogoUrl": "https://chatbot.polussolutions.com/dist/assets/logo1.svg",
+    "iconsBaseUrl": "https://chatbot.polussolutions.com/dist/assets/icons",
+    "primaryColor": "#4562BB",
+    "secondaryColor": "#02F17C",
+    "primaryGradientDegree": "135deg",
+    "headerTextColor": "#ffffff",
+    "headerTitle": "Leto HR Assistant",
+    "welcomeMessage": "Ask me about the uploaded documents!",
+    "inputPlaceholder": "I'm your HR Assistant..",
+    "placeholderHighlightText": "HR Assistant.."
+}

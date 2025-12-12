@@ -375,6 +375,7 @@ export default function UserAdminChat() {
         detail?: string;
         message?: string;
         error?: string;
+        is_generic?: boolean;
       };
       let data: ChatApiResponse | null = null;
       try {
@@ -445,29 +446,35 @@ export default function UserAdminChat() {
       const assistantContent =
         dataResponse.response || dataResponse.answer || dataResponse.content || 'I was unable to generate a response.';
 
-      const sources: ChatSource[] | undefined = Array.isArray(dataResponse.sources)
-        ? dataResponse.sources
-          .map<ChatSource | null>((item: { file_name?: unknown; file_id?: unknown; source_type?: unknown; url?: unknown } | null | undefined) => {
-            if (!item || typeof item !== 'object') {
-              return null;
-            }
-            const fileName = typeof item.file_name === 'string' ? item.file_name : undefined;
-            const fileId = typeof item.file_id === 'string' ? item.file_id : undefined;
-            const sourceType = typeof item.source_type === 'string' ? item.source_type as 'file' | 'web_crawl' : undefined;
-            const url = typeof item.url === 'string' ? item.url : undefined;
+      // Check if response is marked as generic (no relevant info found) - if so, don't show sources
+      const isGeneric = Boolean(dataResponse.is_generic);
 
-            if (!fileName) {
-              return null;
-            }
-            return {
-              file_name: fileName,
-              file_id: fileId,
-              source_type: sourceType,
-              url: url,
-            } satisfies ChatSource;
-          })
-          .filter((value): value is ChatSource => value !== null)
-        : undefined;
+      const sources: ChatSource[] | undefined = isGeneric
+        ? undefined
+        : Array.isArray(dataResponse.sources)
+          ? dataResponse.sources
+            .map<ChatSource | null>((item: { file_name?: unknown; file_id?: unknown; source_type?: unknown; url?: unknown } | null | undefined) => {
+              if (!item || typeof item !== 'object') {
+                return null;
+              }
+              const fileName = typeof item.file_name === 'string' ? item.file_name : undefined;
+              const fileId = typeof item.file_id === 'string' ? item.file_id : undefined;
+              const sourceType = typeof item.source_type === 'string' ? item.source_type as 'file' | 'web_crawl' : undefined;
+              const url = typeof item.url === 'string' ? item.url : undefined;
+
+              if (!fileName) {
+                return null;
+              }
+              return {
+                file_name: fileName,
+                file_id: fileId,
+                source_type: sourceType,
+                url: url,
+              } satisfies ChatSource;
+            })
+            .filter((value): value is ChatSource => value !== null)
+            .slice(0, 4) // Limit to 4 most relevant sources
+          : undefined;
 
       await streamAssistantResponse(assistantContent, sources);
       setIsLoading(false);

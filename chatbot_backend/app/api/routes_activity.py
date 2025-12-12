@@ -23,7 +23,7 @@ class ActivityLogRequest(BaseModel):
 # ------------------------
 @router.get("/recent")
 async def get_recent_activities(
-    limit: int = Query(100, ge=1, le=200),
+    limit: int = Query(100, ge=1, le=10000),
     offset: int = Query(0, ge=0),
     since_hours: Optional[int] = Query(None, ge=1, le=24 * 180),
     activity_type: Optional[str] = Query(None),
@@ -33,7 +33,7 @@ async def get_recent_activities(
 ):
     """Get recent activities with pagination and filtering support"""
     try:
-        activities = activity_tracker.get_recent_activities(
+        activities, total_count = activity_tracker.get_recent_activities(
             limit=limit, 
             offset=offset,
             since_hours=since_hours,
@@ -43,7 +43,9 @@ async def get_recent_activities(
         )
         return {
             "activities": activities,
-            "count": len(activities)
+            "count": len(activities),
+            "total": total_count,
+            "has_more": (offset + len(activities)) < total_count
         }
     except Exception as e:
         logger.error(f"Failed to get recent activities: {e}")
