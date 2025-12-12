@@ -272,7 +272,8 @@ class CrawlerEngine:
                     async with semaphore:
                         if self._cancelled:
                             return
-                        # Skip limit check if max_pages is 0 (unlimited)
+                        
+                        # Check limit BEFORE processing - atomic check
                         if self.config.max_pages > 0 and self.stats.pages_crawled >= self.config.max_pages:
                             return
                         
@@ -283,13 +284,22 @@ class CrawlerEngine:
                         page.on("download", lambda download: download.cancel())
                         
                         try:
+                            # Check limit again right before processing (double-check for race conditions)
+                            if self.config.max_pages > 0 and self.stats.pages_crawled >= self.config.max_pages:
+                                return
+                            
                             self.stats.current_url = url
                             success = await self._process_page(page, url, depth)
                             
                             if success:
-                                self.stats.pages_crawled += 1
-                                self.consecutive_errors = 0
-                                self._decrease_delay()  # Speed up on success
+                                # Atomically check and increment - only increment if under limit
+                                if self.config.max_pages == 0 or self.stats.pages_crawled < self.config.max_pages:
+                                    self.stats.pages_crawled += 1
+                                    self.consecutive_errors = 0
+                                    self._decrease_delay()  # Speed up on success
+                                else:
+                                    # Limit reached during processing, don't count this page
+                                    logger.debug(f"Skipping page count for {url} - limit reached during processing")
                             else:
                                 self.stats.pages_failed += 1
                                 self.consecutive_errors += 1
@@ -327,12 +337,26 @@ class CrawlerEngine:
                             logger.info("No more URLs to process")
                             break
                     
-                    # Get batch of URLs to process
-                    batch_size = min(max_concurrent * 2, len(self.to_visit))  # Larger batches for efficiency
+                    # Calculate how many pages we can still crawl
+                    remaining_pages = float('inf')
+                    if self.config.max_pages > 0:
+                        remaining_pages = self.config.max_pages - self.stats.pages_crawled
+                        if remaining_pages <= 0:
+                            logger.info(f"Reached max pages limit: {self.config.max_pages}")
+                            break
+                    
+                    # Get batch of URLs to process - limit batch size to remaining pages
+                    max_batch_size = min(max_concurrent * 2, len(self.to_visit))
+                    if self.config.max_pages > 0:
+                        max_batch_size = min(max_batch_size, int(remaining_pages))
+                    
                     batch = []
                     
-                    for _ in range(batch_size):
+                    for _ in range(max_batch_size):
                         if not self.to_visit:
+                            break
+                        # Check limit before adding to batch
+                        if self.config.max_pages > 0 and self.stats.pages_crawled >= self.config.max_pages:
                             break
                         url, depth = self.to_visit.pop(0)
                         if url not in self.visited_urls:

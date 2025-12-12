@@ -36,6 +36,16 @@ import {
   DialogTrigger,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
@@ -103,6 +113,11 @@ export default function SuperadminCrawler() {
   const [scheduleJobId, setScheduleJobId] = useState<string | null>(null);
   const [scheduleInterval, setScheduleInterval] = useState('1440');
   const [isScheduling, setIsScheduling] = useState(false);
+
+  // Delete confirmation state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [jobIdToDelete, setJobIdToDelete] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // URL details dialog state
   const [urlDetailsOpen, setUrlDetailsOpen] = useState(false);
@@ -242,19 +257,19 @@ export default function SuperadminCrawler() {
   };
 
   // Delete a job
-  const handleDeleteJob = async (jobId: string) => {
-    // Confirm deletion since it removes content from knowledge base
-    const confirmed = window.confirm(
-      'Are you sure you want to delete this crawl job?\n\n' +
-      'This will also remove all crawled content from the knowledge base. ' +
-      'This action cannot be undone.'
-    );
+  // Delete a job
+  const handleDeleteJob = (jobId: string) => {
+    setJobIdToDelete(jobId);
+    setDeleteDialogOpen(true);
+  };
 
-    if (!confirmed) return;
+  const confirmDeleteJob = async () => {
+    if (!jobIdToDelete) return;
 
+    setIsDeleting(true);
     try {
       const response = await apiDelete(
-        `${import.meta.env.VITE_API_BASE_URL}/crawler/jobs/${jobId}`,
+        `${import.meta.env.VITE_API_BASE_URL}/crawler/jobs/${jobIdToDelete}`,
         user?.access_token
       );
 
@@ -266,6 +281,10 @@ export default function SuperadminCrawler() {
       }
     } catch (error) {
       toast.error('Failed to delete job');
+    } finally {
+      setIsDeleting(false);
+      setDeleteDialogOpen(false);
+      setJobIdToDelete(null);
     }
   };
 
@@ -827,6 +846,39 @@ export default function SuperadminCrawler() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the crawl job and remove all crawled content
+              from the knowledge base. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+              onClick={(e) => {
+                e.preventDefault();
+                confirmDeleteJob();
+              }}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Schedule Configuration Dialog */}
       <Dialog open={scheduleDialogOpen} onOpenChange={setScheduleDialogOpen}>
