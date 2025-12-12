@@ -13,6 +13,7 @@ import threading
 from sqlalchemy.orm import Session
 
 from app.models.crawler_job import CrawlerJob
+from app.models.user import User
 from app.core.vectorstore import VectorStore
 from app.services.crawler import (
     CrawlConfig,
@@ -20,6 +21,7 @@ from app.services.crawler import (
     CrawlerEngine,
     ContentChunk
 )
+from app.services.activity_tracker import activity_tracker
 
 logger = logging.getLogger("crawler_service")
 
@@ -248,8 +250,33 @@ class CrawlerService:
             with SessionLocal() as session:
                 job = session.query(CrawlerJob).filter(CrawlerJob.job_id == job_id).first()
                 if job:
+                    # Track previous status to detect completion/failure
+                    previous_status = job.status
                     job.update_from_stats(stats)
                     session.commit()
+                    
+                    # Log activity when crawl completes or fails
+                    if stats.status in ("completed", "failed") and previous_status != stats.status:
+                        try:
+                            user = session.query(User).filter(User.user_id == job.user_id).first()
+                            username = user.username if user else "unknown"
+                            
+                            activity_type = "crawl_completed" if stats.status == "completed" else "crawl_failed"
+                            activity_tracker.log_activity(
+                                activity_type=activity_type,
+                                user=username,
+                                details={
+                                    "job_id": job_id,
+                                    "target_url": job.target_url,
+                                    "collection_id": job.collection_id,
+                                    "pages_crawled": stats.pages_crawled,
+                                    "pages_failed": stats.pages_failed,
+                                    "chunks_created": stats.chunks_created,
+                                    "error_message": stats.error_message if stats.status == "failed" else None,
+                                },
+                            )
+                        except Exception as log_error:
+                            logger.error(f"Failed to log crawl completion activity: {log_error}")
         except Exception as e:
             logger.error(f"Failed to update job progress: {e}")
     
@@ -260,10 +287,30 @@ class CrawlerService:
             with SessionLocal() as session:
                 job = session.query(CrawlerJob).filter(CrawlerJob.job_id == job_id).first()
                 if job:
+                    previous_status = job.status
                     job.status = "failed"
                     job.error_message = error
                     job.completed_at = datetime.utcnow()
                     session.commit()
+                    
+                    # Log activity when crawl fails
+                    if previous_status != "failed":
+                        try:
+                            user = session.query(User).filter(User.user_id == job.user_id).first()
+                            username = user.username if user else "unknown"
+                            
+                            activity_tracker.log_activity(
+                                activity_type="crawl_failed",
+                                user=username,
+                                details={
+                                    "job_id": job_id,
+                                    "target_url": job.target_url,
+                                    "collection_id": job.collection_id,
+                                    "error_message": error,
+                                },
+                            )
+                        except Exception as log_error:
+                            logger.error(f"Failed to log crawl failure activity: {log_error}")
         except Exception as e:
             logger.error(f"Failed to update job error: {e}")
     

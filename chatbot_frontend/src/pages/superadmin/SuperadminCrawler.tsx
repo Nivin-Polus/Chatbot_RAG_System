@@ -39,6 +39,7 @@ import {
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import {
   Globe,
   Play,
@@ -56,6 +57,7 @@ import {
   CalendarClock,
   Timer,
   Eye,
+  Info,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiGet, apiPost, apiDelete } from '@/utils/api';
@@ -99,7 +101,7 @@ export default function SuperadminCrawler() {
   // Schedule dialog state
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [scheduleJobId, setScheduleJobId] = useState<string | null>(null);
-  const [scheduleInterval, setScheduleInterval] = useState('48');
+  const [scheduleInterval, setScheduleInterval] = useState('1440');
   const [isScheduling, setIsScheduling] = useState(false);
 
   // URL details dialog state
@@ -114,8 +116,8 @@ export default function SuperadminCrawler() {
   // Form state
   const [targetUrl, setTargetUrl] = useState('');
   const [selectedCollection, setSelectedCollection] = useState('');
-  const [maxPages, setMaxPages] = useState(0); // 0 = unlimited
-  const [maxDepth, setMaxDepth] = useState(10);
+  const [maxPages, setMaxPages] = useState<number | string>(0); // 0 = unlimited
+  const [maxDepth, setMaxDepth] = useState<number | string>(10);
   const [useSitemap, setUseSitemap] = useState(true);
   const [excludePatterns, setExcludePatterns] = useState('/login\n/admin\n/cart');
   const [includeKeywords, setIncludeKeywords] = useState('');
@@ -177,6 +179,10 @@ export default function SuperadminCrawler() {
       return;
     }
 
+    // Parse numeric values, defaulting to 0/10 if empty or invalid
+    const parsedMaxPages = maxPages === '' ? 0 : parseInt(String(maxPages));
+    const parsedMaxDepth = maxDepth === '' ? 10 : parseInt(String(maxDepth));
+
     setIsStarting(true);
     try {
       const response = await apiPost(
@@ -184,8 +190,8 @@ export default function SuperadminCrawler() {
         {
           target_url: targetUrl,
           collection_id: selectedCollection,
-          max_pages: maxPages,
-          max_depth: maxDepth,
+          max_pages: isNaN(parsedMaxPages) ? 0 : parsedMaxPages,
+          max_depth: isNaN(parsedMaxDepth) ? 10 : parsedMaxDepth,
           use_sitemap: useSitemap,
           exclude_patterns: excludePatterns
             .split('\n')
@@ -286,7 +292,7 @@ export default function SuperadminCrawler() {
   // Open schedule dialog
   const openScheduleDialog = (jobId: string) => {
     setScheduleJobId(jobId);
-    setScheduleInterval('48');
+    setScheduleInterval('1440');
     setScheduleDialogOpen(true);
   };
 
@@ -509,7 +515,7 @@ export default function SuperadminCrawler() {
                     type="number"
                     min={0}
                     value={maxPages}
-                    onChange={(e) => setMaxPages(parseInt(e.target.value) || 0)}
+                    onChange={(e) => setMaxPages(e.target.value)}
                     placeholder="0 for unlimited"
                   />
                 </div>
@@ -521,7 +527,7 @@ export default function SuperadminCrawler() {
                     min={1}
                     max={15}
                     value={maxDepth}
-                    onChange={(e) => setMaxDepth(parseInt(e.target.value) || 10)}
+                    onChange={(e) => setMaxDepth(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2 md:col-span-2">
@@ -532,10 +538,43 @@ export default function SuperadminCrawler() {
                       onCheckedChange={setUseSitemap}
                     />
                     <Label htmlFor="use-sitemap">Use sitemap.xml for URL discovery</Label>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex cursor-help text-muted-foreground hover:text-foreground transition-colors">
+                          <Info className="h-4 w-4" />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-[240px] p-2">
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium">Sitemap discovery</p>
+                          <p className="text-xs">
+                            When enabled, the crawler reads your domain&apos;s sitemap.xml to find pages faster.
+                            If no sitemap exists, normal link crawling still works.
+                          </p>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="exclude-patterns">Exclude Patterns (one per line)</Label>
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="exclude-patterns">Exclude Patterns (one per line)</Label>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex cursor-help text-muted-foreground hover:text-foreground transition-colors">
+                          <Info className="h-4 w-4" />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-[240px] p-2">
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium">Substring match</p>
+                          <p className="text-xs">
+                            URLs containing any line are skipped. Plain text only (not regex).
+                          </p>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
                   <Textarea
                     id="exclude-patterns"
                     placeholder="/login&#10;/admin&#10;/cart"
@@ -545,7 +584,24 @@ export default function SuperadminCrawler() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="include-keywords">Include Keywords (one per line)</Label>
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="include-keywords">Include Keywords (one per line)</Label>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex cursor-help text-muted-foreground hover:text-foreground transition-colors">
+                          <Info className="h-4 w-4" />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-[240px] p-2">
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium">Required keywords</p>
+                          <p className="text-xs">
+                            Only visit URLs that contain at least one keyword. Leave empty to scan all.
+                          </p>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
                   <Textarea
                     id="include-keywords"
                     placeholder="docs&#10;guide&#10;help"
@@ -793,14 +849,9 @@ export default function SuperadminCrawler() {
                   <SelectValue placeholder="Select interval" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="6">6 hours</SelectItem>
-                  <SelectItem value="12">12 hours</SelectItem>
-                  <SelectItem value="24">1 day</SelectItem>
-                  <SelectItem value="48">2 days</SelectItem>
-                  <SelectItem value="72">3 days</SelectItem>
-                  <SelectItem value="168">1 week</SelectItem>
-                  <SelectItem value="336">2 weeks</SelectItem>
-                  <SelectItem value="720">1 month</SelectItem>
+                  <SelectItem value="1440">2 months</SelectItem>
+                  <SelectItem value="4320">6 months</SelectItem>
+                  <SelectItem value="8760">1 year</SelectItem>
                 </SelectContent>
               </Select>
             </div>

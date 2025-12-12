@@ -309,29 +309,58 @@ export default function UserChat() {
       }
 
       const data = await response.json();
-      const assistantContent =
+      let assistantContent =
         data.answer || data.response || data.content || 'I was unable to generate a response.';
 
-      const sources: ChatSource[] | undefined = Array.isArray(data.sources)
-        ? data.sources
-          .map((item: any) => {
-            if (!item || typeof item !== 'object') {
-              return null;
-            }
-            const fileName = typeof item.file_name === 'string' ? item.file_name : undefined;
-            const fileId = typeof item.file_id === 'string' ? item.file_id : undefined;
+      // Helper to detect generic responses locally if API flag is missing
+      const isGenericResponse = (text: string) => {
+        if (!text) return false;
+        const normalized = text.trim();
+        const genericPattern = /I apologize|I'm limited to providing information|not have any information|outside of my scope|I'm afraid I don't have enough information|I don't have access to information|I don't have any information about|I'm here to help with questions about your knowledge base documents|the provided context does not contain|does not contain any information|do not have enough details|without any relevant information|there are no sources that discuss|i do not have enough details to provide|my role is to assist based on the provided information|I do not have enough context|I have no relevant information|I don't have enough context|I do not have any relevant information|provide a meaningful response/i;
+        return genericPattern.test(normalized);
+      };
 
-            if (!fileName) {
-              return null;
-            }
-            return {
-              file_name: fileName,
-              file_id: fileId,
-            } satisfies ChatSource;
-          })
-          .filter((value): value is ChatSource => value !== null)
-          .slice(0, 4) // Limit to 4 most relevant sources
-        : undefined;
+      // Check if response is marked as generic (no relevant info found) - if so, don't show sources
+      const isGeneric = Boolean(data.is_generic) || isGenericResponse(assistantContent);
+
+      // ALWAYS strip embedded sources section from answer text to prevent duplicates/baked-in sources
+      assistantContent = assistantContent
+        .replace(/\r?\n+[\s>*-]*\*{0,2}\s*Sources?\s*:?\s*\*{0,2}\s*[\s\S]*$/i, '')
+        .replace(/\r?\n+Sources?\s*:[\s\S]*$/i, '')
+        .trim();
+
+      const sources: ChatSource[] | undefined = isGeneric
+        ? undefined
+        : Array.isArray(data.sources)
+          ? data.sources
+            .map((item: any) => {
+              if (!item || typeof item !== 'object') {
+                return null;
+              }
+              const fileName = typeof item.file_name === 'string' ? item.file_name : undefined;
+              const fileId = typeof item.file_id === 'string' ? item.file_id : undefined;
+
+              if (!fileName) {
+                return null;
+              }
+              return {
+                file_name: fileName,
+                file_id: fileId,
+              } satisfies ChatSource;
+            })
+            .filter((value): value is ChatSource => value !== null)
+            .slice(0, 4) // Limit to 4 most relevant sources
+          : undefined;
+
+      // Re-append the cleaned and limited sources to the text so the renderer can pick them up
+      if (!isGeneric && sources && sources.length > 0) {
+        assistantContent += '\n\n**Sources:**';
+        sources.forEach((source) => {
+          // Format as markdown link [- filename](id/url) which the renderer understands
+          const ref = source.url || source.file_id || 'source';
+          assistantContent += `\n- [${source.file_name}](${ref})`;
+        });
+      }
 
       await streamAssistantResponse(assistantContent, sources);
       setIsLoading(false);

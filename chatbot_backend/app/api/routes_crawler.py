@@ -17,7 +17,9 @@ from app.core.permissions import get_current_user
 from app.core.database import get_db
 from app.models.user import User
 from app.models.crawler_job import CrawlerJob
+from app.models.collection import Collection
 from app.services.crawler_service import CrawlerService
+from app.services.activity_tracker import activity_tracker
 
 logger = logging.getLogger("crawler_routes")
 router = APIRouter()
@@ -107,8 +109,8 @@ class ScheduleCrawlRequest(BaseModel):
     interval_hours: float = Field(
         default=48.0,
         ge=1.0,
-        le=720.0,  # Max 30 days
-        description="Hours between crawls (e.g., 48 for every 2 days)"
+        le=8760.0,  # Max 1 year (365 days)
+        description="Hours between crawls (e.g., 48 for every 2 days, 1440 for 2 months, 4320 for 6 months, 8760 for 1 year)"
     )
     start_immediately: bool = Field(
         default=True,
@@ -179,6 +181,19 @@ async def start_crawl(
         
         logger.info(f"User {current_user.username} started crawl job {job.job_id}")
         
+        # Log activity
+        activity_tracker.log_activity(
+            activity_type="crawl_started",
+            user=current_user.username,
+            details={
+                "job_id": job.job_id,
+                "target_url": request.target_url,
+                "collection_id": request.collection_id,
+                "max_pages": request.max_pages,
+                "max_depth": request.max_depth,
+            },
+        )
+        
         return CrawlJobResponse(**job.to_dict())
         
     except Exception as e:
@@ -202,9 +217,18 @@ async def list_crawl_jobs(
     """
     query = db.query(CrawlerJob)
     
-    # Filter by user unless superadmin
+    # Filter by user unless superadmin, or user_admin viewing their own collection
     if current_user.role not in ['super_admin', 'superadmin']:
-        query = query.filter(CrawlerJob.user_id == current_user.user_id)
+        # Check if user is admin of the requested collection
+        is_collection_admin = False
+        if collection_id and current_user.role in ['user_admin', 'useradmin', 'admin']:
+            collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+            if collection and collection.admin_user_id == current_user.user_id:
+                is_collection_admin = True
+        
+        # If not collection admin, restrict to own jobs
+        if not is_collection_admin:
+            query = query.filter(CrawlerJob.user_id == current_user.user_id)
     
     # Apply filters
     if collection_id:
@@ -316,6 +340,18 @@ async def cancel_crawl_job(
     
     if success:
         logger.info(f"User {current_user.username} cancelled job {job_id}")
+        
+        # Log activity
+        activity_tracker.log_activity(
+            activity_type="crawl_cancelled",
+            user=current_user.username,
+            details={
+                "job_id": job_id,
+                "target_url": job.target_url,
+                "collection_id": job.collection_id,
+            },
+        )
+        
         return {"status": "cancelled", "job_id": job_id}
     else:
         raise HTTPException(status_code=500, detail="Failed to cancel job")
@@ -349,6 +385,18 @@ async def delete_crawl_job(
     
     if success:
         logger.info(f"User {current_user.username} deleted job {job_id}")
+        
+        # Log activity
+        activity_tracker.log_activity(
+            activity_type="crawl_deleted",
+            user=current_user.username,
+            details={
+                "job_id": job_id,
+                "target_url": job.target_url,
+                "collection_id": job.collection_id,
+            },
+        )
+        
         return {"status": "deleted", "job_id": job_id}
     else:
         raise HTTPException(status_code=500, detail="Failed to delete job")
@@ -397,6 +445,18 @@ async def recrawl(
     background_tasks.add_task(crawler_service.start_job, new_job.job_id)
     
     logger.info(f"User {current_user.username} started recrawl {new_job.job_id} (from {job_id})")
+    
+    # Log activity
+    activity_tracker.log_activity(
+        activity_type="crawl_recrawled",
+        user=current_user.username,
+        details={
+            "new_job_id": new_job.job_id,
+            "original_job_id": job_id,
+            "target_url": original_job.target_url,
+            "collection_id": original_job.collection_id,
+        },
+    )
     
     return CrawlJobResponse(**new_job.to_dict())
 
@@ -451,6 +511,19 @@ async def schedule_crawl(
     
     logger.info(f"User {current_user.username} scheduled job {job_id} every {request.interval_hours} hours")
     
+    # Log activity
+    activity_tracker.log_activity(
+        activity_type="crawl_scheduled",
+        user=current_user.username,
+        details={
+            "job_id": job_id,
+            "target_url": job.target_url,
+            "collection_id": job.collection_id,
+            "interval_hours": request.interval_hours,
+            "start_immediately": request.start_immediately,
+        },
+    )
+    
     return CrawlJobResponse(**job.to_dict())
 
 
@@ -487,6 +560,17 @@ async def unschedule_crawl(
     db.refresh(job)
     
     logger.info(f"User {current_user.username} unscheduled job {job_id}")
+    
+    # Log activity
+    activity_tracker.log_activity(
+        activity_type="crawl_unscheduled",
+        user=current_user.username,
+        details={
+            "job_id": job_id,
+            "target_url": job.target_url,
+            "collection_id": job.collection_id,
+        },
+    )
     
     return CrawlJobResponse(**job.to_dict())
 
