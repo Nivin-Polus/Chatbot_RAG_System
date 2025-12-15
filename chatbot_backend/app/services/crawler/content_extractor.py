@@ -52,14 +52,19 @@ class ContentExtractor:
     ]
     
     # Classes/IDs that indicate navigation/boilerplate
+    # IMPORTANT: Use word boundaries (\b) to avoid matching substrings
+    # e.g., 'sidebar' should NOT match 'both-sidebars' on <body>
     REMOVE_PATTERNS = [
-        r'nav', r'navigation', r'navbar', r'menu', r'main-menu',
-        r'header', r'footer', r'site-footer', r'sidebar',
-        r'breadcrumb', r'skip-link', r'social-share', r'share-buttons',
-        r'ad\b', r'advertisement', r'ads', r'ad-container',
-        r'cookie-banner', r'cookie-consent', r'popup', r'modal', r'overlay',
-        r'toolbar', r'pagination', r'comment', r'comments'
+        r'\bnav\b', r'\bnavigation\b', r'\bnavbar\b', r'\bmenu\b', r'\bmain-menu\b',
+        r'\bsite-header\b', r'\bsite-footer\b', r'\bpage-footer\b',
+        r'\bbreadcrumb\b', r'\bskip-link\b', r'\bsocial-share\b', r'\bshare-buttons\b',
+        r'\bad\b', r'\badvertisement\b', r'\bads\b', r'\bad-container\b',
+        r'\bcookie-banner\b', r'\bcookie-consent\b', r'\bpopup\b', r'\bmodal\b', r'\boverlay\b',
+        r'\btoolbar\b', r'\bpagination\b', r'\bcomment\b', r'\bcomments\b'
     ]
+    
+    # Elements that should NEVER be removed regardless of class/ID
+    PROTECTED_TAGS = {'body', 'html', 'main', 'article'}
     
     # CSS/JS code patterns
     CSS_PATTERNS = [
@@ -115,6 +120,12 @@ class ContentExtractor:
             
             # Build raw text
             raw_text = self._build_raw_text(sections)
+
+            # Fallback: if raw_text is too short, use full body text to avoid empty pages
+            if len(raw_text.strip()) < 20:
+                fallback_text = soup.get_text(separator=' ', strip=True)
+                if fallback_text and len(fallback_text.strip()) >= len(raw_text.strip()):
+                    raw_text = fallback_text
             
             return {
                 "title": title,
@@ -188,6 +199,10 @@ class ContentExtractor:
         # Must iterate over a list copy since we're modifying while iterating
         for element in list(soup.find_all(True)):
             try:
+                # Never remove protected elements (body, main, article, etc.)
+                if element.name in self.PROTECTED_TAGS:
+                    continue
+                
                 # Safely get class attribute (can be list or None)
                 class_attr = element.get('class', [])
                 classes = ' '.join(class_attr) if class_attr else ''
@@ -228,7 +243,7 @@ class ContentExtractor:
         blocks = []
         current_headers = []  # Stack of parent headers
         
-        for element in container.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'ul', 'ol', 'table', 'pre', 'blockquote']):
+        for element in container.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'ul', 'ol', 'table', 'pre', 'blockquote', 'div']):
             if element.name.startswith('h') and len(element.name) == 2:
                 # Header element
                 level = int(element.name[1])
@@ -321,6 +336,21 @@ class ContentExtractor:
                         header_level=current_headers[-1][0] if current_headers else 0,
                         parent_headers=[h[1] for h in current_headers]
                     ))
+
+            elif element.name == 'div':
+                # Flexible div handling for non-standard CMS
+                # Only process if it directly contains meaningful text and NO block children (to avoid duplication)
+                # This catches <div class="field-item">Some text...</div> common in Drupal
+                if not element.find(['p', 'div', 'ul', 'ol', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table']):
+                     text = element.get_text(separator=' ', strip=True)
+                     if len(text) > 30 and not self._is_code_or_nav(text):
+                         blocks.append(SemanticBlock(
+                            block_type="paragraph",
+                            content=text,
+                            header=current_headers[-1][1] if current_headers else None,
+                            header_level=current_headers[-1][0] if current_headers else 0,
+                            parent_headers=[h[1] for h in current_headers]
+                        ))
         
         # Detect FAQ sections
         blocks = self._detect_faq_blocks(blocks)

@@ -14,6 +14,7 @@ import { Link as ExternalLinkIcon, Loader2, Pencil, Plus, Plug, Trash2 } from 'l
 import { Collection, PluginIntegration } from '@/types/auth';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { toast } from 'sonner';
+import { useConfirmAction } from '@/hooks/useConfirmAction';
 
 export default function SuperadminPlugins() {
   const { user } = useAuth();
@@ -27,6 +28,7 @@ export default function SuperadminPlugins() {
   const [pluginFormData, setPluginFormData] = useState({ website_url: '', display_name: '' });
   const [editingPlugin, setEditingPlugin] = useState<PluginIntegration | null>(null);
   const [isPluginSaving, setIsPluginSaving] = useState(false);
+  const { confirm: confirmAction, dialog: confirmDialog } = useConfirmAction();
 
   const refreshCollections = useCallback(async () => {
     if (!user?.access_token) {
@@ -157,18 +159,25 @@ export default function SuperadminPlugins() {
   };
 
   const handleDeletePlugin = async (plugin: PluginIntegration) => {
-    if (!confirm('Are you sure you want to delete this plugin integration?')) return;
-    try {
-      const response = await apiDelete(`${import.meta.env.VITE_API_BASE_URL}/plugins/${plugin.id}`, user?.access_token);
-      if (!response.ok) {
-        throw new Error('Failed to delete plugin integration');
-      }
-      toast.success('Plugin integration deleted');
-      const targetCollection = pluginFilterCollection === 'all' ? undefined : pluginFilterCollection;
-      await refreshPlugins(targetCollection);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete plugin');
-    }
+    confirmAction({
+      title: 'Delete plugin integration?',
+      description: 'This will remove the plugin integration from this knowledge base.',
+      confirmText: 'Delete',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          const response = await apiDelete(`${import.meta.env.VITE_API_BASE_URL}/plugins/${plugin.id}`, user?.access_token);
+          if (!response.ok) {
+            throw new Error('Failed to delete plugin integration');
+          }
+          toast.success('Plugin integration deleted');
+          const targetCollection = pluginFilterCollection === 'all' ? undefined : pluginFilterCollection;
+          await refreshPlugins(targetCollection);
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : 'Failed to delete plugin');
+        }
+      },
+    });
   };
 
   const handleTogglePluginStatus = async (plugin: PluginIntegration) => {
@@ -198,6 +207,7 @@ export default function SuperadminPlugins() {
 
   return (
     <DashboardLayout>
+      {confirmDialog}
       <div className="space-y-6">
         <div className="flex flex-col gap-2">
           <h1 className="text-3xl font-bold">Plugins</h1>

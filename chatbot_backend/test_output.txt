@@ -1,0 +1,33 @@
+HTML Length: 27554
+
+--- EXTRACTION RESULTS ---
+Title: Beginning Employment | Policies
+Raw text length: 3198
+Section count: 34
+Word count: 445
+
+--- RAW TEXT PREVIEW ---
+Beginning Employment
+
+The MIT Talent Acquisition team's website gives detail on hiring for nonacademic staff:
+ò Hiring process overview
+ò Applicant Tracking System (ATS)
+ò Resources for Managers, including checklists and guides
+ò Hiring temporary help
+
+Types of Appointments
+
+ò Non-academic appointments (definitions of ôregularö, ôtermö etc.) EPM Section 2.1.2 links to this Talent Acquisition website
+ò Temporary workers: EPM Section 2.3
+Non-academic appointments (definitions of ôregularö, ôtermö etc.) EPM Section 2.1.2 links to this Talent Acquisition website
+Temporary workers: EPM Section 2.3
+
+Affirmative Action Serious Search
+
+ò P&P Section 7.1.4
+
+Background Checks
+
+MIT conducts criminal record background checks foránew hires with paid appointments.
+ò EPM Section 2.4.3
+ò Criminal Offender

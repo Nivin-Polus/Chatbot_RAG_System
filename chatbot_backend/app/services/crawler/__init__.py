@@ -10,6 +10,7 @@ from .chunker import TextChunker, ContentChunk
 from .duplicate_detector import DuplicateDetector
 from .sitemap_parser import SitemapParser
 from .crawler_engine import CrawlerEngine
+from .html_fetcher import fetch_static, is_empty_static, fetch_js_rendered, fetch_html, close_playwright
 
 __all__ = [
     "CrawlConfig",
@@ -21,5 +22,11 @@ __all__ = [
     "ContentChunk",
     "DuplicateDetector",
     "SitemapParser",
-    "CrawlerEngine"
+    "CrawlerEngine",
+    "fetch_static",
+    "is_empty_static",
+    "fetch_js_rendered",
+    "fetch_html",
+    "close_playwright",
 ]
+

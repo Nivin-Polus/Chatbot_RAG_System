@@ -29,6 +29,7 @@ import { Plus, Pencil, Trash2, Loader2, Search, Folder, FileCode, Copy } from 'l
 import { Collection } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost, apiDelete, apiPut } from '@/utils/api';
+import { useConfirmAction } from '@/hooks/useConfirmAction';
 
 export default function SuperadminDashboard() {
   const { user } = useAuth();
@@ -56,6 +57,7 @@ export default function SuperadminDashboard() {
     admin_email: '',
     is_active: true,
   });
+  const { confirm: confirmAction, dialog: confirmDialog } = useConfirmAction();
 
   const refreshCollections = useCallback(async () => {
     try {
@@ -134,23 +136,27 @@ export default function SuperadminDashboard() {
   };
 
   const handleDeleteCollection = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this knowledge base?')) return;
+    confirmAction({
+      title: 'Delete knowledge base?',
+      description: 'This will permanently remove the knowledge base. This cannot be undone.',
+      confirmText: 'Delete',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          const response = await apiDelete(
+            `${import.meta.env.VITE_API_BASE_URL}/collections/${id}`,
+            user?.access_token
+          );
 
-    try {
-      const response = await apiDelete(
-        `${import.meta.env.VITE_API_BASE_URL}/collections/${id}`,
-        user?.access_token
-      );
+          if (!response.ok) throw new Error('Failed to delete collection');
 
-      if (!response.ok) throw new Error('Failed to delete collection');
-
-      toast.success('Knowledge base deleted successfully');
-      
-      // Refresh collections
-      await refreshCollections();
-    } catch (error) {
-      toast.error('Failed to delete knowledge base');
-    }
+          toast.success('Knowledge base deleted successfully');
+          await refreshCollections();
+        } catch (error) {
+          toast.error('Failed to delete knowledge base');
+        }
+      },
+    });
   };
 
   const handleOpenEditDialog = (collection: Collection) => {
@@ -229,6 +235,7 @@ export default function SuperadminDashboard() {
 
   return (
     <DashboardLayout>
+      {confirmDialog}
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
