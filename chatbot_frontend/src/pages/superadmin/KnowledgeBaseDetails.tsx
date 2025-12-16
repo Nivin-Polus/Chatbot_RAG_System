@@ -447,7 +447,8 @@ export default function KnowledgeBaseDetails() {
     setPromptFormData({ name: '', description: '', content: '', is_active: true, is_default: false });
   };
 
-  const formatFileSize = (bytes: number) => {
+  const formatFileSize = (bytes: number | null) => {
+    if (bytes === null || bytes === undefined) return 'N/A';
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
@@ -790,13 +791,34 @@ export default function KnowledgeBaseDetails() {
                     <TableBody>
                        {filteredFiles.map((file) => (
                          <TableRow key={file.file_id}>
-                           <TableCell className="font-medium">{file.file_name}</TableCell>
-                           <TableCell>{formatFileSize(file.file_size)}</TableCell>
+                           <TableCell className="font-medium">
+                             <div className="flex items-center gap-2">
+                               {file.file_name}
+                               {file.source_type === 'crawled' && (
+                                 <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
+                                   Crawled
+                                 </span>
+                               )}
+                             </div>
+                             {file.source_type === 'crawled' && file.target_url && (
+                               <div className="text-xs text-muted-foreground mt-1">
+                                 URL: {file.target_url}
+                               </div>
+                             )}
+                             {file.source_type === 'crawled' && file.pages_crawled !== undefined && (
+                               <div className="text-xs text-muted-foreground mt-1">
+                                 Pages: {file.pages_crawled} | Chunks: {file.chunks_created || 0}
+                               </div>
+                             )}
+                           </TableCell>
+                           <TableCell>
+                             {file.file_size !== null ? formatFileSize(file.file_size) : 'N/A'}
+                           </TableCell>
                            <TableCell>
                              <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
                                file.processing_status === 'completed'
                                  ? 'bg-green-100 text-green-800'
-                                 : file.processing_status === 'processing'
+                                 : file.processing_status === 'processing' || file.processing_status === 'running'
                                  ? 'bg-yellow-100 text-yellow-800'
                                  : 'bg-red-100 text-red-800'
                              }`}>
@@ -805,26 +827,32 @@ export default function KnowledgeBaseDetails() {
                            </TableCell>
                            <TableCell>{new Date(file.upload_timestamp).toLocaleDateString()}</TableCell>
                            <TableCell className="text-right">
-                             <div className="flex items-center justify-end space-x-2">
-                               <Button
-                                 variant="ghost"
-                                 size="sm"
-                                 onClick={() => handleDownload(file.file_id, file.file_name)}
-                                 disabled={file.processing_status !== 'completed'}
-                               >
-                                 <Download className="h-4 w-4 mr-1" />
-                                 Download
-                               </Button>
-                               <Button
-                                 variant="ghost"
-                                 size="sm"
-                                 onClick={() => handleDeleteFile(file.file_id)}
-                                 className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                               >
-                                 <Trash2 className="h-4 w-4 mr-1" />
-                                 Delete
-                               </Button>
-                             </div>
+                             {file.source_type === 'crawled' ? (
+                               <div className="text-xs text-muted-foreground">
+                                 Crawled data
+                               </div>
+                             ) : (
+                               <div className="flex items-center justify-end space-x-2">
+                                 <Button
+                                   variant="ghost"
+                                   size="sm"
+                                   onClick={() => handleDownload(file.file_id, file.file_name)}
+                                   disabled={file.processing_status !== 'completed'}
+                                 >
+                                   <Download className="h-4 w-4 mr-1" />
+                                   Download
+                                 </Button>
+                                 <Button
+                                   variant="ghost"
+                                   size="sm"
+                                   onClick={() => handleDeleteFile(file.file_id)}
+                                   className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                 >
+                                   <Trash2 className="h-4 w-4 mr-1" />
+                                   Delete
+                                 </Button>
+                               </div>
+                             )}
                            </TableCell>
                          </TableRow>
                        ))}

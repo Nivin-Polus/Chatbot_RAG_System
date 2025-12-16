@@ -6,6 +6,7 @@ Endpoints for managing web crawl jobs.
 
 import re
 import logging
+from datetime import datetime
 from typing import Optional, List
 from urllib.parse import urlparse
 
@@ -37,7 +38,7 @@ class StartCrawlRequest(BaseModel):
     
     # Optional settings
     max_pages: int = Field(default=0, ge=0, le=100000, description="Maximum pages to crawl (0 = unlimited)")
-    max_depth: int = Field(default=10, ge=1, le=15, description="Maximum link depth")
+    max_depth: int = Field(default=5, ge=1, le=15, description="Maximum link depth")
     use_sitemap: bool = Field(default=True, description="Use sitemap for URL discovery")
     
     exclude_patterns: Optional[List[str]] = Field(
@@ -237,11 +238,74 @@ async def list_crawl_jobs(
     if status:
         query = query.filter(CrawlerJob.status == status)
     
-    # Get total count
+    # Get total count (before ordering to avoid sort memory issues)
     total = query.count()
     
-    # Get jobs
-    jobs = query.order_by(CrawlerJob.created_at.desc()).limit(limit).all()
+    # Get jobs with error handling for MySQL sort buffer issues
+    try:
+        # Try the optimized query: use a subquery to get IDs first, then fetch full records
+        # This reduces the amount of data MySQL needs to sort
+        from sqlalchemy import select
+        
+        # Build the same filters for the subquery
+        subquery_filters = []
+        if current_user.role not in ['super_admin', 'superadmin']:
+            is_collection_admin = False
+            if collection_id and current_user.role in ['user_admin', 'useradmin', 'admin']:
+                collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+                if collection and collection.admin_user_id == current_user.user_id:
+                    is_collection_admin = True
+            if not is_collection_admin:
+                subquery_filters.append(CrawlerJob.user_id == current_user.user_id)
+        
+        if collection_id:
+            subquery_filters.append(CrawlerJob.collection_id == collection_id)
+        if status:
+            subquery_filters.append(CrawlerJob.status == status)
+        
+        # Create subquery to get job_ids ordered by created_at
+        subquery = select(CrawlerJob.job_id)
+        for filter_condition in subquery_filters:
+            subquery = subquery.where(filter_condition)
+        subquery = subquery.order_by(CrawlerJob.created_at.desc()).limit(limit)
+        
+        # Execute subquery to get IDs
+        result = db.execute(subquery)
+        job_ids = [row[0] for row in result.fetchall()]
+        
+        if job_ids:
+            # Fetch full records - use a dictionary to preserve order
+            jobs_dict = {job.job_id: job for job in db.query(CrawlerJob).filter(CrawlerJob.job_id.in_(job_ids)).all()}
+            # Reorder based on job_ids list
+            jobs = [jobs_dict[jid] for jid in job_ids if jid in jobs_dict]
+        else:
+            jobs = []
+            
+    except Exception as e:
+        # Fallback: try original query with error handling
+        logger.warning(f"Optimized query failed, trying fallback: {e}")
+        try:
+            jobs = query.order_by(CrawlerJob.created_at.desc()).limit(limit).all()
+        except Exception as fallback_error:
+            error_str = str(fallback_error).lower()
+            logger.error(f"Failed to fetch crawl jobs: {fallback_error}")
+            
+            # Check if it's the sort memory error
+            if "sort memory" in error_str or "1038" in error_str or "out of sort memory" in error_str:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "Database query failed due to large dataset. "
+                        "Please contact administrator to: "
+                        "1) Add an index on crawler_jobs.created_at column, or "
+                        "2) Increase MySQL sort_buffer_size configuration. "
+                        "Error: " + str(fallback_error)
+                    )
+                )
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to fetch crawl jobs: {str(fallback_error)}"
+            )
     
     return CrawlJobListResponse(
         jobs=[CrawlJobResponse(**job.to_dict()) for job in jobs],
@@ -435,7 +499,7 @@ async def recrawl(
         collection_id=original_job.collection_id,
         target_url=original_job.target_url,
         max_pages=config.get('max_pages', 0),  # 0 = unlimited
-        max_depth=config.get('max_depth', 10),  # Updated from 5 to 10
+        max_depth=config.get('max_depth', 5),
         use_sitemap=config.get('use_sitemap', True),
         exclude_patterns=config.get('exclude_patterns'),
         include_keywords=config.get('include_keywords')

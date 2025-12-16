@@ -49,9 +49,14 @@ export interface FileItem {
   uploaded_by: string;
   uploader_id: string;
   upload_timestamp: string;
-  file_size: number;
+  file_size: number | null;
   processing_status: string;
   collection_id: string;
+  source_type?: 'file' | 'crawled';
+  crawl_job_id?: string;
+  target_url?: string;
+  pages_crawled?: number;
+  chunks_created?: number;
 }
 
 export interface Prompt {

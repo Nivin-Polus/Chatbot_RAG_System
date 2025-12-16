@@ -519,8 +519,9 @@ button {
 /* Web crawl source links that open in new tab */
 .msg.bot .source-link {
   display: inline-flex;
-  align-items: flex-start;
-  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 6px 10px;
   border: 1px solid rgba(17, 24, 39, 0.15);
   border-radius: 6px;
@@ -540,12 +541,32 @@ button {
   text-align: left;
 }
 
+.msg.bot .source-link-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.msg.bot .source-link-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: #6b7280;
+  opacity: 0.7;
+  transition: opacity 0.2s ease, color 0.2s ease;
+}
+
 .msg.bot .source-link:hover {
   background: linear-gradient(135deg, rgba(69, 98, 187, 0.1), rgba(2, 241, 124, 0.1));
   border-color: rgba(69, 98, 187, 0.3);
   box-shadow: 0 3px 8px rgba(69, 98, 187, 0.15);
   transform: translateY(-1px);
   text-decoration: none;
+}
+
+.msg.bot .source-link:hover .source-link-icon {
+  opacity: 1;
+  color: #2563eb;
 }
 
 .msg.bot .source-link:active {

@@ -20,7 +20,7 @@ class CrawlConfig:
     
     # Crawl limits
     max_pages: int = 0  # 0 = unlimited (no default limit)
-    max_depth: int = 10  # Increased from 5 for larger sites
+    max_depth: int = 5
     
     # Rate limiting - optimized for speed while respecting server limits
     min_delay_seconds: float = 0.2   # Reduced for faster crawling
@@ -48,12 +48,17 @@ class CrawlConfig:
     
     # Extensions to skip
     skip_extensions: Set[str] = field(default_factory=lambda: {
-        ".pdf", ".zip", ".exe", ".dmg", ".pkg", ".rar", ".7z",
+        ".zip", ".exe", ".dmg", ".pkg", ".rar", ".7z",
         ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico",
         ".mp3", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm",
-        ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+        ".xls", ".xlsx", ".ppt", ".pptx",
         ".ics", ".vcf", ".css", ".js", ".json", ".xml"
     })
+    
+    # Document processing
+    process_documents: bool = True  # Enable/disable document processing
+    document_types: Set[str] = field(default_factory=lambda: {".pdf", ".docx", ".doc"})
+    max_document_size_mb: int = 100  # Skip documents larger than this
     
     # Duplicate detection
     similarity_threshold: float = 0.90  # Skip pages > 90% similar

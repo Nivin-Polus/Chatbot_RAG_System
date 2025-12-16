@@ -184,10 +184,26 @@ export class ChatService {
       // Add assistant response to history
       this.addToHistory('assistant', data.answer);
 
-      // Return formatted text, sources, and generic flag
+      // Normalize sources to ensure all fields are captured
+      const normalizeSources = (sources) => {
+        if (!Array.isArray(sources)) return [];
+        return sources.map(source => {
+          if (!source || typeof source !== 'object') return null;
+          // Capture all source fields from API response
+          return {
+            file_name: source.file_name || null,
+            file_id: source.file_id || null,
+            chunk_indices: Array.isArray(source.chunk_indices) ? source.chunk_indices : null,
+            source_type: source.source_type || 'file',
+            url: source.url || null
+          };
+        }).filter(source => source !== null && source.file_name); // Only keep sources with file_name
+      };
+
+      // Return formatted text, sources (with all fields preserved), and generic flag
       return {
         text: formattedResponse,
-        sources: data.sources || [],
+        sources: normalizeSources(data.sources || []),
         generic: isGeneric
       };
     } catch (err) {

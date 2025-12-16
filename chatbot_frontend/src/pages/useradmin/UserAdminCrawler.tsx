@@ -109,8 +109,9 @@ export default function UserAdminCrawler() {
     // Form state
     const [targetUrl, setTargetUrl] = useState('');
     const [maxPages, setMaxPages] = useState<number | string>(0); // 0 = unlimited
-    const [maxDepth, setMaxDepth] = useState<number | string>(10);
+    const [maxDepth, setMaxDepth] = useState<number | string>(5);
     const [useSitemap, setUseSitemap] = useState(true);
+    const [processDocuments, setProcessDocuments] = useState(true);
     const [excludePatterns, setExcludePatterns] = useState('/login\n/admin\n/cart');
     const [includeKeywords, setIncludeKeywords] = useState('');
 
@@ -193,9 +194,9 @@ export default function UserAdminCrawler() {
             return;
         }
 
-        // Parse numeric values, defaulting to 0/10 if empty or invalid
+        // Parse numeric values, defaulting to 0/5 if empty or invalid
         const parsedMaxPages = maxPages === '' ? 0 : parseInt(String(maxPages));
-        const parsedMaxDepth = maxDepth === '' ? 10 : parseInt(String(maxDepth));
+        const parsedMaxDepth = maxDepth === '' ? 5 : parseInt(String(maxDepth));
 
         setIsStarting(true);
         try {
@@ -205,8 +206,9 @@ export default function UserAdminCrawler() {
                     target_url: targetUrl,
                     collection_id: collection.collection_id,
                     max_pages: isNaN(parsedMaxPages) ? 0 : parsedMaxPages,
-                    max_depth: isNaN(parsedMaxDepth) ? 10 : parsedMaxDepth,
+                    max_depth: isNaN(parsedMaxDepth) ? 5 : parsedMaxDepth,
                     use_sitemap: useSitemap,
+                    process_documents: processDocuments,
                     exclude_patterns: excludePatterns
                         .split('\n')
                         .map(p => p.trim())

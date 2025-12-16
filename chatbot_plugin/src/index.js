@@ -497,6 +497,22 @@ import "./styles.css";
   }
 
   function addMessage(message) {
+    // Ensure sources array preserves all fields from each source object
+    const normalizeSources = (sources) => {
+      if (!Array.isArray(sources)) return [];
+      return sources.map(source => {
+        if (!source || typeof source !== 'object') return null;
+        // Preserve all source fields: file_name, file_id, chunk_indices, source_type, url
+        return {
+          file_name: source.file_name || null,
+          file_id: source.file_id || null,
+          chunk_indices: Array.isArray(source.chunk_indices) ? source.chunk_indices : null,
+          source_type: source.source_type || 'file',
+          url: source.url || null
+        };
+      }).filter(source => source !== null && source.file_name); // Filter out invalid sources
+    };
+
     const storedMessage = {
       user: Boolean(message.user),
       text: message.text || "",
@@ -505,7 +521,7 @@ import "./styles.css";
       isError: Boolean(message.isError),
       isTyping: Boolean(message.isTyping),
       isTypingIndicator: Boolean(message.isTypingIndicator),
-      sources: message.sources || []
+      sources: normalizeSources(message.sources)
     };
     messages.push(storedMessage);
     renderMessages();
@@ -561,17 +577,20 @@ import "./styles.css";
         .replace(/\r?\n+Sources?\s*:[\s\S]*$/i, '')
         .trim();
 
-      // Determine if message is generic - if so, don't show sources
+      // Determine if message is generic - if so, don't show sources in UI but preserve them
       const isGeneric = Boolean(isGenericFlag) || isGenericResponse(fullText);
-      const effectiveSources = isGeneric ? [] : sources;
+      // Always preserve sources array with all fields, even for generic messages
+      const preservedSources = Array.isArray(sources) ? sources : [];
+      // Only use sources for display if message is not generic
+      const displaySources = isGeneric ? [] : preservedSources;
 
       // Only append sources section if sources are provided and message is not generic
-      if (!isGeneric && Array.isArray(effectiveSources) && effectiveSources.length > 0) {
+      if (!isGeneric && Array.isArray(displaySources) && displaySources.length > 0) {
         // Append fresh sources section
         enhancedText += "\n\nSources:\n";
         // Limit displayed sources to the first N to avoid overwhelming the UI
-        effectiveSources.slice(0, MAX_DISPLAY_SOURCES).forEach(source => {
-          if (source.file_name) {
+        displaySources.slice(0, MAX_DISPLAY_SOURCES).forEach(source => {
+          if (source && source.file_name) {
             enhancedText += `- ${source.file_name}\n`;
           }
         });
@@ -583,7 +602,8 @@ import "./styles.css";
         return;
       }
 
-      const typingMessage = addMessage({ user: false, text: "", formatted: true, isTyping: true, sources: effectiveSources });
+      // Store preserved sources with all fields, even if not displayed
+      const typingMessage = addMessage({ user: false, text: "", formatted: true, isTyping: true, sources: preservedSources });
       scrollChatToBottom();
       let completed = false;
 
@@ -654,6 +674,22 @@ import "./styles.css";
   // Save chat history to localStorage
   function saveChatHistory() {
     try {
+      // Normalize sources to ensure all fields are preserved
+      const normalizeSourcesForStorage = (sources) => {
+        if (!Array.isArray(sources)) return [];
+        return sources.map(source => {
+          if (!source || typeof source !== 'object') return null;
+          // Preserve all source fields
+          return {
+            file_name: source.file_name || null,
+            file_id: source.file_id || null,
+            chunk_indices: Array.isArray(source.chunk_indices) ? source.chunk_indices : null,
+            source_type: source.source_type || 'file',
+            url: source.url || null
+          };
+        }).filter(source => source !== null && source.file_name);
+      };
+
       // Filter out typing indicators and only save actual messages
       const messagesToSave = messages
         .filter(msg => !msg.isTypingIndicator && !msg.isTyping)
@@ -663,7 +699,7 @@ import "./styles.css";
           text: msg.text,
           formatted: msg.formatted,
           timestamp: msg.timestamp,
-          sources: msg.sources || []
+          sources: normalizeSourcesForStorage(msg.sources || [])
         }));
 
       localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(messagesToSave));
@@ -691,6 +727,22 @@ import "./styles.css";
         return false;
       }
 
+      // Normalize sources when loading from storage
+      const normalizeSourcesFromStorage = (sources) => {
+        if (!Array.isArray(sources)) return [];
+        return sources.map(source => {
+          if (!source || typeof source !== 'object') return null;
+          // Restore all source fields
+          return {
+            file_name: source.file_name || null,
+            file_id: source.file_id || null,
+            chunk_indices: Array.isArray(source.chunk_indices) ? source.chunk_indices : null,
+            source_type: source.source_type || 'file',
+            url: source.url || null
+          };
+        }).filter(source => source !== null && source.file_name);
+      };
+
       // Restore messages to UI
       messages.length = 0;
       parsed.forEach(msg => {
@@ -699,7 +751,7 @@ import "./styles.css";
           text: msg.text || '',
           formatted: Boolean(msg.formatted),
           timestamp: msg.timestamp || new Date().toISOString(),
-          sources: msg.sources || []
+          sources: normalizeSourcesFromStorage(msg.sources || [])
         });
       });
 
@@ -876,6 +928,18 @@ import "./styles.css";
   function renderAssistantText(text, sources = []) {
     if (!text) return "";
 
+    // Normalize sources to ensure all fields are present
+    const normalizedSources = Array.isArray(sources) ? sources.map(source => {
+      if (!source || typeof source !== 'object') return null;
+      return {
+        file_name: source.file_name || null,
+        file_id: source.file_id || null,
+        chunk_indices: Array.isArray(source.chunk_indices) ? source.chunk_indices : null,
+        source_type: source.source_type || 'file',
+        url: source.url || null
+      };
+    }).filter(source => source !== null && source.file_name) : [];
+
     // Normalize label like "Source 4: Leave_Policy.pdf" to match file_name
     function normalizeFileName(label) {
       return label.replace(/^Source\s*\d+:\s*/, "").trim();
@@ -913,16 +977,18 @@ import "./styles.css";
       return sourceMetadataMap[trimmedName.toLowerCase()] || null;
     };
 
-    if (Array.isArray(sources)) {
-      sources.forEach(source => {
-        if (source.file_name) {
+    // Process normalized sources
+    if (Array.isArray(normalizedSources)) {
+      normalizedSources.forEach(source => {
+        if (source && source.file_name) {
           const fileName = source.file_name.trim();
           const fileId = source.file_id ? source.file_id.trim() : null;
           if (!fileName) return;
           const metadata = {
             source_type: source.source_type || 'file',
             url: source.url || null,
-            file_id: fileId
+            file_id: fileId,
+            chunk_indices: source.chunk_indices || null
           };
           storeFileMapping(fileName, fileId, fileName, metadata);
           const normalizedFileName = normalizeFileName(fileName);
@@ -961,7 +1027,7 @@ import "./styles.css";
         const url = (metadata && metadata.url) || fallbackRef;
         const href = url.startsWith('http') ? url : `https://${url}`;
         const token = `__SOURCE_LINK_${linkTokens.length}__`;
-        linkTokens.push(`<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer" class="source-link">${buttonLabel} ↗</a>`);
+        linkTokens.push(`<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer" class="source-link"><span class="source-link-text">${buttonLabel}</span><svg class="source-link-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>`);
         return token;
       } else {
         // File source - render as download button
@@ -1086,7 +1152,7 @@ import "./styles.css";
       if (isWebCrawl && url) {
         // Web crawl source - render as anchor tag that opens in new tab
         const href = url.startsWith('http') ? url : `https://${url}`;
-        const linkHtml = `<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer" class="source-link">${escapeHtml(displayName)} ↗</a>`;
+        const linkHtml = `<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer" class="source-link"><span class="source-link-text">${escapeHtml(displayName)}</span><svg class="source-link-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>`;
         safe = safe.replace(token, linkHtml);
       } else {
         // File source - render as download button

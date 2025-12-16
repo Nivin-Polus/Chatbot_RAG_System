@@ -48,6 +48,12 @@ class FileMeta(BaseModel):
     file_size: Optional[int] = None
     processing_status: str = "completed"
     collection_id: Optional[str] = None
+    source_type: Optional[str] = "file"  # "file" or "crawled"
+    # Crawled data fields
+    crawl_job_id: Optional[str] = None
+    target_url: Optional[str] = None
+    pages_crawled: Optional[int] = None
+    chunks_created: Optional[int] = None
 
 # In-memory metadata store for MVP (replace with DB in production)
 file_metadata_db = {}
@@ -437,9 +443,63 @@ async def list_files(
             file_size=int(str(record.file_size)) if record.file_size is not None else None,
             processing_status=str(record.processing_status),
             collection_id=str(record.collection_id) if record.collection_id is not None else None,
+            source_type="file",
         )
         response_items.append(item)
         file_metadata_db[str(record.file_id)] = item
+
+    # Add crawl jobs for the collection if collection_id is provided
+    if collection_id:
+        try:
+            from app.models.crawler_job import CrawlerJob
+            crawl_jobs_query = db.query(CrawlerJob).filter(CrawlerJob.collection_id == collection_id)
+            
+            # Apply same permission filters for crawl jobs
+            if role == "super_admin":
+                pass  # Can see all
+            elif role == "user_admin":
+                # User admin: view crawl jobs in collections they administer
+                admin_collection_ids = [
+                    str(c.collection_id) for c in db.query(Collection).filter(Collection.admin_user_id == user_id).all()
+                ]
+                if collection_id not in admin_collection_ids:
+                    crawl_jobs_query = crawl_jobs_query.filter(False)  # No access
+            else:
+                # Regular user: only own crawl jobs
+                if user_id is not None:
+                    crawl_jobs_query = crawl_jobs_query.filter(CrawlerJob.user_id == user_id)
+                else:
+                    crawl_jobs_query = crawl_jobs_query.filter(False)  # No access
+            
+            crawl_jobs = crawl_jobs_query.order_by(CrawlerJob.created_at.desc()).all()
+            
+            for job in crawl_jobs:
+                # Only include completed or running jobs that have crawled pages
+                if job.status in ["completed", "running"] and job.pages_crawled > 0:
+                    # Get user info for the crawl job
+                    job_user = db.query(User).filter(User.user_id == job.user_id).first()
+                    job_username = str(job_user.username) if job_user and hasattr(job_user, 'username') and job_user.username else "System"
+                    
+                    # Use job_id as file_id for crawled data
+                    crawl_item = FileMeta(
+                        file_id=f"crawl_{job.job_id}",
+                        file_name=f"Crawled: {job.target_url}",
+                        uploaded_by=job_username,
+                        uploader_id=str(job.user_id) if job.user_id else None,
+                        upload_timestamp=job.created_at.isoformat() if job.created_at else None,
+                        file_size=None,  # Crawled data doesn't have a file size
+                        processing_status=job.status,
+                        collection_id=str(job.collection_id) if job.collection_id else None,
+                        source_type="crawled",
+                        crawl_job_id=str(job.job_id),
+                        target_url=job.target_url,
+                        pages_crawled=job.pages_crawled,
+                        chunks_created=job.chunks_created if hasattr(job, 'chunks_created') else None,
+                    )
+                    response_items.append(crawl_item)
+        except Exception as e:
+            logger.warning(f"Failed to fetch crawl jobs: {e}")
+            # Continue without crawl jobs if there's an error
 
     return response_items
 

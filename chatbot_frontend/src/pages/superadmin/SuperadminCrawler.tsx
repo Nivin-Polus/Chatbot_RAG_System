@@ -132,8 +132,9 @@ export default function SuperadminCrawler() {
   const [targetUrl, setTargetUrl] = useState('');
   const [selectedCollection, setSelectedCollection] = useState('');
   const [maxPages, setMaxPages] = useState<number | string>(0); // 0 = unlimited
-  const [maxDepth, setMaxDepth] = useState<number | string>(10);
+  const [maxDepth, setMaxDepth] = useState<number | string>(5);
   const [useSitemap, setUseSitemap] = useState(true);
+  const [processDocuments, setProcessDocuments] = useState(true);
   const [excludePatterns, setExcludePatterns] = useState('/login\n/admin\n/cart');
   const [includeKeywords, setIncludeKeywords] = useState('');
 
@@ -194,9 +195,9 @@ export default function SuperadminCrawler() {
       return;
     }
 
-    // Parse numeric values, defaulting to 0/10 if empty or invalid
+    // Parse numeric values, defaulting to 0/5 if empty or invalid
     const parsedMaxPages = maxPages === '' ? 0 : parseInt(String(maxPages));
-    const parsedMaxDepth = maxDepth === '' ? 10 : parseInt(String(maxDepth));
+    const parsedMaxDepth = maxDepth === '' ? 5 : parseInt(String(maxDepth));
 
     setIsStarting(true);
     try {
@@ -206,8 +207,9 @@ export default function SuperadminCrawler() {
           target_url: targetUrl,
           collection_id: selectedCollection,
           max_pages: isNaN(parsedMaxPages) ? 0 : parsedMaxPages,
-          max_depth: isNaN(parsedMaxDepth) ? 10 : parsedMaxDepth,
+          max_depth: isNaN(parsedMaxDepth) ? 5 : parsedMaxDepth,
           use_sitemap: useSitemap,
+          process_documents: processDocuments,
           exclude_patterns: excludePatterns
             .split('\n')
             .map(p => p.trim())
@@ -569,6 +571,31 @@ export default function SuperadminCrawler() {
                           <p className="text-xs">
                             When enabled, the crawler reads your domain&apos;s sitemap.xml to find pages faster.
                             If no sitemap exists, normal link crawling still works.
+                          </p>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="process-documents"
+                      checked={processDocuments}
+                      onCheckedChange={setProcessDocuments}
+                    />
+                    <Label htmlFor="process-documents">Download and process PDF/Word documents</Label>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex cursor-help text-muted-foreground hover:text-foreground transition-colors">
+                          <Info className="h-4 w-4" />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-[240px] p-2">
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium">Document processing</p>
+                          <p className="text-xs">
+                            When enabled, the crawler downloads PDF and Word (.docx) documents and extracts their text content to include in the knowledge base.
                           </p>
                         </div>
                       </TooltipContent>

@@ -10,6 +10,9 @@ import random
 import time
 import re
 import logging
+import os
+import tempfile
+import shutil
 from typing import Set, List, Dict, Optional, Callable
 from urllib.parse import urljoin, urlparse, urlunparse
 from urllib.robotparser import RobotFileParser
@@ -31,6 +34,7 @@ from .chunker import TextChunker, ContentChunk
 from .duplicate_detector import DuplicateDetector
 from .sitemap_parser import SitemapParser
 from .html_fetcher import fetch_static, is_empty_static, close_playwright
+from .document_extractor import download_document, extract_text_from_document, is_document_url
 
 logger = logging.getLogger("crawler_engine")
 
@@ -267,6 +271,9 @@ class CrawlerEngine:
         
         # Cancellation flag
         self._cancelled = False
+        
+        # Temporary directory for document downloads
+        self.temp_download_dir = None
     
     def cancel(self):
         """Cancel the ongoing crawl."""
@@ -319,6 +326,14 @@ class CrawlerEngine:
                 close_playwright()
             except Exception:
                 pass
+            
+            # Cleanup temporary download directory
+            if self.temp_download_dir and os.path.exists(self.temp_download_dir):
+                try:
+                    shutil.rmtree(self.temp_download_dir)
+                    logger.info(f"Cleaned up temp directory: {self.temp_download_dir}")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup temp directory: {e}")
         
         self.stats.completed_at = datetime.utcnow()
         self._notify_progress()
@@ -616,6 +631,88 @@ class CrawlerEngine:
                 await browser.close()
 
     
+    async def _process_document(self, url: str, depth: int) -> bool:
+        """
+        Process a document (PDF or DOCX) by downloading and extracting text.
+        
+        Args:
+            url: Document URL
+            depth: Current crawl depth
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Create temp directory if needed
+            if not self.temp_download_dir:
+                self.temp_download_dir = tempfile.mkdtemp(prefix="crawler_docs_")
+                logger.info(f"Created temp directory: {self.temp_download_dir}")
+            
+            logger.info(f"Processing document: {url}")
+            
+            # Download the document
+            loop = asyncio.get_event_loop()
+            file_path = await loop.run_in_executor(None, download_document, url, self.temp_download_dir)
+            
+            if not file_path:
+                logger.warning(f"Failed to download document: {url}")
+                self.stats.failed_urls.append({"url": url, "reason": "Document download failed"})
+                return False
+            
+            # Extract text from document
+            extracted = await loop.run_in_executor(None, extract_text_from_document, file_path, url)
+            
+            # Check if extraction was successful
+            if not extracted.get('raw_text') or len(extracted['raw_text'].strip()) < 50:
+                logger.warning(f"No content extracted from document: {url}")
+                self.stats.skipped_urls.append({"url": url, "reason": "No text content in document"})
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+                return False
+            
+            # Check for duplicates
+            is_dup, reason = self.duplicate_detector.is_duplicate(url, extracted['raw_text'], extracted.get('title', ''))
+            
+            if is_dup:
+                logger.debug(f"Skipping duplicate document: {url} ({reason})")
+                self.stats.pages_skipped += 1
+                self.stats.skipped_urls.append({"url": url, "reason": f"Duplicate: {reason}"})
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+                return False
+            
+            # Create chunks
+            page_chunks = self.chunker.chunk_page(extracted, job_id=self.stats.job_id, collection_id=self.config.collection_id, crawl_depth=depth)
+            
+            # Process chunks
+            for chunk in page_chunks:
+                self.chunks.append(chunk)
+                self.stats.chunks_created += 1
+                self.stats.total_characters += chunk.char_count
+                if self.on_chunk:
+                    self.on_chunk(chunk)
+            
+            # Track successfully processed document
+            self.stats.crawled_urls.append({"url": url, "title": extracted.get('title', '')[:100], "chunks": len(page_chunks)})
+            logger.info(f"✅ Document processed: {url} ({len(page_chunks)} chunks)")
+            
+            # Clean up the downloaded file
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                logger.warning(f"Failed to cleanup document file: {e}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error processing document {url}: {e}")
+            self.stats.failed_urls.append({"url": url, "reason": f"Document processing error: {str(e)[:100]}"})
+            return False
+    
     async def _process_page(self, page, url: str, depth: int, retry_count: int = 0) -> bool:
         """
         Process a single page with retry mechanism.
@@ -629,6 +726,9 @@ class CrawlerEngine:
         Returns:
             True if successful, False otherwise
         """
+        # Check if this is a document URL (PDF/DOCX)
+        if self.config.process_documents and is_document_url(url):
+            return await self._process_document(url, depth)
         # HYBRID FETCH: Try static fetch first (fast), fallback to Playwright for SPAs
         # This optimizes crawl speed by avoiding browser overhead for static sites
         use_static_html = False
