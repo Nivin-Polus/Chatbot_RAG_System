@@ -438,7 +438,7 @@ button {
 }
 
 .prose .sources-section-wrapper:last-child,
-.prose .sources-section-wrapper + * {
+.prose .sources-section-wrapper+* {
   margin-top: 0;
 }
 
@@ -777,11 +777,16 @@ button {
 
 .thinking-content,
 .plugin-thinking-content {
-  background-color: #f3f4f6;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 12px 16px;
-  display: inline-block;
+  display: flex;
+  /* Changed from inline-block to allow proper alignment */
+  align-items: center;
+  gap: 8px;
+  /* Restoring gap potentially needed if inner structure relies on it, though inner has its own flax now */
+  /* background-color, border, border-radius removed to blend with parent msg bubble */
+  padding: 0;
+  /* Remove padding as parent msg has padding */
+  width: 100%;
+  /* Ensure it takes available space in the flex container */
 }
 
 .thinking-inner,
@@ -876,7 +881,8 @@ button {
   border: 1px solid #d1d5db;
   border-radius: 8px;
   padding: 16px;
-  padding-right: 40px; /* Extra padding on right to make room for loader */
+  padding-right: 40px;
+  /* Extra padding on right to make room for loader */
   outline: none;
   background: #fff;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
