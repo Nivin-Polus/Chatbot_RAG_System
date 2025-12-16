@@ -54,6 +54,7 @@ class CrawlerService:
         max_pages: int = 100,
         max_depth: int = 5,
         use_sitemap: bool = True,
+        process_documents: bool = True,
         exclude_patterns: Optional[List[str]] = None,
         include_keywords: Optional[List[str]] = None
     ) -> CrawlerJob:
@@ -67,6 +68,7 @@ class CrawlerService:
             max_pages: Maximum pages to crawl
             max_depth: Maximum link depth
             use_sitemap: Whether to use sitemap for discovery
+            process_documents: Whether to download and process PDF/Word documents
             exclude_patterns: URL patterns to exclude
             include_keywords: Only crawl URLs containing these keywords
             
@@ -79,7 +81,8 @@ class CrawlerService:
             "collection_id": collection_id,
             "max_pages": max_pages,
             "max_depth": max_depth,
-            "use_sitemap": use_sitemap
+            "use_sitemap": use_sitemap,
+            "process_documents": process_documents
         }
         
         if exclude_patterns:

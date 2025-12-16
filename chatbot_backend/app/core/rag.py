@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple, Union
 import requests
 import json
 import re
@@ -12,6 +12,18 @@ from app.config import settings
 from app.models.system_prompt import SystemPrompt
 from app.models.collection import Collection
 from app.core.database import get_db
+
+# AI Classification instruction - appended to every prompt independently of user-configurable system prompts
+# This ensures users cannot disable the generic detection functionality
+CLASSIFICATION_INSTRUCTION = """
+
+[SYSTEM CLASSIFICATION INSTRUCTION - DO NOT OMIT]
+After your response, you MUST add one of these tags on a new line:
+- If you were able to provide a helpful, substantive answer based on the provided context: [RESPONSE_TYPE:INFORMATIVE]
+- If you could NOT find relevant information in the context, OR the question is just a greeting/small talk, OR you had to say "I don't have information": [RESPONSE_TYPE:GENERIC]
+
+This tag is required for internal processing. Place it at the very end of your response.
+"""
 
 # Default system prompt - can be overridden via environment variable or config
 DEFAULT_SYSTEM_PROMPT = """You are a helpful AI assistant for a knowledge base system. Your role is to respond naturally and conversationally based on the provided context from uploaded documents.
@@ -99,12 +111,66 @@ class RAG:
 
         return normalized in small_talk_phrases
 
-    def _handle_small_talk(self, query: str) -> str:
+    def _handle_small_talk(self, query: str) -> Dict[str, any]:
         """Return a friendly response for small talk interactions."""
-        return (
-            "Hello! I'm here to help with questions about your knowledge base documents. "
-            "Let me know what you'd like to learn or explore."
-        )
+        return {
+            "answer": "Hello! I'm here to help with questions about your knowledge base documents. "
+                      "Let me know what you'd like to learn or explore.",
+            "is_generic": True
+        }
+
+    def _parse_ai_response(self, raw_response: str) -> Dict[str, any]:
+        """Parse AI response to extract the classification tag and clean answer.
+        
+        Returns:
+            dict with 'answer' (cleaned text) and 'is_generic' (bool)
+        """
+        if not raw_response:
+            return {"answer": "", "is_generic": True}
+        
+        # Look for the classification tag anywhere in the response (typically at the end)
+        # Pattern matches the tag with optional surrounding whitespace/newlines
+        informative_pattern = r'\s*\[RESPONSE_TYPE:INFORMATIVE\]\s*'
+        generic_pattern = r'\s*\[RESPONSE_TYPE:GENERIC\]\s*'
+        
+        is_generic = False
+        cleaned_response = raw_response
+        
+        # Check for informative tag
+        if re.search(r'\[RESPONSE_TYPE:INFORMATIVE\]', raw_response, re.IGNORECASE):
+            is_generic = False
+            cleaned_response = re.sub(informative_pattern, '', raw_response, flags=re.IGNORECASE).strip()
+        # Check for generic tag
+        elif re.search(r'\[RESPONSE_TYPE:GENERIC\]', raw_response, re.IGNORECASE):
+            is_generic = True
+            cleaned_response = re.sub(generic_pattern, '', raw_response, flags=re.IGNORECASE).strip()
+        else:
+            # Fallback: If no tag found, use heuristic based on common "I don't know" phrases
+            # This is a safety net in case the AI doesn't follow instructions
+            fallback_generic_patterns = [
+                r"i don't have (any |enough )?information",
+                r"i do not have (any |enough )?information",
+                r"i wasn't able to (find|retrieve)",
+                r"i couldn't find",
+                r"no relevant information",
+                r"please refine your question",
+                r"not covered in the knowledge base",
+                r"unfortunately.{0,50}(don't|do not|cannot|can't|unable|no information)",
+                r"i apologize.{0,30}(don't|do not|cannot|can't|unable)",
+                r"outside of my scope",
+                r"i'm (not able|unable) to",
+                r"i am (not able|unable) to",
+                r"beyond my (knowledge|scope|capabilities)",
+                r"i'm here to help with questions about your knowledge base",
+                r"let me know what you'd like to learn",
+            ]
+            normalized = raw_response.lower()
+            for pattern in fallback_generic_patterns:
+                if re.search(pattern, normalized):
+                    is_generic = True
+                    break
+        
+        return {"answer": cleaned_response, "is_generic": is_generic}
 
     def get_prompt_for_collection(self, collection_id: str) -> Optional[SystemPrompt]:
         """Get the active prompt for a specific collection from database"""
@@ -234,14 +300,21 @@ class RAG:
             print(f"AI Provider Error ({self.ai_provider}): {e}")
             return "I wasn't able to retrieve a confident answer, please refine your question."
 
-    def answer(self, query: str, top_k: int = 5, collection_id: Optional[str] = None) -> str:
-        """Main pipeline: retrieve → medium-detailed answer with source references using collection-specific prompt."""
+    def answer(self, query: str, top_k: int = 5, collection_id: Optional[str] = None) -> Union[str, Dict[str, any]]:
+        """Main pipeline: retrieve → medium-detailed answer with source references using collection-specific prompt.
+        
+        Returns:
+            dict with 'answer' (str) and 'is_generic' (bool) for AI classification
+        """
         if self._is_small_talk(query):
             return self._handle_small_talk(query)
 
         chunks_with_sources = self.retrieve_chunks(query, top_k=top_k, collection_id=collection_id)
         if not chunks_with_sources:
-            return "I wasn't able to retrieve a confident answer, please refine your question."
+            return {
+                "answer": "I wasn't able to retrieve a confident answer, please refine your question.",
+                "is_generic": True
+            }
 
         system_prompt, model, max_tokens, temperature = self._resolve_prompt_settings(collection_id)
 
@@ -261,7 +334,7 @@ class RAG:
         
         context = "\n\n---\n\n".join(context_parts)
         
-        # Enhanced prompt with source instruction
+        # Enhanced prompt with source instruction + classification instruction (tamper-proof)
         enhanced_prompt = f"""{system_prompt}
 
 IMPORTANT: At the end of your response, always include a "Sources:" section listing the specific files you referenced.
@@ -271,13 +344,20 @@ Context from uploaded documents:
 
 Question: {query}
 Answer:"""
+        # Append classification instruction (cannot be overridden by user-configurable prompts)
+        enhanced_prompt += CLASSIFICATION_INSTRUCTION
         
         # Extract values from SQLAlchemy model objects
         model_value = model if isinstance(model, str) else getattr(model, 'model_name', self.default_model)
         max_tokens_value = max_tokens if isinstance(max_tokens, int) else getattr(max_tokens, 'max_tokens', self.default_max_tokens)
         temperature_value = temperature if isinstance(temperature, (int, float)) else getattr(temperature, 'temperature', self.default_temperature)
         
-        answer = self.call_ai(enhanced_prompt, model=model_value, max_tokens=max_tokens_value, temperature=temperature_value)
+        raw_answer = self.call_ai(enhanced_prompt, model=model_value, max_tokens=max_tokens_value, temperature=temperature_value)
+        
+        # Parse AI response to extract classification
+        parsed = self._parse_ai_response(raw_answer)
+        answer = parsed["answer"]
+        is_generic = parsed["is_generic"]
         
         # ALWAYS add formatted sources - remove any AI-generated sources section first
         # Format: [file_name](reference|source_type) for frontend parsing
@@ -298,7 +378,7 @@ Answer:"""
         if source_list:
             answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
 
-        return answer
+        return {"answer": answer, "is_generic": is_generic}
 
     def answer_with_context(
         self,
@@ -306,14 +386,21 @@ Answer:"""
         conversation_history: List,
         top_k: int = 5,
         collection_id: Optional[str] = None
-    ) -> str:
-        """Main pipeline with conversation context: retrieve → contextual answer with source references."""
+    ) -> Union[str, Dict[str, any]]:
+        """Main pipeline with conversation context: retrieve → contextual answer with source references.
+        
+        Returns:
+            dict with 'answer' (str) and 'is_generic' (bool) for AI classification
+        """
         if self._is_small_talk(query):
             return self._handle_small_talk(query)
 
         chunks_with_sources = self.retrieve_chunks(query, top_k=top_k, collection_id=collection_id)
         if not chunks_with_sources:
-            return "I wasn't able to retrieve a confident answer, please refine your question."
+            return {
+                "answer": "I wasn't able to retrieve a confident answer, please refine your question.",
+                "is_generic": True
+            }
 
         system_prompt, model, max_tokens, temperature = self._resolve_prompt_settings(collection_id)
 
@@ -363,13 +450,20 @@ Context from uploaded documents:
 
 Question: {query}
 Answer:"""
+        # Append classification instruction (cannot be overridden by user-configurable prompts)
+        enhanced_prompt += CLASSIFICATION_INSTRUCTION
         
         # Extract values from SQLAlchemy model objects
         model_value = model if isinstance(model, str) else getattr(model, 'model_name', self.default_model)
         max_tokens_value = max_tokens if isinstance(max_tokens, int) else getattr(max_tokens, 'max_tokens', self.default_max_tokens)
         temperature_value = temperature if isinstance(temperature, (int, float)) else getattr(temperature, 'temperature', self.default_temperature)
         
-        answer = self.call_ai(enhanced_prompt, model=model_value, max_tokens=max_tokens_value, temperature=temperature_value)
+        raw_answer = self.call_ai(enhanced_prompt, model=model_value, max_tokens=max_tokens_value, temperature=temperature_value)
+        
+        # Parse AI response to extract classification
+        parsed = self._parse_ai_response(raw_answer)
+        answer = parsed["answer"]
+        is_generic = parsed["is_generic"]
         
         # ALWAYS add formatted sources - remove any AI-generated sources section first
         # Format: [file_name](reference|source_type) for frontend parsing
@@ -390,4 +484,4 @@ Answer:"""
         if source_list:
             answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
 
-        return answer
+        return {"answer": answer, "is_generic": is_generic}

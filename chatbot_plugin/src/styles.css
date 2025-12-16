@@ -143,14 +143,14 @@
   transform: translate(-50%, -6px) scale(0.95);
   background: #ffffff;
   color: #111827;
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.18s ease, transform 0.18s ease;
-  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
   border: 1px solid rgba(17, 24, 39, 0.12);
   z-index: 10;
 }
@@ -769,6 +769,54 @@ button {
   }
 }
 
+/* Thinking indicator styles */
+.thinking-indicator,
+.plugin-thinking-indicator {
+  /* No additional padding needed - msg class already provides padding */
+}
+
+.thinking-content,
+.plugin-thinking-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.thinking-logo,
+.plugin-thinking-logo {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.thinking-spinner,
+.plugin-thinking-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #d1d5db;
+  border-top-color: #6b7280;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.thinking-text,
+.plugin-thinking-text {
+  font-size: 14px;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .chat-input {
   display: flex;
   border-top: 1px solid #ddd;
@@ -818,6 +866,7 @@ button {
   border: 1px solid #d1d5db;
   border-radius: 8px;
   padding: 16px;
+  padding-right: 40px; /* Extra padding on right to make room for loader */
   outline: none;
   background: #fff;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -832,6 +881,30 @@ button {
 .chat-input input:disabled {
   background-color: #f3f4f6;
   color: #6b7280;
+}
+
+/* Input loader styles */
+.input-loader,
+.plugin-input-loader {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.loader-spinner,
+.plugin-loader-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #d1d5db;
+  border-top-color: #6b7280;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
 
 .chat-input button {

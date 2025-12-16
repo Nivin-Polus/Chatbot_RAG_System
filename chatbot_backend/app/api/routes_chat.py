@@ -299,7 +299,7 @@ def _process_chat_request(
     try:
         if maintain_context and conversation_history:
             logger.info(f"[CONTEXT] Using context with {len(conversation_history)} messages")
-            answer_text = rag_instance.answer_with_context(
+            rag_result = rag_instance.answer_with_context(
                 question,
                 conversation_history,
                 top_k=top_k,
@@ -307,11 +307,21 @@ def _process_chat_request(
             )
         else:
             logger.info("[CONTEXT] Using basic RAG without context")
-            answer_text = rag_instance.answer(
+            rag_result = rag_instance.answer(
                 question,
                 top_k=top_k,
                 collection_id=effective_collection_id,
             )
+        
+        # Handle new dict return format from RAG (contains 'answer' and 'is_generic')
+        if isinstance(rag_result, dict):
+            answer_text = rag_result.get("answer", "")
+            is_generic_from_ai = rag_result.get("is_generic", False)
+        else:
+            # Fallback for string return (shouldn't happen with updated RAG)
+            answer_text = rag_result
+            is_generic_from_ai = _is_generic_query(question) or _is_generic_response(answer_text)
+        
     except Exception as e:
         logger.error(f"[RAG ERROR] Failed to generate answer: {str(e)}")
         return ChatResponse(
@@ -320,6 +330,7 @@ def _process_chat_request(
             is_generic=True,
             sources=sources_payload,
         )
+
 
     if r:
         r.set(cache_key, answer_text, ex=60 * 60 * 24)
@@ -395,8 +406,9 @@ def _process_chat_request(
     except Exception as e:
         logger.error(f"Failed to log chat history to file: {str(e)}")
 
-    # Determine if response is generic (greeting or "I don't know" type)
-    is_generic = _is_generic_query(question) or _is_generic_response(answer_text)
+    # Use AI-provided is_generic flag (set by RAG via classification instruction in prompt)
+    # Falls back to regex-based detection only if RAG returned a string (legacy behavior)
+    is_generic = is_generic_from_ai
     
     # Don't send sources for generic responses
     if is_generic:

@@ -29,7 +29,7 @@ import "./styles.css";
   let typingInterval = null;
 
   // Wait for DOM to be ready before accessing elements
-  let chatBox, chatEmpty, input, sendBtn, stopBtn;
+  let chatBox, chatEmpty, input, sendBtn, stopBtn, inputLoader;
   let inFlight = false;
   let abortController = null;
   let currentTypingFinish = null;
@@ -78,6 +78,7 @@ import "./styles.css";
   input = document.getElementById("chat-message");
   sendBtn = document.getElementById("chat-send");
   stopBtn = document.getElementById("chat-stop");
+  inputLoader = document.getElementById("input-loader");
 
   // Store original send button HTML for restoration
   if (sendBtn) {
@@ -325,6 +326,10 @@ import "./styles.css";
     if (stopBtn) {
       stopBtn.style.display = "none";
     }
+    // Hide input loader
+    if (inputLoader) {
+      inputLoader.style.display = "none";
+    }
   }
 
   function showProcessingState() {
@@ -335,6 +340,10 @@ import "./styles.css";
     }
     if (stopBtn) {
       stopBtn.style.display = "inline-flex";
+    }
+    // Show input loader
+    if (inputLoader) {
+      inputLoader.style.display = "flex";
     }
   }
 
@@ -482,6 +491,10 @@ import "./styles.css";
       input.disabled = false;
     }
     showSendButton();
+    // Hide input loader
+    if (inputLoader) {
+      inputLoader.style.display = "none";
+    }
 
     // Clear context and messages
     chatService.clearContext();
@@ -807,8 +820,13 @@ import "./styles.css";
       </div>`;
     }
     if (message.isTypingIndicator) {
-      return `<div class="plugin-msg msg bot typing">
-        <div class="plugin-typing-dots typing-dots"><span></span><span></span><span></span></div>
+      const logoUrl = CONFIG.ui.logoUrl || `${CONFIG.ui.iconsBaseUrl}/logo.svg`;
+      return `<div class="plugin-msg msg bot typing thinking-indicator">
+        <div class="plugin-thinking-content thinking-content">
+          <img src="${logoUrl}" alt="Leto logo" class="plugin-thinking-logo thinking-logo" />
+          <div class="plugin-thinking-spinner thinking-spinner"></div>
+          <span class="plugin-thinking-text thinking-text">Leto is thinking...</span>
+        </div>
       </div>`;
     }
     const classes = ["msg", "bot"];

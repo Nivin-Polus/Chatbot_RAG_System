@@ -30,7 +30,6 @@ import { getAssetUrl } from '@/utils/assets';
 // Navigation definitions
 const superadminNav = [
   { title: 'Knowledge Base', url: '/superadmin', icon: Layers },
-  { title: 'Web Crawler', url: '/superadmin/crawler', icon: Globe },
   { title: 'Users', url: '/superadmin/users', icon: Users },
   { title: 'Plugins', url: '/superadmin/plugins', icon: Link2 },
   { title: 'Chat', url: '/superadmin/chat', icon: MessageSquare },
@@ -48,7 +47,6 @@ const adminNav = (collectionId?: string) => [
 
 const userAdminNav = () => [
   { title: 'Knowledge Base', url: `/useradmin/knowledge-base`, icon: Layers },
-  { title: 'Web Crawler', url: `/useradmin/crawler`, icon: Globe },
   { title: 'Users', url: `/useradmin/users`, icon: Users },
   { title: 'Plugins', url: `/useradmin/plugins`, icon: Link2 },
   { title: 'Chat', url: `/useradmin/chat`, icon: MessageSquare },

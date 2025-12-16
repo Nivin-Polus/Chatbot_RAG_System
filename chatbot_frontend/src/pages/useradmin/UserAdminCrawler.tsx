@@ -541,6 +541,31 @@ export default function UserAdminCrawler() {
                                         </Tooltip>
                                     </div>
                                 </div>
+                                <div className="space-y-2 md:col-span-2">
+                                    <div className="flex items-center gap-2">
+                                        <Switch
+                                            id="process-documents"
+                                            checked={processDocuments}
+                                            onCheckedChange={setProcessDocuments}
+                                        />
+                                        <Label htmlFor="process-documents">Download and process PDF/Word documents</Label>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <span className="inline-flex cursor-help text-muted-foreground hover:text-foreground transition-colors">
+                                                    <Info className="h-4 w-4" />
+                                                </span>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="right" className="max-w-[240px] p-2">
+                                                <div className="space-y-1">
+                                                    <p className="text-xs font-medium">Document processing</p>
+                                                    <p className="text-xs">
+                                                        When enabled, the crawler downloads PDF and Word (.docx) documents and extracts their text content to include in the knowledge base.
+                                                    </p>
+                                                </div>
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    </div>
+                                </div>
                                 <div className="space-y-2">
                                     <div className="flex items-center gap-2">
                                         <Label htmlFor="exclude-patterns">Exclude Patterns (one per line)</Label>

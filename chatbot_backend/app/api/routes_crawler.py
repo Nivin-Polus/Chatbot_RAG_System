@@ -40,6 +40,7 @@ class StartCrawlRequest(BaseModel):
     max_pages: int = Field(default=0, ge=0, le=100000, description="Maximum pages to crawl (0 = unlimited)")
     max_depth: int = Field(default=5, ge=1, le=15, description="Maximum link depth")
     use_sitemap: bool = Field(default=True, description="Use sitemap for URL discovery")
+    process_documents: bool = Field(default=True, description="Download and process PDF/Word documents")
     
     exclude_patterns: Optional[List[str]] = Field(
         default=None,
@@ -173,6 +174,7 @@ async def start_crawl(
             max_pages=request.max_pages,
             max_depth=request.max_depth,
             use_sitemap=request.use_sitemap,
+            process_documents=request.process_documents,
             exclude_patterns=request.exclude_patterns,
             include_keywords=request.include_keywords
         )
@@ -501,6 +503,7 @@ async def recrawl(
         max_pages=config.get('max_pages', 0),  # 0 = unlimited
         max_depth=config.get('max_depth', 5),
         use_sitemap=config.get('use_sitemap', True),
+        process_documents=config.get('process_documents', True),
         exclude_patterns=config.get('exclude_patterns'),
         include_keywords=config.get('include_keywords')
     )

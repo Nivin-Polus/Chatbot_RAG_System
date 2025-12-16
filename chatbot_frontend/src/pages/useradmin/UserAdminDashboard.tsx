@@ -39,6 +39,7 @@ import {
 import { User, UserRole, FileItem, Prompt, Collection } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost, apiPut, apiDelete, apiUpload } from '@/utils/api';
+import CrawlerView from '@/components/CrawlerView';
 
 type CollectionSummary = {
   collection_id: string;
@@ -55,7 +56,7 @@ export default function UserAdminDashboard() {
   const [collection, setCollection] = useState<Collection | null>(null);
   const [selectedCollectionId, setSelectedCollectionId] = useState<string>('');
   const [collectionDetails, setCollectionDetails] = useState<Collection | null>(null);
-  const [knowledgeTab, setKnowledgeTab] = useState<'files' | 'prompts'>('files');
+  const [knowledgeTab, setKnowledgeTab] = useState<'files' | 'prompts' | 'crawler'>('files');
 
   const [users, setUsers] = useState<User[]>([]);
   const [isLoadingCollections, setIsLoadingCollections] = useState(true);
@@ -283,7 +284,7 @@ export default function UserAdminDashboard() {
   }, [selectedCollectionId, activeSection, knowledgeTab, fetchCollectionDetails, fetchUsers, fetchFiles, fetchPrompts]);
 
   const handleKnowledgeTabChange = (value: string) => {
-    if (value === 'files' || value === 'prompts') {
+    if (value === 'files' || value === 'prompts' || value === 'crawler') {
       setKnowledgeTab(value);
     }
   };
@@ -736,7 +737,7 @@ export default function UserAdminDashboard() {
           <Card>
             <CardHeader>
               <CardTitle>
-              {collection.name ? `  ${collection.name}` : ''} Knowledge Base
+                {collection.name ? `  ${collection.name}` : ''} Knowledge Base
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -777,7 +778,7 @@ export default function UserAdminDashboard() {
                       <Users className="h-5 w-5" />
                       Users
                     </CardTitle>
-                   
+
                   </div>
                   <Button onClick={() => openUserDialog()} disabled={isLoadingUsers}>
                     <Plus className="mr-2 h-4 w-4" />
@@ -939,7 +940,12 @@ export default function UserAdminDashboard() {
             <TabsList>
               <TabsTrigger value="files">Files</TabsTrigger>
               <TabsTrigger value="prompts">Prompts</TabsTrigger>
+              <TabsTrigger value="crawler">Web Crawler</TabsTrigger>
             </TabsList>
+
+            <TabsContent value="crawler">
+              <CrawlerView collectionId={selectedCollectionId} />
+            </TabsContent>
 
             <TabsContent value="files" className="space-y-6">
               <Card>
@@ -950,7 +956,7 @@ export default function UserAdminDashboard() {
                         <Database className="h-5 w-5" />
                         Files
                       </CardTitle>
-                      
+
                     </div>
                     <Button onClick={() => setIsFileDialogOpen(true)}>
                       <Upload className="mr-2 h-4 w-4" />
@@ -1061,13 +1067,12 @@ export default function UserAdminDashboard() {
                                 {fileName}
                               </span>
                               <span
-                                className={`text-xs font-semibold ${
-                                  status === 'success'
-                                    ? 'text-green-600'
-                                    : status === 'error'
+                                className={`text-xs font-semibold ${status === 'success'
+                                  ? 'text-green-600'
+                                  : status === 'error'
                                     ? 'text-red-600'
                                     : 'text-muted-foreground'
-                                }`}
+                                  }`}
                               >
                                 {status === 'pending' && 'Uploading...'}
                                 {status === 'success' && 'Uploaded'}

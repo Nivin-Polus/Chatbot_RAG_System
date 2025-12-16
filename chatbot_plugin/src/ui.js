@@ -89,6 +89,9 @@ export class ChatbotUI {
                  aria-label="${this.escapeHtml(welcomeMessage)}" 
                  maxlength="500"/>
           <span class="plugin-custom-placeholder custom-placeholder">${welcomeMessage}</span>
+          <div class="plugin-input-loader input-loader" id="input-loader" style="display: none;">
+            <div class="plugin-loader-spinner loader-spinner"></div>
+          </div>
         </div>
         <button type="button" id="chat-stop" title="Stop" style="display:none" aria-label="Stop">
           <span class="plugin-icon icon" style="--icon-url: url('${CONFIG.ui.apiBase}/dist/assets/close.svg');" aria-hidden="true"></span>
