@@ -777,13 +777,25 @@ button {
 
 .thinking-content,
 .plugin-thinking-content {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   background-color: #f3f4f6;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 12px 16px;
+  display: inline-block;
+}
+
+.thinking-inner,
+.plugin-thinking-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.thinking-status,
+.plugin-thinking-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .thinking-logo,
@@ -797,10 +809,8 @@ button {
 .plugin-thinking-spinner {
   width: 16px;
   height: 16px;
-  border: 2px solid #d1d5db;
-  border-top-color: #6b7280;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  animation: spin 1s linear infinite;
+  color: #6b7280;
   flex-shrink: 0;
 }
 
