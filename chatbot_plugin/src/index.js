@@ -29,12 +29,14 @@ import "./styles.css";
   let typingInterval = null;
 
   // Wait for DOM to be ready before accessing elements
-  let chatBox, chatEmpty, input, sendBtn, stopBtn, inputLoader;
+  let chatBox, chatEmpty, input, sendBtn, stopBtn;
   let inFlight = false;
   let abortController = null;
   let currentTypingFinish = null;
   let currentRequestId = null; // Track current request to prevent old responses from updating UI
   let originalSendBtnHTML = null; // Store original send button HTML
+  let isTypingMessage = false; // Track if a message is currently being typed/streamed
+  let initialTypingScrollDone = false; // Track if we've scrolled to show the start of the typing message
 
   // LocalStorage keys for chat history
   const CHAT_HISTORY_KEY = 'chatbot_chat_history';
@@ -78,7 +80,6 @@ import "./styles.css";
   input = document.getElementById("chat-message");
   sendBtn = document.getElementById("chat-send");
   stopBtn = document.getElementById("chat-stop");
-  inputLoader = document.getElementById("input-loader");
 
   // Store original send button HTML for restoration
   if (sendBtn) {
@@ -326,10 +327,7 @@ import "./styles.css";
     if (stopBtn) {
       stopBtn.style.display = "none";
     }
-    // Hide input loader
-    if (inputLoader) {
-      inputLoader.style.display = "none";
-    }
+    // Input loader removed - no loader in input box
   }
 
   function showProcessingState() {
@@ -341,10 +339,7 @@ import "./styles.css";
     if (stopBtn) {
       stopBtn.style.display = "inline-flex";
     }
-    // Show input loader
-    if (inputLoader) {
-      inputLoader.style.display = "flex";
-    }
+    // Input loader removed - no loader in input box
   }
 
   async function handleSendMessage() {
@@ -485,16 +480,14 @@ import "./styles.css";
 
     // Reset state flags
     inFlight = false;
+    isTypingMessage = false; // Reset typing state
+    initialTypingScrollDone = false;
 
     // Re-enable UI elements
     if (input) {
       input.disabled = false;
     }
     showSendButton();
-    // Hide input loader
-    if (inputLoader) {
-      inputLoader.style.display = "none";
-    }
 
     // Clear context and messages
     chatService.clearContext();
@@ -617,7 +610,11 @@ import "./styles.css";
 
       // Store preserved sources with all fields, even if not displayed
       const typingMessage = addMessage({ user: false, text: "", formatted: true, isTyping: true, sources: preservedSources });
-      scrollChatToBottom();
+      // Mark that we're typing a message and scroll to show the start of it
+      isTypingMessage = true;
+      initialTypingScrollDone = false;
+      scrollChatToBottom(); // Scroll once to show the start of the message
+      initialTypingScrollDone = true; // Mark that initial scroll is done
       let completed = false;
 
       const finishTyping = () => {
@@ -629,6 +626,8 @@ import "./styles.css";
           const index = messages.indexOf(typingMessage);
           if (index !== -1) {
             messages.splice(index, 1);
+            isTypingMessage = false; // Reset typing state
+            initialTypingScrollDone = false;
             renderMessages();
           }
           resolve();
@@ -638,6 +637,8 @@ import "./styles.css";
         completed = true;
         typingMessage.text = enhancedText;
         typingMessage.isTyping = false;
+        isTypingMessage = false; // No longer typing
+        initialTypingScrollDone = false;
         renderMessages();
         resolve();
         showSendButton();
@@ -645,7 +646,7 @@ import "./styles.css";
         abortController = null;
         currentTypingFinish = null;
         input.focus();
-        if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
+        // Don't scroll at the end - let user control scrolling
       };
 
       if (!enhancedText || document.hidden) {
@@ -672,7 +673,7 @@ import "./styles.css";
 
         index += 1;
         typingMessage.text = enhancedText.slice(0, index);
-        renderMessages();
+        renderMessages(); // renderMessages won't auto-scroll during typing
 
         if (index >= enhancedText.length) {
           clearInterval(typingInterval);
@@ -807,8 +808,15 @@ import "./styles.css";
     const html = messages.map(renderMessageHtml).join("");
     chatBox.innerHTML = html;
 
-    if (wasNearBottom) chatBox.scrollTop = chatBox.scrollHeight;
-    else chatBox.scrollTop = previousScrollTop;
+    // If a message is being typed/streamed, preserve scroll position (don't auto-scroll)
+    // Only scroll if we're not currently typing a message
+    if (!isTypingMessage) {
+      if (wasNearBottom) chatBox.scrollTop = chatBox.scrollHeight;
+      else chatBox.scrollTop = previousScrollTop;
+    } else {
+      // During typing, preserve the scroll position
+      chatBox.scrollTop = previousScrollTop;
+    }
 
     if (chatEmpty) chatEmpty.style.display = messages.length ? "none" : "flex";
   }
@@ -820,7 +828,7 @@ import "./styles.css";
       </div>`;
     }
     if (message.isTypingIndicator) {
-      const logoUrl = CONFIG.ui.logoUrl || `${CONFIG.ui.iconsBaseUrl}/logo.svg`;
+      const logoUrl = CONFIG.ui.placeholderLogoUrl || CONFIG.ui.logoUrl || `${CONFIG.ui.iconsBaseUrl}/logo1.svg`;
       return `<div class="plugin-msg msg bot typing thinking-indicator">
         <div class="plugin-thinking-content thinking-content">
           <div class="plugin-thinking-inner thinking-inner">

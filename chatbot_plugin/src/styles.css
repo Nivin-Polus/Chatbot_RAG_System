@@ -881,8 +881,7 @@ button {
   border: 1px solid #d1d5db;
   border-radius: 8px;
   padding: 16px;
-  padding-right: 40px;
-  /* Extra padding on right to make room for loader */
+  padding-right: 16px;
   outline: none;
   background: #fff;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -897,30 +896,6 @@ button {
 .chat-input input:disabled {
   background-color: #f3f4f6;
   color: #6b7280;
-}
-
-/* Input loader styles */
-.input-loader,
-.plugin-input-loader {
-  position: absolute;
-  top: 50%;
-  right: 16px;
-  transform: translateY(-50%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  z-index: 1;
-}
-
-.loader-spinner,
-.plugin-loader-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid #d1d5db;
-  border-top-color: #6b7280;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
 }
 
 .chat-input button {
