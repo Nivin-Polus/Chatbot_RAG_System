@@ -26,7 +26,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Plus, Pencil, Trash2, Loader2, Search, Folder, FileCode, Copy } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Search, Folder, FileCode, Copy, Globe } from 'lucide-react';
 import { Collection } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost, apiDelete, apiPut } from '@/utils/api';
@@ -458,7 +458,7 @@ export default function SuperadminDashboard() {
                     <TableHead>Collection ID</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead className="text-center">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -510,8 +510,23 @@ export default function SuperadminDashboard() {
                       <TableCell className="text-muted-foreground">
                         {new Date(collection.created_at).toLocaleDateString()}
                       </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end space-x-1">
+                      <TableCell className="text-center">
+                        <div className="flex items-center justify-center space-x-1">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => navigate(`/superadmin/crawler?collectionId=${collection.collection_id}`)}
+                                className="hover:bg-accent"
+                              >
+                                <Globe className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              Crawl Website
+                            </TooltipContent>
+                          </Tooltip>
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button

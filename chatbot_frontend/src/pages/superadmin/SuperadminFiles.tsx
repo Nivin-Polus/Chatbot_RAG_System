@@ -227,8 +227,8 @@ export default function SuperadminFiles() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
-        <div>
+      <div className="space-y-6 relative">
+        <div className="pt-8">
           <h1 className="text-3xl font-bold">Files Management</h1>
           <p className="text-muted-foreground">Upload and manage files for collections</p>
         </div>
@@ -340,13 +340,12 @@ export default function SuperadminFiles() {
                           <TableCell className="font-medium">{file.file_name}</TableCell>
                           <TableCell>{formatFileSize(file.file_size)}</TableCell>
                           <TableCell>
-                            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                              file.processing_status === 'completed'
-                                ? 'bg-green-100 text-green-800'
-                                : file.processing_status === 'processing'
+                            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${file.processing_status === 'completed'
+                              ? 'bg-green-100 text-green-800'
+                              : file.processing_status === 'processing'
                                 ? 'bg-yellow-100 text-yellow-800'
                                 : 'bg-red-100 text-red-800'
-                            }`}>
+                              }`}>
                               {file.processing_status}
                             </span>
                           </TableCell>

@@ -198,8 +198,8 @@ export default function SuperadminPrompts() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
+      <div className="space-y-6 relative">
+        <div className="flex items-center justify-between pt-8">
           <div>
             <h1 className="text-3xl font-bold">Prompts Management</h1>
             <p className="text-muted-foreground">Manage prompts for knowledge base</p>
@@ -261,8 +261,8 @@ export default function SuperadminPrompts() {
                             {editingPrompt ? 'Edit Prompt' : 'Create New Prompt'}
                           </DialogTitle>
                           <DialogDescription>
-                            {editingPrompt 
-                              ? 'Update the prompt details' 
+                            {editingPrompt
+                              ? 'Update the prompt details'
                               : 'Create a new prompt for the selected knowledge base'
                             }
                           </DialogDescription>
@@ -332,18 +332,17 @@ export default function SuperadminPrompts() {
                         <TableRow key={prompt.prompt_id}>
                           <TableCell className="font-medium">{prompt.name}</TableCell>
                           <TableCell className="text-muted-foreground max-w-xs truncate">
-                            {prompt.system_prompt.length > 100 
-                              ? `${prompt.system_prompt.substring(0, 100)}...` 
+                            {prompt.system_prompt.length > 100
+                              ? `${prompt.system_prompt.substring(0, 100)}...`
                               : prompt.system_prompt
                             }
                           </TableCell>
                           <TableCell>
                             <span
-                              className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                                prompt.is_default
-                                  ? 'bg-blue-100 text-blue-800'
-                                  : 'bg-gray-100 text-gray-800'
-                              }`}
+                              className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${prompt.is_default
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-gray-100 text-gray-800'
+                                }`}
                             >
                               {prompt.is_default ? 'Default' : '—'}
                             </span>

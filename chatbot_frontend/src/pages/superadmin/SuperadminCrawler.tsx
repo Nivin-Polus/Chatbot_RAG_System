@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Button } from '@/components/ui/button';
@@ -20,6 +21,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import {
   Card,
   CardContent,
@@ -49,7 +55,7 @@ import {
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import {
   Globe,
   Play,
@@ -68,6 +74,8 @@ import {
   Timer,
   Eye,
   Info,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiGet, apiPost, apiDelete } from '@/utils/api';
@@ -102,6 +110,8 @@ interface CrawlJob {
 
 export default function SuperadminCrawler() {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [collections, setCollections] = useState<Collection[]>([]);
   const [jobs, setJobs] = useState<CrawlJob[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -134,7 +144,7 @@ export default function SuperadminCrawler() {
   const [maxPages, setMaxPages] = useState<number | string>(0); // 0 = unlimited
   const [maxDepth, setMaxDepth] = useState<number | string>(5);
   const [useSitemap, setUseSitemap] = useState(true);
-  const [processDocuments, setProcessDocuments] = useState(true);
+  const [processDocuments, setProcessDocuments] = useState(false);
   const [excludePatterns, setExcludePatterns] = useState('/login\n/admin\n/cart');
   const [includeKeywords, setIncludeKeywords] = useState('');
 
@@ -150,6 +160,12 @@ export default function SuperadminCrawler() {
         // Handle both array response and object with collections property
         const collectionList = Array.isArray(data) ? data : (data.collections || []);
         setCollections(collectionList);
+
+        // Check for collectionId in URL and set it if present in the fetched list
+        const urlCollectionId = searchParams.get('collectionId');
+        if (urlCollectionId && collectionList.some((c: Collection) => c.collection_id === urlCollectionId)) {
+          setSelectedCollection(urlCollectionId);
+        }
       }
     } catch (error) {
       console.error('Failed to fetch collections:', error);
@@ -452,614 +468,601 @@ export default function SuperadminCrawler() {
   };
 
   // Active jobs
-  const activeJobs = jobs.filter(j => j.status === 'running' || j.status === 'pending');
-  const scheduledJobs = jobs.filter(j => j.is_scheduled === true);
-  const completedJobs = jobs.filter(j => j.status !== 'running' && j.status !== 'pending' && j.status !== 'scheduled');
+  const activeJobs = jobs
+    .filter(j => j.status === 'running' || j.status === 'pending')
+    .filter(j => !selectedCollection || j.collection_id === selectedCollection);
+
+  const scheduledJobs = jobs
+    .filter(j => j.is_scheduled === true)
+    .filter(j => !selectedCollection || j.collection_id === selectedCollection);
+
+  const completedJobs = jobs
+    .filter(j => j.status !== 'running' && j.status !== 'pending' && j.status !== 'scheduled')
+    .filter(j => !selectedCollection || j.collection_id === selectedCollection);
 
   return (
     <DashboardLayout>
-      <div className="space-y-6 h-full overflow-y-auto overflow-x-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              <Globe className="h-6 w-6" />
-              Web Crawler
-            </h1>
-            <p className="text-muted-foreground">
-              Crawl websites and add content to your knowledge base automatically
-            </p>
-          </div>
-          <Button variant="outline" onClick={fetchJobs}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
-        </div>
-
-        {/* Start New Crawl */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Play className="h-5 w-5" />
-              Start New Crawl
-            </CardTitle>
-            <CardDescription>
-              Enter a website URL to crawl and select the target knowledge base
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="target-url">Website URL</Label>
-                <Input
-                  id="target-url"
-                  placeholder="https://example.com"
-                  value={targetUrl}
-                  onChange={(e) => setTargetUrl(e.target.value)}
-                />
+      <TooltipProvider>
+        <div className="space-y-6 h-full overflow-y-auto overflow-x-hidden">
+          <div className="space-y-6 relative">
+            {/* Header */}
+            <div className="flex items-center justify-between pt-8">
+              <div>
+                <h1 className="text-2xl font-bold flex items-center gap-2">
+                  <Globe className="h-6 w-6" />
+                  Web Crawler
+                </h1>
+                <p className="text-muted-foreground">
+                  Crawl websites and add content to your knowledge base automatically
+                </p>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="collection">Knowledge Base</Label>
-                <Select value={selectedCollection} onValueChange={setSelectedCollection}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select knowledge base" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {collections.map((collection) => (
-                      <SelectItem key={collection.collection_id} value={collection.collection_id}>
-                        {collection.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Advanced Settings */}
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowAdvanced(!showAdvanced)}
-              >
-                <Settings2 className="h-4 w-4 mr-1" />
-                {showAdvanced ? 'Hide' : 'Show'} Advanced Settings
+              <Button variant="outline" onClick={fetchJobs}>
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh
               </Button>
             </div>
 
-            {showAdvanced && (
-              <div className="grid gap-4 md:grid-cols-2 p-4 bg-muted/50 rounded-lg">
-                <div className="space-y-2">
-                  <Label htmlFor="max-pages">Max Pages (0 = unlimited)</Label>
-                  <Input
-                    id="max-pages"
-                    type="number"
-                    min={0}
-                    value={maxPages}
-                    onChange={(e) => setMaxPages(e.target.value)}
-                    placeholder="0 for unlimited"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="max-depth">Max Depth</Label>
-                  <Input
-                    id="max-depth"
-                    type="number"
-                    min={1}
-                    max={15}
-                    value={maxDepth}
-                    onChange={(e) => setMaxDepth(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id="use-sitemap"
-                      checked={useSitemap}
-                      onCheckedChange={setUseSitemap}
-                    />
-                    <Label htmlFor="use-sitemap">Use sitemap.xml for URL discovery</Label>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="inline-flex cursor-help text-muted-foreground hover:text-foreground transition-colors">
-                          <Info className="h-4 w-4" />
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-[240px] p-2">
-                        <div className="space-y-1">
-                          <p className="text-xs font-medium">Sitemap discovery</p>
-                          <p className="text-xs">
-                            When enabled, the crawler reads your domain&apos;s sitemap.xml to find pages faster.
-                            If no sitemap exists, normal link crawling still works.
-                          </p>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id="process-documents"
-                      checked={processDocuments}
-                      onCheckedChange={setProcessDocuments}
-                    />
-                    <Label htmlFor="process-documents">Download and process PDF/Word documents</Label>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="inline-flex cursor-help text-muted-foreground hover:text-foreground transition-colors">
-                          <Info className="h-4 w-4" />
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-[240px] p-2">
-                        <div className="space-y-1">
-                          <p className="text-xs font-medium">Document processing</p>
-                          <p className="text-xs">
-                            When enabled, the crawler downloads PDF and Word (.docx) documents and extracts their text content to include in the knowledge base.
-                          </p>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Label htmlFor="exclude-patterns">Exclude Patterns (one per line)</Label>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="inline-flex cursor-help text-muted-foreground hover:text-foreground transition-colors">
-                          <Info className="h-4 w-4" />
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-[240px] p-2">
-                        <div className="space-y-1">
-                          <p className="text-xs font-medium">Substring match</p>
-                          <p className="text-xs">
-                            URLs containing any line are skipped. Plain text only (not regex).
-                          </p>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <Textarea
-                    id="exclude-patterns"
-                    placeholder="/login&#10;/admin&#10;/cart"
-                    value={excludePatterns}
-                    onChange={(e) => setExcludePatterns(e.target.value)}
-                    rows={3}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Label htmlFor="include-keywords">Include Keywords (one per line)</Label>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="inline-flex cursor-help text-muted-foreground hover:text-foreground transition-colors">
-                          <Info className="h-4 w-4" />
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-[240px] p-2">
-                        <div className="space-y-1">
-                          <p className="text-xs font-medium">Required keywords</p>
-                          <p className="text-xs">
-                            Only visit URLs that contain at least one keyword. Leave empty to scan all.
-                          </p>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <Textarea
-                    id="include-keywords"
-                    placeholder="docs&#10;guide&#10;help"
-                    value={includeKeywords}
-                    onChange={(e) => setIncludeKeywords(e.target.value)}
-                    rows={3}
-                  />
-                </div>
-              </div>
-            )}
-
-            <Button onClick={handleStartCrawl} disabled={isStarting || !targetUrl || !selectedCollection}>
-              {isStarting ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Starting...
-                </>
-              ) : (
-                <>
-                  <Play className="h-4 w-4 mr-2" />
-                  Start Crawl
-                </>
-              )}
-            </Button>
-          </CardContent>
-        </Card>
-
-        {/* Active Crawls */}
-        {activeJobs.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Loader2 className="h-5 w-5 animate-spin" />
-                Active Crawls ({activeJobs.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {activeJobs.map((job) => (
-                <div
-                  key={job.job_id}
-                  className="p-4 border rounded-lg space-y-3"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Link2 className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium truncate max-w-md">{job.target_url}</span>
-                      {getStatusBadge(job.status)}
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleCancelJob(job.job_id)}
-                    >
-                      <Square className="h-4 w-4 mr-1" />
-                      Cancel
-                    </Button>
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-sm text-muted-foreground">
-                      <span>Progress: {job.pages_crawled} / {job.pages_discovered} pages</span>
-                      <span>{job.progress_percent}%</span>
-                    </div>
-                    <Progress value={job.progress_percent} className="h-2" />
-                  </div>
-
-                  {job.current_url && (
-                    <p className="text-xs text-muted-foreground truncate">
-                      Currently crawling: {job.current_url}
-                    </p>
+            {/* Start New Crawl */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Play className="h-5 w-5" />
+                  Start New Crawl
+                </CardTitle>
+                <CardDescription className="text-base">
+                  {searchParams.get('collectionId') ? (
+                    <span>
+                      Adding content to <span className="font-semibold text-foreground">{selectedCollection ? getCollectionName(selectedCollection) : 'Loading...'}</span>
+                    </span>
+                  ) : (
+                    'Enter a website URL to crawl and select the target knowledge base'
                   )}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className={`grid gap-6 ${searchParams.get('collectionId') ? 'grid-cols-1' : 'md:grid-cols-3'} `}>
+                  <div className={searchParams.get('collectionId') ? '' : 'md:col-span-2'}>
+                    <div className="space-y-2">
+                      <Label htmlFor="target-url" className="text-base font-medium">Website URL</Label>
+                      <div className="relative">
+                        <Globe className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          id="target-url"
+                          placeholder="https://example.com"
+                          value={targetUrl}
+                          onChange={(e) => setTargetUrl(e.target.value)}
+                          className="pl-9 h-11"
+                        />
+                      </div>
+                    </div>
+                  </div>
 
-                  <div className="flex gap-4 text-sm text-muted-foreground">
-                    <span>
-                      <FileText className="h-3 w-3 inline mr-1" />
-                      {job.chunks_created} chunks
-                    </span>
-                    <span>
-                      {job.pages_skipped} skipped
-                    </span>
-                    <span>
-                      {job.pages_failed} failed
-                    </span>
+                  {!searchParams.get('collectionId') && (
+                    <div className="space-y-2">
+                      <Label htmlFor="collection" className="text-base font-medium">Knowledge Base</Label>
+                      <Select value={selectedCollection} onValueChange={setSelectedCollection}>
+                        <SelectTrigger className="h-11">
+                          <SelectValue placeholder="Select knowledge base" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {collections.map((collection) => (
+                            <SelectItem key={collection.collection_id} value={collection.collection_id}>
+                              {collection.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+
+                {/* Advanced Settings */}
+                <Collapsible open={showAdvanced} onOpenChange={setShowAdvanced} className="border rounded-lg bg-muted/20">
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      className="flex w-full items-center justify-between p-4 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 font-medium">
+                        <Settings2 className="h-4 w-4" />
+                        Advanced Settings
+                      </div>
+                      {showAdvanced ? (
+                        <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="p-4 pt-0 space-y-6">
+                    <div className="grid gap-6 md:grid-cols-2 pt-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="max-pages">Max Pages (0 = unlimited)</Label>
+                        <Input
+                          id="max-pages"
+                          type="number"
+                          min={0}
+                          value={maxPages}
+                          onChange={(e) => setMaxPages(e.target.value)}
+                          placeholder="0 for unlimited"
+                          className="bg-background"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="max-depth">Max Depth</Label>
+                        <Input
+                          id="max-depth"
+                          type="number"
+                          min={1}
+                          max={15}
+                          value={maxDepth}
+                          onChange={(e) => setMaxDepth(e.target.value)}
+                          className="bg-background"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid gap-6 md:grid-cols-2">
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between border p-3 rounded-md bg-background">
+                          <div className="space-y-0.5">
+                            <Label htmlFor="use-sitemap" className="text-base">Sitemap Discovery</Label>
+                            <p className="text-xs text-muted-foreground">
+                              Use sitemap.xml to find pages
+                            </p>
+                          </div>
+                          <Switch
+                            id="use-sitemap"
+                            checked={useSitemap}
+                            onCheckedChange={setUseSitemap}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between border p-3 rounded-md bg-background">
+                          <div className="space-y-0.5">
+                            <Label htmlFor="process-documents" className="text-base">Process Documents</Label>
+                            <p className="text-xs text-muted-foreground">
+                              Extract text from PDF/Word files
+                            </p>
+                          </div>
+                          <Switch
+                            id="process-documents"
+                            checked={processDocuments}
+                            onCheckedChange={setProcessDocuments}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="exclude-patterns">Exclude Patterns (one per line)</Label>
+                          <Textarea
+                            id="exclude-patterns"
+                            placeholder="/login&#10;/admin&#10;/cart"
+                            value={excludePatterns}
+                            onChange={(e) => setExcludePatterns(e.target.value)}
+                            rows={3}
+                            className="bg-background resize-none"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="include-keywords">Include Keywords (one per line)</Label>
+                          <Textarea
+                            id="include-keywords"
+                            placeholder="docs&#10;guide&#10;help"
+                            value={includeKeywords}
+                            onChange={(e) => setIncludeKeywords(e.target.value)}
+                            rows={3}
+                            className="bg-background resize-none"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+
+                <Button onClick={handleStartCrawl} disabled={isStarting || !targetUrl || !selectedCollection}>
+                  {isStarting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Starting...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-4 w-4 mr-2" />
+                      Start Crawl
+                    </>
+                  )}
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Active Crawls */}
+            {activeJobs.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    Active Crawls ({activeJobs.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {activeJobs.map((job) => (
+                    <div
+                      key={job.job_id}
+                      className="p-4 border rounded-lg space-y-3"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Link2 className="h-4 w-4 text-muted-foreground" />
+                          <span className="font-medium truncate max-w-md">{job.target_url}</span>
+                          {getStatusBadge(job.status)}
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleCancelJob(job.job_id)}
+                        >
+                          <Square className="h-4 w-4 mr-1" />
+                          Cancel
+                        </Button>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-sm text-muted-foreground">
+                          <span>Progress: {job.pages_crawled} / {job.pages_discovered} pages</span>
+                          <span>{job.progress_percent}%</span>
+                        </div>
+                        <Progress value={job.progress_percent} className="h-2" />
+                      </div>
+
+                      {job.current_url && (
+                        <p className="text-xs text-muted-foreground truncate">
+                          Currently crawling: {job.current_url}
+                        </p>
+                      )}
+
+                      <div className="flex gap-4 text-sm text-muted-foreground">
+                        <span>
+                          <FileText className="h-3 w-3 inline mr-1" />
+                          {job.chunks_created} chunks
+                        </span>
+                        <span>
+                          {job.pages_skipped} skipped
+                        </span>
+                        <span>
+                          {job.pages_failed} failed
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Crawl History */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Crawl History</CardTitle>
+                <CardDescription>
+                  Past crawl jobs and their results
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {isLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  </div>
+                ) : completedJobs.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Globe className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                    <p>No crawl history yet</p>
+                    <p className="text-sm">Start your first crawl above</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>URL</TableHead>
+                          <TableHead>Knowledge Base</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead className="text-right">Pages</TableHead>
+                          <TableHead className="text-right">Chunks</TableHead>
+                          <TableHead>Date</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {completedJobs.map((job) => (
+                          <TableRow key={job.job_id}>
+                            <TableCell className="max-w-[200px]">
+                              <div className="flex items-center gap-2">
+                                <span className="truncate max-w-[150px]" title={job.target_url}>
+                                  {job.target_url}
+                                </span>
+                                {job.is_scheduled && (
+                                  <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 text-xs shrink-0">
+                                    <Timer className="h-3 w-3 mr-1" />
+                                    {job.schedule_interval_hours}h
+                                  </Badge>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>{getCollectionName(job.collection_id)}</TableCell>
+                            <TableCell>{getStatusBadge(job.status)}</TableCell>
+                            <TableCell className="text-right">{job.pages_crawled}</TableCell>
+                            <TableCell className="text-right">{job.chunks_created}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              {formatDate(job.completed_at || job.created_at)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-1">
+                                {job.is_scheduled ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleUnschedule(job.job_id)}
+                                    title="Remove schedule"
+                                  >
+                                    <CalendarClock className="h-4 w-4 text-purple-600" />
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => openScheduleDialog(job.job_id)}
+                                    title="Schedule recurring crawl"
+                                  >
+                                    <CalendarClock className="h-4 w-4" />
+                                  </Button>
+                                )}
+                                {(job.status === 'completed' || job.status === 'failed') && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleViewUrlDetails(job.job_id)}
+                                    title="View URL details"
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                )}
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleRecrawl(job.job_id)}
+                                  title="Recrawl now"
+                                >
+                                  <RefreshCw className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleDeleteJob(job.job_id)}
+                                  title="Delete"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Info Card */}
+            <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+              <CardContent className="pt-6">
+                <div className="flex gap-3">
+                  <AlertCircle className="h-5 w-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                      How Web Crawling Works
+                    </p>
+                    <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1 list-disc list-inside">
+                      <li>The crawler discovers and follows internal links on your target website</li>
+                      <li>Content is extracted with semantic structure (headings, paragraphs, lists)</li>
+                      <li>Text is chunked and added to your knowledge base for AI chat retrieval</li>
+                      <li>Duplicate pages are automatically detected and skipped</li>
+                      <li>The crawler respects robots.txt and rate limits</li>
+                    </ul>
                   </div>
                 </div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Crawl History */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Crawl History</CardTitle>
-            <CardDescription>
-              Past crawl jobs and their results
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin" />
-              </div>
-            ) : completedJobs.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <Globe className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                <p>No crawl history yet</p>
-                <p className="text-sm">Start your first crawl above</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>URL</TableHead>
-                      <TableHead>Knowledge Base</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Pages</TableHead>
-                      <TableHead className="text-right">Chunks</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {completedJobs.map((job) => (
-                      <TableRow key={job.job_id}>
-                        <TableCell className="max-w-[200px]">
-                          <div className="flex items-center gap-2">
-                            <span className="truncate max-w-[150px]" title={job.target_url}>
-                              {job.target_url}
-                            </span>
-                            {job.is_scheduled && (
-                              <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 text-xs shrink-0">
-                                <Timer className="h-3 w-3 mr-1" />
-                                {job.schedule_interval_hours}h
-                              </Badge>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>{getCollectionName(job.collection_id)}</TableCell>
-                        <TableCell>{getStatusBadge(job.status)}</TableCell>
-                        <TableCell className="text-right">{job.pages_crawled}</TableCell>
-                        <TableCell className="text-right">{job.chunks_created}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {formatDate(job.completed_at || job.created_at)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            {job.is_scheduled ? (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleUnschedule(job.job_id)}
-                                title="Remove schedule"
-                              >
-                                <CalendarClock className="h-4 w-4 text-purple-600" />
-                              </Button>
-                            ) : (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => openScheduleDialog(job.job_id)}
-                                title="Schedule recurring crawl"
-                              >
-                                <CalendarClock className="h-4 w-4" />
-                              </Button>
-                            )}
-                            {(job.status === 'completed' || job.status === 'failed') && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleViewUrlDetails(job.job_id)}
-                                title="View URL details"
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            )}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleRecrawl(job.job_id)}
-                              title="Recrawl now"
-                            >
-                              <RefreshCw className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDeleteJob(job.job_id)}
-                              title="Delete"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Info Card */}
-        <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
-          <CardContent className="pt-6">
-            <div className="flex gap-3">
-              <AlertCircle className="h-5 w-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
-                  How Web Crawling Works
-                </p>
-                <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1 list-disc list-inside">
-                  <li>The crawler discovers and follows internal links on your target website</li>
-                  <li>Content is extracted with semantic structure (headings, paragraphs, lists)</li>
-                  <li>Text is chunked and added to your knowledge base for AI chat retrieval</li>
-                  <li>Duplicate pages are automatically detected and skipped</li>
-                  <li>The crawler respects robots.txt and rate limits</li>
-                </ul>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Delete Confirmation Dialog */}
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently delete the crawl job and remove all crawled content
-              from the knowledge base. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
-              onClick={(e) => {
-                e.preventDefault();
-                confirmDeleteJob();
-              }}
-              disabled={isDeleting}
-            >
-              {isDeleting ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                'Delete'
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Schedule Configuration Dialog */}
-      <Dialog open={scheduleDialogOpen} onOpenChange={setScheduleDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <CalendarClock className="h-5 w-5" />
-              Schedule Recurring Crawl
-            </DialogTitle>
-            <DialogDescription>
-              Set how often this website should be automatically re-crawled.
-              Content changes will be detected and updated in your knowledge base.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="schedule-interval">Run Every</Label>
-              <Select value={scheduleInterval} onValueChange={setScheduleInterval}>
-                <SelectTrigger id="schedule-interval">
-                  <SelectValue placeholder="Select interval" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1440">2 months</SelectItem>
-                  <SelectItem value="4320">6 months</SelectItem>
-                  <SelectItem value="8760">1 year</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="text-sm text-muted-foreground">
-              <p>The crawler will automatically run at this interval and:</p>
-              <ul className="list-disc list-inside mt-2 space-y-1">
-                <li>Detect new and updated pages</li>
-                <li>Remove deleted content from knowledge base</li>
-                <li>Skip unchanged pages</li>
-              </ul>
-            </div>
+              </CardContent>
+            </Card>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setScheduleDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleSchedule} disabled={isScheduling}>
-              {isScheduling ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Scheduling...
-                </>
-              ) : (
-                <>
-                  <CalendarClock className="h-4 w-4 mr-2" />
-                  Enable Schedule
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
-      {/* URL Details Dialog */}
-      <Dialog open={urlDetailsOpen} onOpenChange={setUrlDetailsOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Eye className="h-5 w-5" />
-              URL Details
-            </DialogTitle>
-            <DialogDescription>
-              Breakdown of URLs processed during this crawl
-            </DialogDescription>
-          </DialogHeader>
+          {/* Delete Confirmation Dialog */}
+          <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete the crawl job and remove all crawled content
+                  from the knowledge base. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    confirmDeleteJob();
+                  }}
+                  disabled={isDeleting}
+                >
+                  {isDeleting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Deleting...
+                    </>
+                  ) : (
+                    'Delete'
+                  )}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
-          {urlDetailsLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin" />
-            </div>
-          ) : urlDetails ? (
-            <div className="space-y-4 overflow-y-auto pr-2">
-              {/* Crawled URLs */}
-              <div className="space-y-2">
-                <h4 className="font-medium flex items-center gap-2 text-green-700">
-                  <CheckCircle2 className="h-4 w-4" />
-                  Crawled ({urlDetails.crawled_urls?.length || 0})
-                </h4>
-                {urlDetails.crawled_urls?.length > 0 ? (
-                  <div className="text-sm space-y-1 max-h-40 overflow-y-auto bg-green-50 rounded-md p-2">
-                    {urlDetails.crawled_urls.map((item, i) => (
-                      <div key={i} className="flex justify-between items-start gap-2 py-1">
-                        <span className="truncate text-green-800" title={item.url}>
-                          {item.title || item.url}
-                        </span>
-                        <Badge variant="outline" className="shrink-0 text-xs">
-                          {item.chunks} chunks
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No URLs crawled</p>
-                )}
+          {/* Schedule Configuration Dialog */}
+          <Dialog open={scheduleDialogOpen} onOpenChange={setScheduleDialogOpen}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <CalendarClock className="h-5 w-5" />
+                  Schedule Recurring Crawl
+                </DialogTitle>
+                <DialogDescription>
+                  Set how often this website should be automatically re-crawled.
+                  Content changes will be detected and updated in your knowledge base.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="schedule-interval">Run Every</Label>
+                  <Select value={scheduleInterval} onValueChange={setScheduleInterval}>
+                    <SelectTrigger id="schedule-interval">
+                      <SelectValue placeholder="Select interval" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1440">2 months</SelectItem>
+                      <SelectItem value="4320">6 months</SelectItem>
+                      <SelectItem value="8760">1 year</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  <p>The crawler will automatically run at this interval and:</p>
+                  <ul className="list-disc list-inside mt-2 space-y-1">
+                    <li>Detect new and updated pages</li>
+                    <li>Remove deleted content from knowledge base</li>
+                    <li>Skip unchanged pages</li>
+                  </ul>
+                </div>
               </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setScheduleDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSchedule} disabled={isScheduling}>
+                  {isScheduling ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Scheduling...
+                    </>
+                  ) : (
+                    <>
+                      <CalendarClock className="h-4 w-4 mr-2" />
+                      Enable Schedule
+                    </>
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
-              {/* Failed URLs */}
-              <div className="space-y-2">
-                <h4 className="font-medium flex items-center gap-2 text-red-700">
-                  <XCircle className="h-4 w-4" />
-                  Failed ({urlDetails.failed_urls?.length || 0})
-                </h4>
-                {urlDetails.failed_urls?.length > 0 ? (
-                  <div className="text-sm space-y-1 max-h-40 overflow-y-auto bg-red-50 rounded-md p-2">
-                    {urlDetails.failed_urls.map((item, i) => (
-                      <div key={i} className="py-1">
-                        <div className="truncate text-red-800" title={item.url}>
-                          {item.url}
-                        </div>
-                        <div className="text-xs text-red-600">{item.reason}</div>
+          {/* URL Details Dialog */}
+          <Dialog open={urlDetailsOpen} onOpenChange={setUrlDetailsOpen}>
+            <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Eye className="h-5 w-5" />
+                  URL Details
+                </DialogTitle>
+                <DialogDescription>
+                  Breakdown of URLs processed during this crawl
+                </DialogDescription>
+              </DialogHeader>
+
+              {urlDetailsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                </div>
+              ) : urlDetails ? (
+                <div className="space-y-4 overflow-y-auto pr-2">
+                  {/* Crawled URLs */}
+                  <div className="space-y-2">
+                    <h4 className="font-medium flex items-center gap-2 text-green-700">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Crawled ({urlDetails.crawled_urls?.length || 0})
+                    </h4>
+                    {urlDetails.crawled_urls?.length > 0 ? (
+                      <div className="text-sm space-y-1 max-h-40 overflow-y-auto bg-green-50 rounded-md p-2">
+                        {urlDetails.crawled_urls.map((item, i) => (
+                          <div key={i} className="flex justify-between items-start gap-2 py-1">
+                            <span className="truncate text-green-800" title={item.url}>
+                              {item.title || item.url}
+                            </span>
+                            <Badge variant="outline" className="shrink-0 text-xs">
+                              {item.chunks} chunks
+                            </Badge>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No URLs crawled</p>
+                    )}
                   </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No failures</p>
-                )}
-              </div>
 
-              {/* Skipped URLs */}
-              <div className="space-y-2">
-                <h4 className="font-medium flex items-center gap-2 text-yellow-700">
-                  <AlertCircle className="h-4 w-4" />
-                  Skipped ({urlDetails.skipped_urls?.length || 0})
-                </h4>
-                {urlDetails.skipped_urls?.length > 0 ? (
-                  <div className="text-sm space-y-1 max-h-40 overflow-y-auto bg-yellow-50 rounded-md p-2">
-                    {urlDetails.skipped_urls.map((item, i) => (
-                      <div key={i} className="py-1">
-                        <div className="truncate text-yellow-800" title={item.url}>
-                          {item.url}
-                        </div>
-                        <div className="text-xs text-yellow-600">{item.reason}</div>
+                  {/* Failed URLs */}
+                  <div className="space-y-2">
+                    <h4 className="font-medium flex items-center gap-2 text-red-700">
+                      <XCircle className="h-4 w-4" />
+                      Failed ({urlDetails.failed_urls?.length || 0})
+                    </h4>
+                    {urlDetails.failed_urls?.length > 0 ? (
+                      <div className="text-sm space-y-1 max-h-40 overflow-y-auto bg-red-50 rounded-md p-2">
+                        {urlDetails.failed_urls.map((item, i) => (
+                          <div key={i} className="py-1">
+                            <div className="truncate text-red-800" title={item.url}>
+                              {item.url}
+                            </div>
+                            <div className="text-xs text-red-600">{item.reason}</div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No failures</p>
+                    )}
                   </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No URLs skipped</p>
-                )}
-              </div>
-            </div>
-          ) : null}
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setUrlDetailsOpen(false)}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+                  {/* Skipped URLs */}
+                  <div className="space-y-2">
+                    <h4 className="font-medium flex items-center gap-2 text-yellow-700">
+                      <AlertCircle className="h-4 w-4" />
+                      Skipped ({urlDetails.skipped_urls?.length || 0})
+                    </h4>
+                    {urlDetails.skipped_urls?.length > 0 ? (
+                      <div className="text-sm space-y-1 max-h-40 overflow-y-auto bg-yellow-50 rounded-md p-2">
+                        {urlDetails.skipped_urls.map((item, i) => (
+                          <div key={i} className="py-1">
+                            <div className="truncate text-yellow-800" title={item.url}>
+                              {item.url}
+                            </div>
+                            <div className="text-xs text-yellow-600">{item.reason}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No URLs skipped</p>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setUrlDetailsOpen(false)}>
+                  Close
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </TooltipProvider>
     </DashboardLayout >
   );
 }
