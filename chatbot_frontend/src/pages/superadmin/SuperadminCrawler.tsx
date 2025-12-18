@@ -577,7 +577,25 @@ export default function SuperadminCrawler() {
                   <CollapsibleContent className="p-4 pt-0 space-y-6">
                     <div className="grid gap-6 md:grid-cols-2 pt-2">
                       <div className="space-y-2">
-                        <Label htmlFor="max-pages">Max Pages (0 = unlimited)</Label>
+                        <div className="flex items-center gap-1.5">
+                          <Label htmlFor="max-pages">Max Pages</Label>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-[260px] p-3">
+                              <div className="space-y-1.5">
+                                <p className="text-xs font-semibold flex items-center gap-1.5">
+                                  <FileText className="h-3 w-3 text-primary" />
+                                  Crawl Limit
+                                </p>
+                                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                  Maximum number of pages to index. Set to <span className="font-medium text-foreground">0</span> for an <span className="font-medium text-foreground">unlimited</span> crawl of the entire domain.
+                                </p>
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
                         <Input
                           id="max-pages"
                           type="number"
@@ -589,7 +607,25 @@ export default function SuperadminCrawler() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="max-depth">Max Depth</Label>
+                        <div className="flex items-center gap-1.5">
+                          <Label htmlFor="max-depth">Max Depth</Label>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-[260px] p-3">
+                              <div className="space-y-1.5">
+                                <p className="text-xs font-semibold flex items-center gap-1.5">
+                                  <Link2 className="h-3 w-3 text-primary" />
+                                  Link Depth
+                                </p>
+                                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                  How many steps away from the start URL the crawler will go. Default is <span className="font-medium text-foreground">5</span>. Higher values follow deeper link structures.
+                                </p>
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
                         <Input
                           id="max-depth"
                           type="number"
@@ -606,9 +642,27 @@ export default function SuperadminCrawler() {
                       <div className="space-y-4">
                         <div className="flex items-center justify-between border p-3 rounded-md bg-background">
                           <div className="space-y-0.5">
-                            <Label htmlFor="use-sitemap" className="text-base">Sitemap Discovery</Label>
+                            <div className="flex items-center gap-1.5">
+                              <Label htmlFor="use-sitemap" className="text-base cursor-pointer">Sitemap Discovery</Label>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent side="right" className="max-w-[260px] p-3">
+                                  <div className="space-y-1.5">
+                                    <p className="text-xs font-semibold flex items-center gap-1.5">
+                                      <Globe className="h-3 w-3 text-primary" />
+                                      Sitemap Discovery
+                                    </p>
+                                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                      When enabled, the crawler reads your domain's <code className="text-[10px] bg-muted px-1 py-0.5 rounded">sitemap.xml</code> to find and index pages much more efficiently.
+                                    </p>
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
                             <p className="text-xs text-muted-foreground">
-                              Use sitemap.xml to find pages
+                              Use sitemap.xml to find pages faster
                             </p>
                           </div>
                           <Switch
@@ -619,7 +673,25 @@ export default function SuperadminCrawler() {
                         </div>
                         <div className="flex items-center justify-between border p-3 rounded-md bg-background">
                           <div className="space-y-0.5">
-                            <Label htmlFor="process-documents" className="text-base">Process Documents</Label>
+                            <div className="flex items-center gap-1.5">
+                              <Label htmlFor="process-documents" className="text-base cursor-pointer">Process Documents</Label>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent side="right" className="max-w-[260px] p-3">
+                                  <div className="space-y-1.5">
+                                    <p className="text-xs font-semibold flex items-center gap-1.5">
+                                      <FileText className="h-3 w-3 text-primary" />
+                                      Document Analysis
+                                    </p>
+                                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                      Extract text content from <span className="font-medium text-foreground">PDF and Word</span> files found during crawling to include in your knowledge base knowledge.
+                                    </p>
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
                             <p className="text-xs text-muted-foreground">
                               Extract text from PDF/Word files
                             </p>
@@ -634,7 +706,25 @@ export default function SuperadminCrawler() {
 
                       <div className="space-y-4">
                         <div className="space-y-2">
-                          <Label htmlFor="exclude-patterns">Exclude Patterns (one per line)</Label>
+                          <div className="flex items-center gap-1.5">
+                            <Label htmlFor="exclude-patterns">Exclude Patterns</Label>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-[260px] p-3">
+                                <div className="space-y-1.5">
+                                  <p className="text-xs font-semibold flex items-center gap-1.5">
+                                    <XCircle className="h-3 w-3 text-destructive" />
+                                    Exclude Substrings
+                                  </p>
+                                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                    URLs containing any of these lines will be <span className="font-medium text-foreground">skipped</span>. One pattern per line (e.g. <code className="text-[10px] bg-muted px-1 py-0.5 rounded">/login</code>).
+                                  </p>
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
                           <Textarea
                             id="exclude-patterns"
                             placeholder="/login&#10;/admin&#10;/cart"
@@ -645,7 +735,25 @@ export default function SuperadminCrawler() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="include-keywords">Include Keywords (one per line)</Label>
+                          <div className="flex items-center gap-1.5">
+                            <Label htmlFor="include-keywords">Include Keywords</Label>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-[260px] p-3">
+                                <div className="space-y-1.5">
+                                  <p className="text-xs font-semibold flex items-center gap-1.5">
+                                    <AlertCircle className="h-3 w-3 text-primary" />
+                                    Strict Filtering
+                                  </p>
+                                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                    Only URLs containing <span className="font-medium text-foreground">at least one</span> of these keywords will be crawled. Leave empty to crawl everything.
+                                  </p>
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
                           <Textarea
                             id="include-keywords"
                             placeholder="docs&#10;guide&#10;help"

@@ -13,6 +13,11 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import {
+    Collapsible,
+    CollapsibleContent,
+    CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+import {
     Dialog,
     DialogContent,
     DialogDescription,
@@ -67,6 +72,8 @@ import {
     CalendarClock,
     Timer,
     Info,
+    ChevronDown,
+    ChevronUp,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiGet, apiPost, apiDelete } from '@/utils/api';
@@ -480,148 +487,216 @@ export default function UserAdminCrawler() {
                         </div>
 
                         {/* Advanced Settings */}
-                        <div className="flex items-center gap-2">
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setShowAdvanced(!showAdvanced)}
-                            >
-                                <Settings2 className="h-4 w-4 mr-1" />
-                                {showAdvanced ? 'Hide' : 'Show'} Advanced Settings
-                            </Button>
-                        </div>
+                        <Collapsible open={showAdvanced} onOpenChange={setShowAdvanced} className="border rounded-lg bg-muted/20">
+                            <CollapsibleTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    className="flex w-full items-center justify-between p-4 transition-colors"
+                                >
+                                    <div className="flex items-center gap-2 font-medium">
+                                        <Settings2 className="h-4 w-4" />
+                                        Advanced Settings
+                                    </div>
+                                    {showAdvanced ? (
+                                        <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                                    ) : (
+                                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                    )}
+                                </Button>
+                            </CollapsibleTrigger>
+                            <CollapsibleContent className="p-4 pt-0 space-y-6">
+                                <div className="grid gap-6 md:grid-cols-2 pt-2">
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-1.5">
+                                            <Label htmlFor="max-pages">Max Pages</Label>
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                                                </TooltipTrigger>
+                                                <TooltipContent side="top" className="max-w-[260px] p-3">
+                                                    <div className="space-y-1.5">
+                                                        <p className="text-xs font-semibold flex items-center gap-1.5">
+                                                            <FileText className="h-3 w-3 text-primary" />
+                                                            Crawl Limit
+                                                        </p>
+                                                        <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                                            Maximum number of pages to index. Set to <span className="font-medium text-foreground">0</span> for an <span className="font-medium text-foreground">unlimited</span> crawl of the entire domain.
+                                                        </p>
+                                                    </div>
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        </div>
+                                        <Input
+                                            id="max-pages"
+                                            type="number"
+                                            min={0}
+                                            value={maxPages}
+                                            onChange={(e) => setMaxPages(e.target.value)}
+                                            placeholder="0 for unlimited"
+                                            className="bg-background"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-1.5">
+                                            <Label htmlFor="max-depth">Max Depth</Label>
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                                                </TooltipTrigger>
+                                                <TooltipContent side="top" className="max-w-[260px] p-3">
+                                                    <div className="space-y-1.5">
+                                                        <p className="text-xs font-semibold flex items-center gap-1.5">
+                                                            <Link2 className="h-3 w-3 text-primary" />
+                                                            Link Depth
+                                                        </p>
+                                                        <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                                            How many steps away from the start URL the crawler will go. Default is <span className="font-medium text-foreground">5</span>. Higher values follow deeper link structures.
+                                                        </p>
+                                                    </div>
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        </div>
+                                        <Input
+                                            id="max-depth"
+                                            type="number"
+                                            min={1}
+                                            max={15}
+                                            value={maxDepth}
+                                            onChange={(e) => setMaxDepth(e.target.value)}
+                                            className="bg-background"
+                                        />
+                                    </div>
+                                </div>
 
-                        {showAdvanced && (
-                            <div className="grid gap-4 md:grid-cols-2 p-4 bg-muted/50 rounded-lg">
-                                <div className="space-y-2">
-                                    <Label htmlFor="max-pages">Max Pages (0 = unlimited)</Label>
-                                    <Input
-                                        id="max-pages"
-                                        type="number"
-                                        min={0}
-                                        value={maxPages}
-                                        onChange={(e) => setMaxPages(e.target.value)}
-                                        placeholder="0 for unlimited"
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="max-depth">Max Depth</Label>
-                                    <Input
-                                        id="max-depth"
-                                        type="number"
-                                        min={1}
-                                        max={15}
-                                        value={maxDepth}
-                                        onChange={(e) => setMaxDepth(e.target.value)}
-                                    />
-                                </div>
-                                <div className="space-y-2 md:col-span-2">
-                                    <div className="flex items-center gap-2">
-                                        <Switch
-                                            id="use-sitemap"
-                                            checked={useSitemap}
-                                            onCheckedChange={setUseSitemap}
-                                        />
-                                        <Label htmlFor="use-sitemap">Use sitemap.xml for URL discovery</Label>
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <span className="inline-flex cursor-help text-muted-foreground hover:text-foreground transition-colors">
-                                                    <Info className="h-4 w-4" />
-                                                </span>
-                                            </TooltipTrigger>
-                                            <TooltipContent side="right" className="max-w-[240px] p-2">
-                                                <div className="space-y-1">
-                                                    <p className="text-xs font-medium">Sitemap discovery</p>
-                                                    <p className="text-xs">
-                                                        When enabled, the crawler reads your domain&apos;s sitemap.xml to find pages faster.
-                                                        If no sitemap exists, normal link crawling still works.
-                                                    </p>
+                                <div className="grid gap-6 md:grid-cols-2">
+                                    <div className="space-y-4">
+                                        <div className="flex items-center justify-between border p-3 rounded-md bg-background">
+                                            <div className="space-y-0.5">
+                                                <div className="flex items-center gap-1.5">
+                                                    <Label htmlFor="use-sitemap" className="text-base cursor-pointer">Sitemap Discovery</Label>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                                                        </TooltipTrigger>
+                                                        <TooltipContent side="right" className="max-w-[260px] p-3">
+                                                            <div className="space-y-1.5">
+                                                                <p className="text-xs font-semibold flex items-center gap-1.5">
+                                                                    <Globe className="h-3 w-3 text-primary" />
+                                                                    Sitemap Discovery
+                                                                </p>
+                                                                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                                                    When enabled, the crawler reads your domain's <code className="text-[10px] bg-muted px-1 py-0.5 rounded">sitemap.xml</code> to find and index pages much more efficiently.
+                                                                </p>
+                                                            </div>
+                                                        </TooltipContent>
+                                                    </Tooltip>
                                                 </div>
-                                            </TooltipContent>
-                                        </Tooltip>
+                                                <p className="text-xs text-muted-foreground">
+                                                    Use sitemap.xml to find pages faster
+                                                </p>
+                                            </div>
+                                            <Switch
+                                                id="use-sitemap"
+                                                checked={useSitemap}
+                                                onCheckedChange={setUseSitemap}
+                                            />
+                                        </div>
+                                        <div className="flex items-center justify-between border p-3 rounded-md bg-background">
+                                            <div className="space-y-0.5">
+                                                <div className="flex items-center gap-1.5">
+                                                    <Label htmlFor="process-documents" className="text-base cursor-pointer">Process Documents</Label>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                                                        </TooltipTrigger>
+                                                        <TooltipContent side="right" className="max-w-[260px] p-3">
+                                                            <div className="space-y-1.5">
+                                                                <p className="text-xs font-semibold flex items-center gap-1.5">
+                                                                    <FileText className="h-3 w-3 text-primary" />
+                                                                    Document Analysis
+                                                                </p>
+                                                                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                                                    Extract text content from <span className="font-medium text-foreground">PDF and Word</span> files found during crawling to include in your knowledge base knowledge.
+                                                                </p>
+                                                            </div>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                </div>
+                                                <p className="text-xs text-muted-foreground">
+                                                    Extract text from PDF/Word files
+                                                </p>
+                                            </div>
+                                            <Switch
+                                                id="process-documents"
+                                                checked={processDocuments}
+                                                onCheckedChange={setProcessDocuments}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <div className="space-y-2">
+                                            <div className="flex items-center gap-1.5">
+                                                <Label htmlFor="exclude-patterns">Exclude Patterns</Label>
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                                                    </TooltipTrigger>
+                                                    <TooltipContent side="top" className="max-w-[260px] p-3">
+                                                        <div className="space-y-1.5">
+                                                            <p className="text-xs font-semibold flex items-center gap-1.5">
+                                                                <XCircle className="h-3 w-3 text-destructive" />
+                                                                Exclude Substrings
+                                                            </p>
+                                                            <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                                                URLs containing any of these lines will be <span className="font-medium text-foreground">skipped</span>. One pattern per line (e.g. <code className="text-[10px] bg-muted px-1 py-0.5 rounded">/login</code>).
+                                                            </p>
+                                                        </div>
+                                                    </TooltipContent>
+                                                </Tooltip>
+                                            </div>
+                                            <Textarea
+                                                id="exclude-patterns"
+                                                placeholder="/login&#10;/admin&#10;/cart"
+                                                value={excludePatterns}
+                                                onChange={(e) => setExcludePatterns(e.target.value)}
+                                                rows={3}
+                                                className="bg-background resize-none"
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <div className="flex items-center gap-1.5">
+                                                <Label htmlFor="include-keywords">Include Keywords</Label>
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                                                    </TooltipTrigger>
+                                                    <TooltipContent side="top" className="max-w-[260px] p-3">
+                                                        <div className="space-y-1.5">
+                                                            <p className="text-xs font-semibold flex items-center gap-1.5">
+                                                                <AlertCircle className="h-3 w-3 text-primary" />
+                                                                Strict Filtering
+                                                            </p>
+                                                            <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                                                Only URLs containing <span className="font-medium text-foreground">at least one</span> of these keywords will be crawled. Leave empty to crawl everything.
+                                                            </p>
+                                                        </div>
+                                                    </TooltipContent>
+                                                </Tooltip>
+                                            </div>
+                                            <Textarea
+                                                id="include-keywords"
+                                                placeholder="docs&#10;guide&#10;help"
+                                                value={includeKeywords}
+                                                onChange={(e) => setIncludeKeywords(e.target.value)}
+                                                rows={3}
+                                                className="bg-background resize-none"
+                                            />
+                                        </div>
                                     </div>
                                 </div>
-                                <div className="space-y-2 md:col-span-2">
-                                    <div className="flex items-center gap-2">
-                                        <Switch
-                                            id="process-documents"
-                                            checked={processDocuments}
-                                            onCheckedChange={setProcessDocuments}
-                                        />
-                                        <Label htmlFor="process-documents">Download and process PDF/Word documents</Label>
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <span className="inline-flex cursor-help text-muted-foreground hover:text-foreground transition-colors">
-                                                    <Info className="h-4 w-4" />
-                                                </span>
-                                            </TooltipTrigger>
-                                            <TooltipContent side="right" className="max-w-[240px] p-2">
-                                                <div className="space-y-1">
-                                                    <p className="text-xs font-medium">Document processing</p>
-                                                    <p className="text-xs">
-                                                        When enabled, the crawler downloads PDF and Word (.docx) documents and extracts their text content to include in the knowledge base.
-                                                    </p>
-                                                </div>
-                                            </TooltipContent>
-                                        </Tooltip>
-                                    </div>
-                                </div>
-                                <div className="space-y-2">
-                                    <div className="flex items-center gap-2">
-                                        <Label htmlFor="exclude-patterns">Exclude Patterns (one per line)</Label>
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <span className="inline-flex cursor-help text-muted-foreground hover:text-foreground transition-colors">
-                                                    <Info className="h-4 w-4" />
-                                                </span>
-                                            </TooltipTrigger>
-                                            <TooltipContent side="right" className="max-w-[240px] p-2">
-                                                <div className="space-y-1">
-                                                    <p className="text-xs font-medium">Substring match</p>
-                                                    <p className="text-xs">
-                                                        URLs containing any line are skipped. Plain text only (not regex).
-                                                    </p>
-                                                </div>
-                                            </TooltipContent>
-                                        </Tooltip>
-                                    </div>
-                                    <Textarea
-                                        id="exclude-patterns"
-                                        placeholder="/login&#10;/admin&#10;/cart"
-                                        value={excludePatterns}
-                                        onChange={(e) => setExcludePatterns(e.target.value)}
-                                        rows={3}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <div className="flex items-center gap-2">
-                                        <Label htmlFor="include-keywords">Include Keywords (one per line)</Label>
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <span className="inline-flex cursor-help text-muted-foreground hover:text-foreground transition-colors">
-                                                    <Info className="h-4 w-4" />
-                                                </span>
-                                            </TooltipTrigger>
-                                            <TooltipContent side="right" className="max-w-[240px] p-2">
-                                                <div className="space-y-1">
-                                                    <p className="text-xs font-medium">Required keywords</p>
-                                                    <p className="text-xs">
-                                                        Only visit URLs that contain at least one keyword. Leave empty to scan all.
-                                                    </p>
-                                                </div>
-                                            </TooltipContent>
-                                        </Tooltip>
-                                    </div>
-                                    <Textarea
-                                        id="include-keywords"
-                                        placeholder="docs&#10;guide&#10;help"
-                                        value={includeKeywords}
-                                        onChange={(e) => setIncludeKeywords(e.target.value)}
-                                        rows={3}
-                                    />
-                                </div>
-                            </div>
-                        )}
+                            </CollapsibleContent>
+                        </Collapsible>
 
                         <Button onClick={handleStartCrawl} disabled={isStarting || !targetUrl}>
                             {isStarting ? (
