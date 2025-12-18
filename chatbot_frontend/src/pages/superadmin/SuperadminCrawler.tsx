@@ -906,50 +906,80 @@ export default function SuperadminCrawler() {
                             <TableCell className="text-right">
                               <div className="flex justify-end gap-1">
                                 {job.is_scheduled ? (
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => handleUnschedule(job.job_id)}
-                                    title="Remove schedule"
-                                  >
-                                    <CalendarClock className="h-4 w-4 text-purple-600" />
-                                  </Button>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => handleUnschedule(job.job_id)}
+                                      >
+                                        <CalendarClock className="h-4 w-4 text-purple-600" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="text-xs">
+                                      Remove schedule
+                                    </TooltipContent>
+                                  </Tooltip>
                                 ) : (
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => openScheduleDialog(job.job_id)}
-                                    title="Schedule recurring crawl"
-                                  >
-                                    <CalendarClock className="h-4 w-4" />
-                                  </Button>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => openScheduleDialog(job.job_id)}
+                                      >
+                                        <CalendarClock className="h-4 w-4" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="text-xs">
+                                      Schedule recurring crawl
+                                    </TooltipContent>
+                                  </Tooltip>
                                 )}
                                 {(job.status === 'completed' || job.status === 'failed') && (
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => handleViewUrlDetails(job.job_id)}
-                                    title="View URL details"
-                                  >
-                                    <Eye className="h-4 w-4" />
-                                  </Button>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => handleViewUrlDetails(job.job_id)}
+                                      >
+                                        <Eye className="h-4 w-4" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="text-xs">
+                                      View URL details
+                                    </TooltipContent>
+                                  </Tooltip>
                                 )}
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleRecrawl(job.job_id)}
-                                  title="Recrawl now"
-                                >
-                                  <RefreshCw className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleDeleteJob(job.job_id)}
-                                  title="Delete"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => handleRecrawl(job.job_id)}
+                                    >
+                                      <RefreshCw className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="text-xs">
+                                    Recrawl now
+                                  </TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => handleDeleteJob(job.job_id)}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="text-xs">
+                                    Delete
+                                  </TooltipContent>
+                                </Tooltip>
                               </div>
                             </TableCell>
                           </TableRow>

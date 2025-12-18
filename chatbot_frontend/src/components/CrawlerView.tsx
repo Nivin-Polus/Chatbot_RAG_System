@@ -822,50 +822,80 @@ export default function CrawlerView({ collectionId }: CrawlerViewProps) {
                                             <TableCell className="text-right">
                                                 <div className="flex justify-end gap-1">
                                                     {job.is_scheduled ? (
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            title="Scheduled (Click to unschedule)"
-                                                            onClick={() => handleUnschedule(job.job_id)}
-                                                            className="text-purple-600 hover:text-purple-700 hover:bg-purple-50"
-                                                        >
-                                                            <CalendarClock className="h-4 w-4" />
-                                                        </Button>
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    onClick={() => handleUnschedule(job.job_id)}
+                                                                    className="text-purple-600 hover:text-purple-700 hover:bg-purple-50"
+                                                                >
+                                                                    <CalendarClock className="h-4 w-4" />
+                                                                </Button>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent className="text-xs">
+                                                                Scheduled (Click to unschedule)
+                                                            </TooltipContent>
+                                                        </Tooltip>
                                                     ) : (
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            title="Schedule Recrawl"
-                                                            onClick={() => openScheduleDialog(job.job_id)}
-                                                        >
-                                                            <CalendarClock className="h-4 w-4" />
-                                                        </Button>
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    onClick={() => openScheduleDialog(job.job_id)}
+                                                                >
+                                                                    <CalendarClock className="h-4 w-4" />
+                                                                </Button>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent className="text-xs">
+                                                                Schedule Recrawl
+                                                            </TooltipContent>
+                                                        </Tooltip>
                                                     )}
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        title="Recrawl Now"
-                                                        onClick={() => handleRecrawl(job.job_id)}
-                                                    >
-                                                        <RefreshCw className="h-4 w-4" />
-                                                    </Button>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        title="View URL Details"
-                                                        onClick={() => handleViewUrlDetails(job.job_id)}
-                                                    >
-                                                        <FileText className="h-4 w-4" />
-                                                    </Button>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="text-red-500 hover:text-red-600 hover:bg-red-50"
-                                                        title="Delete"
-                                                        onClick={() => handleDeleteJob(job.job_id)}
-                                                    >
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                onClick={() => handleRecrawl(job.job_id)}
+                                                            >
+                                                                <RefreshCw className="h-4 w-4" />
+                                                            </Button>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent className="text-xs">
+                                                            Recrawl Now
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                onClick={() => handleViewUrlDetails(job.job_id)}
+                                                            >
+                                                                <FileText className="h-4 w-4" />
+                                                            </Button>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent className="text-xs">
+                                                            View URL Details
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="text-red-500 hover:text-red-600 hover:bg-red-50"
+                                                                onClick={() => handleDeleteJob(job.job_id)}
+                                                            >
+                                                                <Trash2 className="h-4 w-4" />
+                                                            </Button>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent className="text-xs text-destructive">
+                                                            Delete
+                                                        </TooltipContent>
+                                                    </Tooltip>
                                                 </div>
                                             </TableCell>
                                         </TableRow>
