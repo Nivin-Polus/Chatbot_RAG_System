@@ -74,6 +74,9 @@ class CrawlerJob(Base):
     completed_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    # Relationships
+    collection = relationship("Collection", back_populates="crawler_jobs")
+    
     def to_dict(self) -> dict:
         """Convert to dictionary for API response."""
         return {

@@ -81,6 +81,7 @@ class ChatMessageHistory(Base):
     
     # Relationships
     session = relationship("ChatSession", back_populates="message_history")
+    collection = relationship("Collection", back_populates="message_history")
     
     def to_dict(self):
         return {

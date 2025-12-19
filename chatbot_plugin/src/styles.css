@@ -92,6 +92,9 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  overflow: visible;
+  position: relative;
+  z-index: 1;
 }
 
 .chat-header-left,
@@ -123,6 +126,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  overflow: visible;
+  position: relative;
+  z-index: 1;
 }
 
 .chat-header-right button[data-tooltip],
@@ -138,9 +144,9 @@
 .plugin-chat-header-right [data-tooltip]::after {
   content: attr(data-tooltip);
   position: absolute;
-  top: calc(100% + 8px);
+  bottom: calc(100% + 8px);
   left: 50%;
-  transform: translate(-50%, -6px) scale(0.95);
+  transform: translate(-50%, 6px) scale(0.95);
   background: #ffffff;
   color: #111827;
   padding: 4px 8px;
@@ -152,7 +158,28 @@
   transition: opacity 0.18s ease, transform 0.18s ease;
   box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
   border: 1px solid rgba(17, 24, 39, 0.12);
-  z-index: 10;
+  z-index: 10001;
+}
+
+.chat-header-right button[data-tooltip]::before,
+.plugin-chat-header-right button[data-tooltip]::before,
+.chat-header-right [data-tooltip]::before,
+.plugin-chat-header-right [data-tooltip]::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 4px solid #ffffff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  z-index: 10002;
+  filter: drop-shadow(0 2px 4px rgba(15, 23, 42, 0.1));
 }
 
 .chat-header-right button[data-tooltip]:hover::after,
@@ -165,6 +192,17 @@
 .plugin-chat-header-right [data-tooltip]:focus-visible::after {
   opacity: 1;
   transform: translate(-50%, 0) scale(1);
+}
+
+.chat-header-right button[data-tooltip]:hover::before,
+.chat-header-right button[data-tooltip]:focus-visible::before,
+.plugin-chat-header-right button[data-tooltip]:hover::before,
+.plugin-chat-header-right button[data-tooltip]:focus-visible::before,
+.chat-header-right [data-tooltip]:hover::before,
+.chat-header-right [data-tooltip]:focus-visible::before,
+.plugin-chat-header-right [data-tooltip]:hover::before,
+.plugin-chat-header-right [data-tooltip]:focus-visible::before {
+  opacity: 1;
 }
 
 /* Branding within chat header */

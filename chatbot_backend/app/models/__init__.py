@@ -17,6 +17,7 @@ from .collection import Collection, CollectionUser, CollectionWebsite
 from .plugin_integration import PluginIntegration
 from .activity_log import ActivityLog
 from .activity_stats import ActivityStats
+from .crawler_job import CrawlerJob
 
 __all__ = [
     "Base",

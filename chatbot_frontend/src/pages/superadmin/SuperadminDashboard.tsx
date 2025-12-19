@@ -268,32 +268,35 @@ export default function SuperadminDashboard() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="description">Description</Label>
+                    <Label htmlFor="description">Description *</Label>
                     <Textarea
                       id="description"
                       maxLength={200}
                       value={formData.description}
                       onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                       rows={3}
+                      required
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="website_url">Website URL</Label>
+                    <Label htmlFor="website_url">Website URL *</Label>
                     <Input
                       id="website_url"
                       value={formData.website_url}
                       onChange={(e) => setFormData({ ...formData, website_url: e.target.value })}
                       placeholder="https://example.com"
+                      required
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="admin_email">Admin Email</Label>
+                    <Label htmlFor="admin_email">Admin Email *</Label>
                     <Input
                       id="admin_email"
                       type="email"
                       value={formData.admin_email}
                       onChange={(e) => setFormData({ ...formData, admin_email: e.target.value })}
                       placeholder="admin@example.com"
+                      required
                     />
                   </div>
                   <div className="flex items-center space-x-2">
@@ -308,12 +311,13 @@ export default function SuperadminDashboard() {
                     <h4 className="font-medium mb-3">Admin User Credentials</h4>
                     <div className="space-y-3">
                       <div className="space-y-2">
-                        <Label htmlFor="admin_full_name">Admin Full Name</Label>
+                        <Label htmlFor="admin_full_name">Admin Full Name *</Label>
                         <Input
                           id="admin_full_name"
                           value={formData.admin_full_name}
                           onChange={(e) => setFormData({ ...formData, admin_full_name: e.target.value })}
                           placeholder="Enter full name"
+                          required
                         />
                       </div>
                       <div className="space-y-2">

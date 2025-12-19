@@ -622,9 +622,17 @@ async def delete_collection(
                 enqueue_user_for_removal(admin_user)
 
         # Delete related records
-        db.query(CollectionUser).filter(CollectionUser.collection_id == collection_id).delete()
-        db.query(SystemPrompt).filter(SystemPrompt.collection_id == collection_id).delete()
-        db.query(FileMetadata).filter(FileMetadata.collection_id == collection_id).delete()
+        from app.models.crawler_job import CrawlerJob
+        from app.models.chat_tracking import ChatSession, ChatQuery, ChatMessageHistory
+        
+        db.query(CrawlerJob).filter(CrawlerJob.collection_id == collection_id).delete(synchronize_session=False)
+        db.query(ChatMessageHistory).filter(ChatMessageHistory.collection_id == collection_id).delete(synchronize_session=False)
+        db.query(ChatQuery).filter(ChatQuery.collection_id == collection_id).delete(synchronize_session=False)
+        db.query(ChatSession).filter(ChatSession.collection_id == collection_id).delete(synchronize_session=False)
+        
+        db.query(CollectionUser).filter(CollectionUser.collection_id == collection_id).delete(synchronize_session=False)
+        db.query(SystemPrompt).filter(SystemPrompt.collection_id == collection_id).delete(synchronize_session=False)
+        db.query(FileMetadata).filter(FileMetadata.collection_id == collection_id).delete(synchronize_session=False)
         
         # Delete collection
         db.delete(collection)
