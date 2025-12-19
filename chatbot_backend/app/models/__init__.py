@@ -38,4 +38,5 @@ __all__ = [
     "PluginIntegration",
     "ActivityLog",
     "ActivityStats",
+    "CrawlerJob",
 ]
