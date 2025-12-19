@@ -45,7 +45,7 @@ class FileStorageService:
         
         # Log received parameters for diagnostics
         try:
-            logger.info(
+            logger.debug(
                 "[FILE STORAGE] save_file_with_website params | user_id=%r website_id=%r db_set=%s collection_id=%r filename=%r content_len=%s",
                 user_id,
                 website_id,
@@ -96,7 +96,7 @@ class FileStorageService:
             db.commit()
             db.refresh(file_metadata)
             
-            logger.info(f"[FILE STORAGE] Saved file {file_id} ({filename}) for user {user_id}, website {website_id}")
+            logger.debug(f"[FILE STORAGE] Saved file {file_id} ({filename}) for user {user_id}, website {website_id}")
             
             return file_metadata
             
@@ -139,7 +139,7 @@ class FileStorageService:
                 file_record.processing_status = status
                 file_record.chunk_count = chunk_count
                 db.commit()
-                logger.info(f"[FILE STORAGE] Updated status for {file_id}: {status}, chunks: {chunk_count}")
+                logger.debug(f"[FILE STORAGE] Updated status for {file_id}: {status}, chunks: {chunk_count}")
                 return True
             return False
         except Exception as e:
@@ -162,7 +162,7 @@ class FileStorageService:
                 db.delete(file_binary)
             db.commit()
 
-            logger.info(f"File metadata deleted: {file_id}")
+            logger.debug(f"File metadata deleted: {file_id}")
             return True
             
         except Exception as e:

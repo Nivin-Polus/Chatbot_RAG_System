@@ -136,7 +136,6 @@ export default function SuperadminUsers() {
 
       toast.success('Plugin token copied to clipboard');
     } catch (error) {
-      console.error('Failed to copy plugin token', error);
       toast.error('Failed to copy plugin token');
     }
   };
@@ -345,7 +344,6 @@ export default function SuperadminUsers() {
           );
         }
       } catch (error) {
-        console.error('Failed to load plugin token', error);
         toast.error('Failed to load plugin token');
       }
     }
@@ -373,7 +371,6 @@ export default function SuperadminUsers() {
         ),
       );
     } catch (error) {
-      console.error(error);
       toast.error('Failed to regenerate plugin token');
     } finally {
       setIsRegeneratingToken(false);
@@ -476,7 +473,7 @@ export default function SuperadminUsers() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">Users Management</h1>
-           
+
           </div>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
@@ -492,8 +489,8 @@ export default function SuperadminUsers() {
                     {editingUser ? 'Edit User' : 'Create New User'}
                   </DialogTitle>
                   <DialogDescription>
-                    {editingUser 
-                      ? 'Update user details and permissions' 
+                    {editingUser
+                      ? 'Update user details and permissions'
                       : 'Create a new user account'
                     }
                   </DialogDescription>
@@ -571,8 +568,8 @@ export default function SuperadminUsers() {
                         <span className="text-sm text-muted-foreground">(Cannot change your own role)</span>
                       )}
                     </Label>
-                    <Select 
-                      value={formData.role} 
+                    <Select
+                      value={formData.role}
                       onValueChange={(value: UserRole) => setFormData({ ...formData, role: value })}
                       disabled={editingUser?.user_id === authUser?.user_id}
                     >
@@ -657,8 +654,8 @@ export default function SuperadminUsers() {
                     Cancel
                   </Button>
                   {editingUser && editingUser.role === 'plugin_user' && (
-                    <Button 
-                      type="button" 
+                    <Button
+                      type="button"
                       variant={editingUser.is_active ? "destructive" : "default"}
                       onClick={() => handleToggleUserStatus(editingUser.user_id, editingUser.is_active, editingUser.role)}
                     >
@@ -768,9 +765,8 @@ export default function SuperadminUsers() {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          user.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                        }`}>
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${user.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          }`}>
                           {user.is_active ? 'Active' : 'Inactive'}
                         </span>
                       </TableCell>

@@ -151,7 +151,6 @@ export default function SuperadminFiles() {
       toast.success(`Uploaded ${uploadedFiles.length}/${filesArray.length} file(s)`);
       event.target.value = '';
     } catch (error) {
-      console.error('Failed to upload files', error);
       toast.error(error instanceof Error ? error.message : 'Failed to upload files');
       setUploadProgress((prev) => {
         const updated: Record<string, 'pending' | 'success' | 'error'> = {};

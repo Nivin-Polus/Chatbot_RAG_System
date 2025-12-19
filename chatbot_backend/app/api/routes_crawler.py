@@ -182,7 +182,7 @@ async def start_crawl(
         # Start job in background
         background_tasks.add_task(crawler_service.start_job, job.job_id)
         
-        logger.info(f"User {current_user.username} started crawl job {job.job_id}")
+        logger.debug(f"User {current_user.username} started crawl job {job.job_id}")
         
         # Log activity
         activity_tracker.log_activity(
@@ -511,7 +511,7 @@ async def recrawl(
     # Start in background
     background_tasks.add_task(crawler_service.start_job, new_job.job_id)
     
-    logger.info(f"User {current_user.username} started recrawl {new_job.job_id} (from {job_id})")
+    logger.debug(f"User {current_user.username} started recrawl {new_job.job_id} (from {job_id})")
     
     # Log activity
     activity_tracker.log_activity(
@@ -576,7 +576,7 @@ async def schedule_crawl(
         crawler_service = CrawlerService(db)
         background_tasks.add_task(crawler_service.start_job, job_id)
     
-    logger.info(f"User {current_user.username} scheduled job {job_id} every {request.interval_hours} hours")
+    logger.debug(f"User {current_user.username} scheduled job {job_id} every {request.interval_hours} hours")
     
     # Log activity
     activity_tracker.log_activity(
@@ -626,7 +626,7 @@ async def unschedule_crawl(
     # Refresh job from DB
     db.refresh(job)
     
-    logger.info(f"User {current_user.username} unscheduled job {job_id}")
+    logger.debug(f"User {current_user.username} unscheduled job {job_id}")
     
     # Log activity
     activity_tracker.log_activity(

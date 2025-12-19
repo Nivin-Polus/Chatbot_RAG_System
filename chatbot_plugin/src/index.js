@@ -35,6 +35,7 @@ import "./styles.css";
   let currentTypingFinish = null;
   let currentRequestId = null; // Track current request to prevent old responses from updating UI
   let originalSendBtnHTML = null; // Store original send button HTML
+  let userMessageCount = 0; // Track how many user messages have been sent in this session
 
   // LocalStorage keys for chat history
   const CHAT_HISTORY_KEY = 'chatbot_chat_history';
@@ -71,6 +72,19 @@ import "./styles.css";
     }
   }
 
+  // Scroll so that the latest user question sits at the top of the chat area
+  function scrollLastUserMessageToTop() {
+    if (!chatBox) return;
+    const userMessages = chatBox.querySelectorAll(".plugin-msg.msg.user, .msg.user");
+    if (!userMessages || userMessages.length === 0) return;
+    const lastUser = userMessages[userMessages.length - 1];
+    if (!lastUser) return;
+
+    // Position the last user message at the top of the scroll container
+    const offsetTop = lastUser.offsetTop ?? 0;
+    chatBox.scrollTop = offsetTop;
+  }
+
   await new Promise(resolve => setTimeout(resolve, 100));
 
   chatBox = document.getElementById("chat-box");
@@ -93,6 +107,9 @@ import "./styles.css";
   if (!historyLoaded) {
     initializeMessages();
   }
+
+  // Initialize user message counter based on any restored history
+  userMessageCount = messages.filter(m => m && m.user).length;
 
   if (CONFIG?.ui) {
     const root = document.documentElement;
@@ -364,16 +381,26 @@ import "./styles.css";
       showProcessingState();
 
       addMessage({ user: true, text: userMsg, formatted: false });
-      scrollChatToBottom();
+      // Track how many user messages have been sent in this session
+      userMessageCount += 1;
+
+      // For the very first exchange, keep existing behavior (scroll to bottom).
+      // From the second user message onwards, align the question at the top so
+      // that the response renders just beneath it.
+      if (userMessageCount <= 1) {
+        scrollChatToBottom();
+      } else {
+        scrollLastUserMessageToTop();
+      }
       input.value = "";
       input.dispatchEvent(new Event("input", { bubbles: true }));
 
       const typingIndicator = showTypingIndicator();
-      scrollChatToBottom();
+      if (userMessageCount <= 1) {
+        scrollChatToBottom();
+      }
 
-      console.log('[ChatPlugin] Sending message to API...');
       const reply = await chatService.sendMessage(userMsg, { signal: abortController.signal });
-      console.log('[ChatPlugin] Got response from API:', reply ? 'success' : 'null');
 
       // Check if this request is still valid (new chat might have been clicked)
       if (currentRequestId !== requestId) {
@@ -710,7 +737,7 @@ import "./styles.css";
       // Also sync conversation history with chatService for API context
       chatService.restoreHistory(messagesToSave);
     } catch (err) {
-      console.warn('[ChatPlugin] Failed to save chat history:', err);
+      // Failed to save chat history
     }
   }
 
@@ -768,7 +795,6 @@ import "./styles.css";
       renderMessages();
       return true;
     } catch (err) {
-      console.warn('[ChatPlugin] Failed to load chat history:', err);
       return false;
     }
   }
@@ -779,7 +805,7 @@ import "./styles.css";
       localStorage.removeItem(CHAT_HISTORY_KEY);
       localStorage.removeItem(CHAT_SESSION_KEY);
     } catch (err) {
-      console.warn('[ChatPlugin] Failed to clear chat history:', err);
+      // Failed to clear chat history
     }
   }
 

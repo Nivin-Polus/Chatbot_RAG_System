@@ -160,7 +160,7 @@ async def _initialize_default_users():
                 logging.info("✅ Created default website")
             else:
                 default_website = existing_website
-                logging.info("✅ Using existing default website")
+                logging.debug("✅ Using existing default website")
 
             if not existing_super_admin:
                 # Create super admin
@@ -178,7 +178,7 @@ async def _initialize_default_users():
                 logging.info("✅ Created super admin")
             else:
                 super_admin = existing_super_admin
-                logging.info("✅ Using existing super admin")
+                logging.debug("✅ Using existing super admin")
 
             if not existing_user_admin:
                 # Create user admin for default website
@@ -196,7 +196,7 @@ async def _initialize_default_users():
                 logging.info("✅ Created admin user")
             else:
                 user_admin = existing_user_admin
-                logging.info("✅ Using existing admin user")
+                logging.debug("✅ Using existing admin user")
 
             if not existing_regular_user:
                 regular_user = User(
@@ -213,7 +213,7 @@ async def _initialize_default_users():
                 logging.info("✅ Created regular user")
             else:
                 regular_user = existing_regular_user
-                logging.info("✅ Using existing regular user")
+                logging.debug("✅ Using existing regular user")
 
             if not existing_plugin_user:
                 plugin_user = User(
@@ -232,7 +232,7 @@ async def _initialize_default_users():
                 plugin_user = existing_plugin_user
                 if plugin_user.website_id != default_website.website_id:
                     plugin_user.website_id = default_website.website_id
-                logging.info("✅ Using existing plugin user")
+                logging.debug("✅ Using existing plugin user")
 
             default_collection = db.query(Collection).filter(Collection.collection_id == "col_default").first()
             if not default_collection:
@@ -268,11 +268,11 @@ async def _initialize_default_users():
 
             db.commit()
 
-            logging.info("✅ User system initialized:")
-            logging.info("   - Super Admin: superadmin/superadmin123 (global access)")
-            logging.info("   - Admin: admin/admin123 (admin access)")
-            logging.info("   - Plugin User: pluginuser/plugin123 (per-collection plugin access)")
-            logging.info("   - Regular User: user/user123 (regular access)")
+            logging.debug("✅ User system initialized:")
+            logging.debug("   - Super Admin: superadmin/superadmin123 (global access)")
+            logging.debug("   - Admin: admin/admin123 (admin access)")
+            logging.debug("   - Plugin User: pluginuser/plugin123 (per-collection plugin access)")
+            logging.debug("   - Regular User: user/user123 (regular access)")
 
         finally:
             db.close()

@@ -90,7 +90,6 @@ export default function SuperadminActivity() {
     try {
       return new Date(rawTimestamp).toISOString();
     } catch (error) {
-      console.warn('Failed to normalize activity timestamp', rawTimestamp, error);
       return new Date().toISOString();
     }
   };
@@ -137,14 +136,14 @@ export default function SuperadminActivity() {
         const rawActivities: any[] = Array.isArray(recentData)
           ? recentData
           : Array.isArray(recentData?.activities)
-          ? recentData.activities
-          : [];
+            ? recentData.activities
+            : [];
 
         const normalized = rawActivities.map(normalizeActivityItem);
-        
+
         // Always replace activities when fetching a new page
         setActivities(normalized);
-        
+
         // Use the total count from the API response
         const total = recentData.total ?? recentData.count ?? rawActivities.length;
         setTotalActivities(total);
@@ -172,7 +171,6 @@ export default function SuperadminActivity() {
         setStats(null);
       }
     } catch (error) {
-      console.error('Error fetching activity data:', error);
       toast.error('Failed to fetch activity data');
       // Ensure activities is always an array even on error
       setActivities([]);
@@ -361,7 +359,7 @@ export default function SuperadminActivity() {
   const getPageNumbers = () => {
     const pages: (number | 'ellipsis')[] = [];
     const maxVisible = 7;
-    
+
     if (totalPages <= maxVisible) {
       // Show all pages if total is small
       for (let i = 1; i <= totalPages; i++) {
@@ -370,7 +368,7 @@ export default function SuperadminActivity() {
     } else {
       // Always show first page
       pages.push(1);
-      
+
       if (currentPage <= 3) {
         // Near the start
         for (let i = 2; i <= 5; i++) {
@@ -394,7 +392,7 @@ export default function SuperadminActivity() {
         pages.push(totalPages);
       }
     }
-    
+
     return pages;
   };
 
@@ -444,7 +442,7 @@ export default function SuperadminActivity() {
                   </SelectContent>
                 </Select>
               </div>
-              
+
               <div>
                 <label className="text-sm font-medium mb-1 block">Activity Type</label>
                 <Select value={activityTypeFilter} onValueChange={setActivityTypeFilter}>
@@ -465,25 +463,25 @@ export default function SuperadminActivity() {
                   </SelectContent>
                 </Select>
               </div>
-              
+
               <div>
                 <label className="text-sm font-medium mb-1 block">User</label>
-                <Input 
-                  placeholder="Filter by user" 
+                <Input
+                  placeholder="Filter by user"
                   value={userFilter}
                   onChange={(e) => setUserFilter(e.target.value)}
                 />
               </div>
-              
+
               <div>
                 <label className="text-sm font-medium mb-1 block">Collection</label>
-                <Input 
-                  placeholder="Filter by collection" 
+                <Input
+                  placeholder="Filter by collection"
                   value={collectionFilter}
                   onChange={(e) => setCollectionFilter(e.target.value)}
                 />
               </div>
-              
+
               <div className="flex items-end">
                 <Button variant="outline" onClick={handleClearFilters} className="w-full">
                   Clear Filters
@@ -612,13 +610,13 @@ export default function SuperadminActivity() {
                     </div>
                   </div>
                 ))}
-                
+
                 {totalPages > 1 && (
                   <div className="flex justify-center py-4">
                     <Pagination>
                       <PaginationContent>
                         <PaginationItem>
-                          <PaginationPrevious 
+                          <PaginationPrevious
                             onClick={(e) => {
                               e.preventDefault();
                               if (currentPage > 1) {
@@ -629,7 +627,7 @@ export default function SuperadminActivity() {
                             href="#"
                           />
                         </PaginationItem>
-                        
+
                         {getPageNumbers().map((page, index) => {
                           if (page === 'ellipsis') {
                             return (
@@ -654,9 +652,9 @@ export default function SuperadminActivity() {
                             </PaginationItem>
                           );
                         })}
-                        
+
                         <PaginationItem>
-                          <PaginationNext 
+                          <PaginationNext
                             onClick={(e) => {
                               e.preventDefault();
                               if (currentPage < totalPages) {

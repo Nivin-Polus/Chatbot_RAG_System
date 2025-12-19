@@ -168,7 +168,7 @@ export default function SuperadminCrawler() {
         }
       }
     } catch (error) {
-      console.error('Failed to fetch collections:', error);
+      // Failed to fetch collections
     }
   }, [user?.access_token]);
 
@@ -184,7 +184,7 @@ export default function SuperadminCrawler() {
         setJobs(data.jobs || []);
       }
     } catch (error) {
-      console.error('Failed to fetch jobs:', error);
+      // Failed to fetch jobs
     } finally {
       setIsLoading(false);
     }

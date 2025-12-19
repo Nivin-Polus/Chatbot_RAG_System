@@ -25,10 +25,10 @@ class VectorStore:
             self.Distance = Distance
             # Ensure collection exists
             self._ensure_collection()
-            logger.info("Qdrant client initialized successfully")
+            logger.debug("Qdrant client initialized successfully")
         except Exception as e:
             logger.warning(f"Qdrant client initialization failed: {e}")
-            logger.info("Using in-memory vector storage fallback")
+            logger.debug("Using in-memory vector storage fallback")
             self.client = None
             self._init_fallback_storage()
 
@@ -51,7 +51,7 @@ class VectorStore:
 
             try:
                 # Try to check if collection exists using collection_exists method
-                logger.info(f"[DEBUG] Checking if collection {self.collection_name} exists... Instance: {id(self)}")
+                logger.debug(f"Checking if collection {self.collection_name} exists... Instance: {id(self)}")
                 if self.client.collection_exists(self.collection_name):
                     # logger.info(f"Qdrant collection '{self.collection_name}' already exists.")
                     self._collection_verified = True
@@ -68,7 +68,7 @@ class VectorStore:
                     collection_name=self.collection_name,
                     vectors_config=VectorParams(size=384, distance=self.Distance.COSINE)
                 )
-                logger.info(f"Qdrant collection '{self.collection_name}' created.")
+                logger.debug(f"Qdrant collection '{self.collection_name}' created.")
                 self._collection_verified = True
             except Exception as create_error:
                 if "already exists" in str(create_error) or "409" in str(create_error):
@@ -97,14 +97,14 @@ class VectorStore:
                 payload=metadata or {}
             )
             self.client.upsert(collection_name=self.collection_name, points=[point])
-            logger.info(f"Document added to Qdrant: {metadata.get('file_name') if metadata else 'unknown'}")
+            logger.debug(f"Document added to Qdrant: {metadata.get('file_name') if metadata else 'unknown'}")
         else:
             # Use fallback storage
             self.documents[doc_id] = {
                 "vector": vector,
                 "payload": metadata or {}
             }
-            logger.info(f"Document added to memory: {metadata.get('file_name') if metadata else 'unknown'}")
+            logger.debug(f"Document added to memory: {metadata.get('file_name') if metadata else 'unknown'}")
         return doc_id
 
     def add_documents_with_metadata(self, documents: list[dict]):
@@ -149,11 +149,11 @@ class VectorStore:
     def delete_document(self, point_id: str):
         if self.client:
             self.client.delete(collection_name=self.collection_name, points=[point_id])
-            logger.info(f"Document deleted from Qdrant: {point_id}")
+            logger.debug(f"Document deleted from Qdrant: {point_id}")
         else:
             if point_id in self.documents:
                 del self.documents[point_id]
-                logger.info(f"Document deleted from memory: {point_id}")
+                logger.debug(f"Document deleted from memory: {point_id}")
 
     def delete_documents_by_file_id(self, file_id: str):
         """Delete all document chunks belonging to a specific file"""
@@ -171,7 +171,7 @@ class VectorStore:
                     ]
                 )
             )
-            logger.info(f"All chunks for file {file_id} deleted from Qdrant")
+            logger.debug(f"All chunks for file {file_id} deleted from Qdrant")
         else:
             # For fallback storage, delete all documents with matching file_id
             to_delete = []
@@ -180,7 +180,7 @@ class VectorStore:
                     to_delete.append(doc_id)
             for doc_id in to_delete:
                 del self.documents[doc_id]
-            logger.info(f"Deleted {len(to_delete)} chunks for file {file_id} from memory")
+            logger.debug(f"Deleted {len(to_delete)} chunks for file {file_id} from memory")
             return len(to_delete)
 
     def delete_documents_by_crawl_job_id(self, crawl_job_id: str) -> int:
@@ -199,7 +199,7 @@ class VectorStore:
                     ]
                 )
             )
-            logger.info(f"All chunks for crawl job {crawl_job_id} deleted from Qdrant")
+            logger.debug(f"All chunks for crawl job {crawl_job_id} deleted from Qdrant")
             return -1  # Qdrant doesn't return count
         else:
             # For fallback storage, delete all documents with matching crawl_job_id
@@ -209,7 +209,7 @@ class VectorStore:
                     to_delete.append(doc_id)
             for doc_id in to_delete:
                 del self.documents[doc_id]
-            logger.info(f"Deleted {len(to_delete)} chunks for crawl job {crawl_job_id} from memory")
+            logger.debug(f"Deleted {len(to_delete)} chunks for crawl job {crawl_job_id} from memory")
             return len(to_delete)
 
     def search(self, query: str, top_k: int = 5, collection_id: Optional[str] = None):
@@ -244,7 +244,7 @@ class VectorStore:
             )
             try:
                 payload_collections = [r.payload.get("collection_id") for r in results[:5]]
-                logger.info(
+                logger.debug(
                     f"[QDRANT SEARCH] filter={collection_id} returned {len(results)} results, sample collections={payload_collections}"
                 )
             except Exception as log_error:
@@ -253,7 +253,7 @@ class VectorStore:
         else:
             # Use fallback: simple cosine similarity
             import numpy as np
-            logger.info(f"[SEARCH DEBUG] Total documents in memory: {len(self.documents)}")
+            logger.debug(f"[SEARCH DEBUG] Total documents in memory: {len(self.documents)}")
             
             if not self.documents:
                 logger.warning("[SEARCH DEBUG] No documents found in memory storage")
@@ -294,13 +294,13 @@ class VectorStore:
                     logger.error(f"[SEARCH DEBUG] Error processing document {doc_id}: {e}")
                     continue
             
-            logger.info(f"[SEARCH DEBUG] Calculated {len(scores)} similarity scores")
+            logger.debug(f"[SEARCH DEBUG] Calculated {len(scores)} similarity scores")
             
             # Sort by score and return top_k
             scores.sort(key=lambda x: x["score"], reverse=True)
             
             if scores:
-                logger.info(f"[SEARCH DEBUG] Top score: {scores[0]['score']:.4f}")
-                logger.info(f"[SEARCH DEBUG] Returning {min(len(scores), top_k)} results")
+                logger.debug(f"[SEARCH DEBUG] Top score: {scores[0]['score']:.4f}")
+                logger.debug(f"[SEARCH DEBUG] Returning {min(len(scores), top_k)} results")
             
             return scores[:top_k]

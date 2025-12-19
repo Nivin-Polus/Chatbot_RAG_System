@@ -122,7 +122,6 @@ export default function UserAdminDashboard() {
           setCollection(null);
         }
       } catch (error) {
-        console.debug('Failed to fetch collection details', error);
         setCollectionDetails(null);
         setCollection(null);
       }
@@ -156,7 +155,6 @@ export default function UserAdminDashboard() {
         setCollection(null);
       }
     } catch (error) {
-      console.error('Failed to load knowledge bases', error);
       toast.error('Unable to load knowledge bases.');
       setSelectedCollectionId('');
       setCollection(null);
@@ -186,7 +184,6 @@ export default function UserAdminDashboard() {
         setUsers([]);
       }
     } catch (error) {
-      console.debug('Failed to fetch users', error);
       setUsers([]);
     } finally {
       setIsLoadingUsers(false);
@@ -213,7 +210,6 @@ export default function UserAdminDashboard() {
         setFiles([]);
       }
     } catch (error) {
-      console.debug('Failed to fetch files', error);
       setFiles([]);
     } finally {
       setFilesLoading(false);
@@ -240,7 +236,6 @@ export default function UserAdminDashboard() {
         setPrompts([]);
       }
     } catch (error) {
-      console.debug('Failed to fetch prompts', error);
       setPrompts([]);
     } finally {
       setPromptsLoading(false);
@@ -463,7 +458,7 @@ export default function UserAdminDashboard() {
             errorMessage = errorData.detail;
           }
         } catch (parseError) {
-          console.debug('Failed to parse upload error response', parseError);
+          // Failed to parse upload error
         }
 
         setUploadProgress((prev) => {
@@ -497,7 +492,6 @@ export default function UserAdminDashboard() {
       event.target.value = '';
       closeFileDialog();
     } catch (error) {
-      console.error('Failed to upload files', error);
       toast.error(error instanceof Error ? error.message : 'Failed to upload files');
     } finally {
       setIsUploading(false);

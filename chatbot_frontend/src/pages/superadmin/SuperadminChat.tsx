@@ -251,7 +251,6 @@ export default function SuperadminChat() {
         return activeData.length > 0 ? activeData[0].collection_id : '';
       });
     } catch (error) {
-      console.error('Failed to load knowledge bases', error);
       toast.error('Unable to load knowledge bases for chat');
       setCollections([]);
       setSelectedCollection('');
@@ -464,7 +463,7 @@ export default function SuperadminChat() {
           },
           user.access_token,
           false
-        ).catch((err) => console.debug('Activity logging failed', err));
+        ).catch(() => { });
       }
 
     } catch (error) {
@@ -508,7 +507,6 @@ export default function SuperadminChat() {
 
       try {
         // Use the exact same approach as the working files section
-        console.log('Downloading source:', { sourceRef, sourceName, url: `${import.meta.env.VITE_API_BASE_URL}/files/download/${sourceRef}` });
         const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/files/download/${sourceRef}`, {
           headers: {
             Authorization: `Bearer ${user.access_token}`,
@@ -527,8 +525,6 @@ export default function SuperadminChat() {
           document.body.removeChild(a);
           toast.success('Source downloaded successfully');
         } else {
-          const errorText = await response.text();
-          console.error('Download failed:', { status: response.status, statusText: response.statusText, errorText });
           if (response.status === 404) {
             toast.error('Source file not found');
           } else if (response.status === 403) {
@@ -538,7 +534,6 @@ export default function SuperadminChat() {
           }
         }
       } catch (error) {
-        console.error('Download error:', error);
         toast.error('Failed to download source file');
       }
     },

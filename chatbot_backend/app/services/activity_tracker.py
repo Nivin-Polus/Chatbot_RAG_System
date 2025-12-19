@@ -113,7 +113,7 @@ class ActivityTracker:
             stats.touch_activity(timestamp)
 
             session.commit()
-            logger.info("Activity logged: %s by %s", activity_type, user)
+            logger.debug("Activity logged: %s by %s", activity_type, user)
         except Exception as exc:
             session.rollback()
             logger.error("Failed to log activity: %s", exc)

@@ -148,7 +148,7 @@ export default function UserAdminCrawler() {
                 }
             }
         } catch (error) {
-            console.error('Failed to fetch collection:', error);
+            // Failed to fetch collection
         }
     }, [user?.access_token]);
 
@@ -169,7 +169,7 @@ export default function UserAdminCrawler() {
                 setJobs(data.jobs || []);
             }
         } catch (error) {
-            console.error('Failed to fetch jobs:', error);
+            // Failed to fetch jobs
         } finally {
             setIsLoading(false);
         }

@@ -225,11 +225,11 @@ def _process_chat_request(
         cached_answer = r.get(cache_key)
         if cached_answer:
             answer_text = cached_answer.decode("utf-8")
-            logger.info(f"[CACHE HIT] User: {identity_username}, Question: {question}")
+            logger.debug(f"[CACHE HIT] User: {identity_username}, Question: {question}")
             is_generic = _is_generic_query(question) or _is_generic_response(answer_text)
             return ChatResponse(answer=answer_text, session_id=effective_session_id, is_generic=is_generic, sources=[])
 
-    logger.info(f"[RAG QUERY] User: {identity_username}, Question: {question}, top_k: {top_k}")
+    logger.debug(f"[RAG QUERY] User: {identity_username}, Question: {question}, top_k: {top_k}")
 
     # Import here to avoid PyO3 initialization issues during module import
     from app.core.vector_singleton import get_vector_store
@@ -238,11 +238,11 @@ def _process_chat_request(
     vector_store = get_vector_store()
     rag_instance = RAG(db_session=db)
     chunks = rag_instance.retrieve_chunks(question, top_k=top_k, collection_id=effective_collection_id)
-    logger.info(f"[CHAT DEBUG] Retrieved {len(chunks)} chunks for query: {question}")
-    logger.info(f"[CHAT DEBUG] Vector store type: {'Qdrant' if vector_store.client else 'In-memory fallback'}")
+    logger.debug(f"[CHAT DEBUG] Retrieved {len(chunks)} chunks for query: {question}")
+    logger.debug(f"[CHAT DEBUG] Vector store type: {'Qdrant' if vector_store.client else 'In-memory fallback'}")
 
     if vector_store.client is None:
-        logger.info(f"[CHAT DEBUG] Fallback storage has {len(vector_store.documents)} documents")
+        logger.debug(f"[CHAT DEBUG] Fallback storage has {len(vector_store.documents)} documents")
 
     source_records: dict[str, dict] = {}
     for chunk in chunks:
@@ -298,7 +298,7 @@ def _process_chat_request(
 
     try:
         if maintain_context and conversation_history:
-            logger.info(f"[CONTEXT] Using context with {len(conversation_history)} messages")
+            logger.debug(f"[CONTEXT] Using context with {len(conversation_history)} messages")
             rag_result = rag_instance.answer_with_context(
                 question,
                 conversation_history,
@@ -306,7 +306,7 @@ def _process_chat_request(
                 collection_id=effective_collection_id,
             )
         else:
-            logger.info("[CONTEXT] Using basic RAG without context")
+            logger.debug("[CONTEXT] Using basic RAG without context")
             rag_result = rag_instance.answer(
                 question,
                 top_k=top_k,
@@ -334,11 +334,11 @@ def _process_chat_request(
 
     if r:
         r.set(cache_key, answer_text, ex=60 * 60 * 24)
-        logger.info(f"[CACHE STORE] User: {identity_username}, Question: {question}")
+        logger.debug(f"[CACHE STORE] User: {identity_username}, Question: {question}")
 
     processing_time = int((time.time() - start_time) * 1000)
 
-    logger.info(f"User: {identity_username}, Question: {question}, Answer: {answer_text}")
+    logger.debug(f"User: {identity_username}, Question: {question}, Answer: {answer_text}")
 
     if effective_session_id:
         try:

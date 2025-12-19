@@ -131,7 +131,6 @@ export default function SuperadminDashboard() {
       // Refresh collections
       await refreshCollections();
     } catch (error) {
-      console.error('Failed to create knowledge base', error);
       toast.error(error instanceof Error ? error.message : 'Failed to create knowledge base');
     }
   };
@@ -220,7 +219,6 @@ export default function SuperadminDashboard() {
         toast.success('Collection ID copied to clipboard');
       }
     } catch (error) {
-      console.error('Failed to copy collection ID', error);
       toast.error('Unable to copy collection ID');
     }
   };

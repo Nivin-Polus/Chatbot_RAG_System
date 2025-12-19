@@ -194,7 +194,7 @@ def fuzzy_fix_url(url: str) -> str:
                 parsed.query,
                 ""
             ))
-            logger.info(f"🔧 Fuzzy corrected URL: {url} → {corrected}")
+            logger.debug(f"🔧 Fuzzy corrected URL: {url} → {corrected}")
             return corrected
     except Exception:
         pass
@@ -347,7 +347,7 @@ class CrawlerEngine:
             self.robots_parser = RobotFileParser()
             self.robots_parser.set_url(robots_url)
             self.robots_parser.read()
-            logger.info(f"Loaded robots.txt from {robots_url}")
+            logger.debug(f"Loaded robots.txt from {robots_url}")
         except Exception as e:
             logger.debug(f"Could not load robots.txt: {e}")
     
@@ -370,7 +370,7 @@ class CrawlerEngine:
                     self._add_url_to_visit(sitemap_url.loc, depth=1)
             
             self.stats.pages_discovered = len(self.to_visit)
-            logger.info(f"Discovered {len(sitemap_urls)} URLs from sitemap")
+            logger.debug(f"Discovered {len(sitemap_urls)} URLs from sitemap")
             
         except Exception as e:
             logger.warning(f"Sitemap discovery failed: {e}")
@@ -499,7 +499,7 @@ class CrawlerEngine:
         max_concurrent = getattr(self.config, 'concurrent_requests', 5) or 5
         semaphore = asyncio.Semaphore(max_concurrent)
         
-        logger.info(f"Starting crawl with {max_concurrent} concurrent workers")
+        logger.debug(f"Starting crawl with {max_concurrent} concurrent workers")
         
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
@@ -580,7 +580,7 @@ class CrawlerEngine:
                         # Wait a moment for any new URLs from in-progress pages
                         await asyncio.sleep(0.5)
                         if not self.to_visit:
-                            logger.info("No more URLs to process")
+                            logger.debug("No more URLs to process")
                             break
                     
                     # Calculate how many pages we can still crawl
@@ -588,7 +588,7 @@ class CrawlerEngine:
                     if self.config.max_pages > 0:
                         remaining_pages = self.config.max_pages - self.stats.pages_crawled
                         if remaining_pages <= 0:
-                            logger.info(f"Reached max pages limit: {self.config.max_pages}")
+                            logger.debug(f"Reached max pages limit: {self.config.max_pages}")
                             break
                     
                     # Get batch of URLs to process - limit batch size to remaining pages
@@ -625,7 +625,7 @@ class CrawlerEngine:
                     
                     # Log progress periodically
                     if processed_count % 50 == 0:
-                        logger.info(f"Progress: {self.stats.pages_crawled} crawled, {self.stats.pages_failed} failed, {len(self.to_visit)} queued")
+                        logger.debug(f"Progress: {self.stats.pages_crawled} crawled, {self.stats.pages_failed} failed, {len(self.to_visit)} queued")
                     
             finally:
                 await browser.close()
@@ -646,9 +646,9 @@ class CrawlerEngine:
             # Create temp directory if needed
             if not self.temp_download_dir:
                 self.temp_download_dir = tempfile.mkdtemp(prefix="crawler_docs_")
-                logger.info(f"Created temp directory: {self.temp_download_dir}")
+                logger.debug(f"Created temp directory: {self.temp_download_dir}")
             
-            logger.info(f"Processing document: {url}")
+            logger.debug(f"Processing document: {url}")
             
             # Download the document
             loop = asyncio.get_event_loop()
@@ -698,7 +698,7 @@ class CrawlerEngine:
             
             # Track successfully processed document
             self.stats.crawled_urls.append({"url": url, "title": extracted.get('title', '')[:100], "chunks": len(page_chunks)})
-            logger.info(f"✅ Document processed: {url} ({len(page_chunks)} chunks)")
+            logger.debug(f"✅ Document processed: {url} ({len(page_chunks)} chunks)")
             
             # Clean up the downloaded file
             try:
@@ -958,7 +958,7 @@ class CrawlerEngine:
             
             # Check for download error (Playwright)
             if "Download is starting" in error_msg:
-                logger.info(f"Skipping file download: {url}")
+                logger.debug(f"Skipping file download: {url}")
                 self.stats.pages_skipped += 1
                 self.stats.skipped_urls.append({
                     "url": url,
@@ -1080,7 +1080,7 @@ class CrawlerEngine:
                     continue
             
             # Summary log
-            logger.info(f"🔗 Discovered {len(links)} internal links from {current_url} (skipped: {skipped_external} external, {skipped_invalid} invalid)")
+            logger.debug(f"🔗 Discovered {len(links)} internal links from {current_url} (skipped: {skipped_external} external, {skipped_invalid} invalid)")
                     
         except Exception as e:
             logger.warning(f"⚠️ Error extracting links from Playwright DOM for {current_url}: {e}")
@@ -1119,7 +1119,7 @@ class CrawlerEngine:
                     skipped_external += 1
             
             if links:
-                logger.info(f"🔗 Discovered {len(links)} internal links (static) from {current_url} (skipped: {skipped_external} external, {skipped_invalid} invalid)")
+                logger.debug(f"🔗 Discovered {len(links)} internal links (static) from {current_url} (skipped: {skipped_external} external, {skipped_invalid} invalid)")
                     
         except Exception as e:
             logger.warning(f"⚠️ Error extracting links from static HTML for {current_url}: {e}")

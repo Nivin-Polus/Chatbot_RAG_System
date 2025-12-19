@@ -194,7 +194,7 @@ class RAG:
             
             return prompt
         except Exception as e:
-            print(f"Error getting prompt for collection {collection_id}: {e}")
+            logging.error(f"Error getting prompt for collection {collection_id}: {e}")
             return None
 
     def retrieve_chunks(self, query: str, top_k: int = 5, collection_id: Optional[str] = None) -> List[Dict]:
@@ -245,7 +245,7 @@ class RAG:
             try:
                 db_prompt.increment_usage(self.db_session)
             except Exception as e:
-                print(f"Error updating prompt usage: {e}")
+                logging.error(f"Error updating prompt usage: {e}")
 
         return system_prompt, model, max_tokens, temperature
 
@@ -297,7 +297,7 @@ class RAG:
                 raise ValueError(f"Unsupported AI_PROVIDER: {self.ai_provider}")
 
         except Exception as e:
-            print(f"AI Provider Error ({self.ai_provider}): {e}")
+            logging.error(f"AI Provider Error ({self.ai_provider}): {e}")
             return "I wasn't able to retrieve a confident answer, please refine your question."
 
     def answer(self, query: str, top_k: int = 5, collection_id: Optional[str] = None) -> Union[str, Dict[str, any]]:

@@ -72,22 +72,22 @@ async def upload_file(
     db: Session = Depends(get_db),
 ):
     """Upload one or multiple files"""
-    logger.info(f"[UPLOAD DEBUG] Upload request from user: {getattr(current_user, 'username', None)}, role: {getattr(current_user, 'role', None)}")
+    logger.debug(f"[UPLOAD DEBUG] Upload request from user: {getattr(current_user, 'username', None)}, role: {getattr(current_user, 'role', None)}")
     
     # Debug: Log what files we received
-    logger.info(f"[UPLOAD DEBUG] Received files: {files is not None}")
-    logger.info(f"[UPLOAD DEBUG] Received uploaded_files: {uploaded_files is not None}")
-    logger.info(f"[UPLOAD DEBUG] Received single_file: {single_file is not None}")
-    logger.info(f"[UPLOAD DEBUG] Received collection_id: {collection_id}")
+    logger.debug(f"[UPLOAD DEBUG] Received files: {files is not None}")
+    logger.debug(f"[UPLOAD DEBUG] Received uploaded_files: {uploaded_files is not None}")
+    logger.debug(f"[UPLOAD DEBUG] Received single_file: {single_file is not None}")
+    logger.debug(f"[UPLOAD DEBUG] Received collection_id: {collection_id}")
     
     # Additional debug info for uploaded_files
     if uploaded_files:
         if isinstance(uploaded_files, list):
-            logger.info(f"[UPLOAD DEBUG] uploaded_files is a list with {len(uploaded_files)} items")
+            logger.debug(f"[UPLOAD DEBUG] uploaded_files is a list with {len(uploaded_files)} items")
             for i, uf in enumerate(uploaded_files):
-                logger.info(f"[UPLOAD DEBUG] uploaded_files[{i}].filename: {getattr(uf, 'filename', 'None')}")
+                logger.debug(f"[UPLOAD DEBUG] uploaded_files[{i}].filename: {getattr(uf, 'filename', 'None')}")
         else:
-            logger.info(f"[UPLOAD DEBUG] uploaded_files is a single file: {getattr(uploaded_files, 'filename', 'None')}")
+            logger.debug(f"[UPLOAD DEBUG] uploaded_files is a single file: {getattr(uploaded_files, 'filename', 'None')}")
 
     # Check permissions
     role = getattr(current_user, 'role', None)
@@ -98,23 +98,23 @@ async def upload_file(
     normalized_files: List[UploadFile] = []
 
     def _add_candidates(group):
-        logger.info(f"[UPLOAD DEBUG] _add_candidates called with group: {type(group)}")
+        logger.debug(f"[UPLOAD DEBUG] _add_candidates called with group: {type(group)}")
         if not group:
-            logger.info("[UPLOAD DEBUG] _add_candidates: group is falsy, returning")
+            logger.debug("[UPLOAD DEBUG] _add_candidates: group is falsy, returning")
             return
-        logger.info(f"[UPLOAD DEBUG] _add_candidates: group is not falsy")
+        logger.debug(f"[UPLOAD DEBUG] _add_candidates: group is not falsy")
         
         if isinstance(group, Sequence) and not isinstance(group, (str, bytes)):
             items = list(group)
-            logger.info(f"[UPLOAD DEBUG] _add_candidates: group is Sequence, items count: {len(items)}")
+            logger.debug(f"[UPLOAD DEBUG] _add_candidates: group is Sequence, items count: {len(items)}")
         else:
             items = [group]
-            logger.info(f"[UPLOAD DEBUG] _add_candidates: group is not Sequence, items count: {len(items)}")
+            logger.debug(f"[UPLOAD DEBUG] _add_candidates: group is not Sequence, items count: {len(items)}")
             
         for i, candidate in enumerate(items):
-            logger.info(f"[UPLOAD DEBUG] _add_candidates: checking candidate {i}: {type(candidate)}")
+            logger.debug(f"[UPLOAD DEBUG] _add_candidates: checking candidate {i}: {type(candidate)}")
             if candidate:
-                logger.info(f"[UPLOAD DEBUG] _add_candidates: candidate {i} is truthy")
+                logger.debug(f"[UPLOAD DEBUG] _add_candidates: candidate {i} is truthy")
                 # Accept both FastAPI and Starlette UploadFile via duck typing
                 filename = getattr(candidate, "filename", None)
                 has_read = hasattr(candidate, "read")
@@ -138,16 +138,16 @@ async def upload_file(
                 if hasattr(v, "filename") and hasattr(v, "read"):
                     _add_candidates([v])
     except Exception as form_err:
-        logger.info(f"[UPLOAD DEBUG] Failed to read raw multipart form: {form_err}")
+        logger.debug(f"[UPLOAD DEBUG] Failed to read raw multipart form: {form_err}")
 
     # Also add from annotated params (in case framework populated them)
     _add_candidates(files)
     _add_candidates(uploaded_files)
     if single_file and getattr(single_file, "filename", None):
         normalized_files.append(single_file)
-        logger.info(f"[UPLOAD DEBUG] Added single file: {single_file.filename}")
+        logger.debug(f"[UPLOAD DEBUG] Added single file: {single_file.filename}")
 
-    logger.info(f"[UPLOAD DEBUG] Total normalized files: {len(normalized_files)}")
+    logger.debug(f"[UPLOAD DEBUG] Total normalized files: {len(normalized_files)}")
     
     if not normalized_files:
         logger.error("[UPLOAD ERROR] No files provided for upload - files list is empty")
@@ -166,7 +166,7 @@ async def upload_file(
     uploader_id = str(user_record.user_id) if user_record.user_id is not None else None
     website_id = str(user_record.website_id) if user_record.website_id is not None else None
     
-    logger.info(f"[UPLOAD] User validated: {username}, user_id: {uploader_id}, website_id: {website_id}")
+    logger.debug(f"[UPLOAD] User validated: {username}, user_id: {uploader_id}, website_id: {website_id}")
 
     # Allowed file extensions
     allowed_extensions = {
@@ -196,7 +196,7 @@ async def upload_file(
 
             # Read file content with detailed logging
             content = await uploaded_file.read()
-            logger.info(f"[UPLOAD DEBUG] File '{original_filename}' read: content_type={type(content)}, is_none={content is None}, length={len(content) if content else 0}")
+            logger.debug(f"[UPLOAD DEBUG] File '{original_filename}' read: content_type={type(content)}, is_none={content is None}, length={len(content) if content else 0}")
             
             if not content:
                 failed_files.append(f"{original_filename}: File is empty")
@@ -212,13 +212,13 @@ async def upload_file(
             text_chunks = parse_file(safe_filename, content)
 
             # --- Validate all parameters before saving ---
-            logger.info(f"[SAVE FILE DEBUG] Validating parameters before save:")
-            logger.info(f"  - uploader_id: {uploader_id} (type: {type(uploader_id)}, is_none: {uploader_id is None})")
-            logger.info(f"  - website_id: {website_id} (type: {type(website_id)}, is_none: {website_id is None})")
-            logger.info(f"  - db: {db} (type: {type(db)}, is_none: {db is None})")
-            logger.info(f"  - collection_id: {collection_id} (type: {type(collection_id)}, is_none: {collection_id is None})")
-            logger.info(f"  - safe_filename: {safe_filename} (type: {type(safe_filename)}, is_none: {safe_filename is None})")
-            logger.info(f"  - content: length={len(content) if content else 0} (type: {type(content)}, is_none: {content is None})")
+            logger.debug(f"[SAVE FILE DEBUG] Validating parameters before save:")
+            logger.debug(f"  - uploader_id: {uploader_id} (type: {type(uploader_id)}, is_none: {uploader_id is None})")
+            logger.debug(f"  - website_id: {website_id} (type: {type(website_id)}, is_none: {website_id is None})")
+            logger.debug(f"  - db: {db} (type: {type(db)}, is_none: {db is None})")
+            logger.debug(f"  - collection_id: {collection_id} (type: {type(collection_id)}, is_none: {collection_id is None})")
+            logger.debug(f"  - safe_filename: {safe_filename} (type: {type(safe_filename)}, is_none: {safe_filename is None})")
+            logger.debug(f"  - content: length={len(content) if content else 0} (type: {type(content)}, is_none: {content is None})")
             
             # Explicit validation before calling save_file_with_website
             if uploader_id is None:
@@ -248,7 +248,7 @@ async def upload_file(
                 file_content=content,
             )
             
-            logger.info(f"[SAVE FILE SUCCESS] File saved with ID: {file_metadata.file_id}")
+            logger.debug(f"[SAVE FILE SUCCESS] File saved with ID: {file_metadata.file_id}")
 
             file_id = str(file_metadata.file_id)
             vector_store = get_vector_store()
@@ -312,7 +312,7 @@ async def upload_file(
     if failed_files:
         logger.warning(f"[UPLOAD PARTIAL SUCCESS] Uploaded {success_count}/{total_count} files. Failed files: {', '.join(failed_files)}")
     else:
-        logger.info(f"[UPLOAD SUCCESS] Uploaded {success_count}/{total_count} files by {getattr(current_user, 'username', 'unknown')}")
+        logger.debug(f"[UPLOAD SUCCESS] Uploaded {success_count}/{total_count} files by {getattr(current_user, 'username', 'unknown')}")
     
     return results
 
@@ -353,11 +353,11 @@ async def delete_file(
             cache = get_cache()
             if cache and hasattr(cache, 'client') and cache.client:
                 cache.client.flushdb()
-                logger.info(f"Cache invalidated due to deletion of file {file_id}")
+                logger.debug(f"Cache invalidated due to deletion of file {file_id}")
         except Exception as cache_error:
             logger.warning(f"Failed to invalidate cache: {cache_error}")
 
-        logger.info(f"File deleted: {file_id} by {getattr(current_user, 'username', 'unknown')}")
+        logger.debug(f"File deleted: {file_id} by {getattr(current_user, 'username', 'unknown')}")
         
         # Log activity
         activity_tracker.log_activity(

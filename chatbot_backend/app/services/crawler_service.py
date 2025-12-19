@@ -103,7 +103,7 @@ class CrawlerService:
         self.db.commit()
         self.db.refresh(job)
         
-        logger.info(f"Created crawl job {job.job_id} for {target_url}")
+        logger.debug(f"Created crawl job {job.job_id} for {target_url}")
         return job
     
     def start_job(self, job_id: str) -> bool:
@@ -172,7 +172,7 @@ class CrawlerService:
         job.started_at = datetime.utcnow()
         self.db.commit()
         
-        logger.info(f"Started crawl job {job_id}")
+        logger.debug(f"Started crawl job {job_id}")
         return True
     
     def cancel_job(self, job_id: str) -> bool:
@@ -187,7 +187,7 @@ class CrawlerService:
         """
         if job_id in self._active_jobs:
             self._active_jobs[job_id].cancel()
-            logger.info(f"Cancellation requested for job {job_id}")
+            logger.debug(f"Cancellation requested for job {job_id}")
         
         job = self.db.query(CrawlerJob).filter(CrawlerJob.job_id == job_id).first()
         if job and job.status == "running":
@@ -232,7 +232,7 @@ class CrawlerService:
         if delete_content:
             try:
                 self.vector_store.delete_documents_by_crawl_job_id(job_id)
-                logger.info(f"Deleted crawled content for job {job_id} from vector store")
+                logger.debug(f"Deleted crawled content for job {job_id} from vector store")
             except Exception as e:
                 logger.error(f"Failed to delete content from vector store: {e}")
         
@@ -240,7 +240,7 @@ class CrawlerService:
         if job:
             self.db.delete(job)
             self.db.commit()
-            logger.info(f"Deleted job {job_id}")
+            logger.debug(f"Deleted job {job_id}")
             return True
         
         return False
