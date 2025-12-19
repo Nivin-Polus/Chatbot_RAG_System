@@ -66,23 +66,18 @@ import "./styles.css";
     }
   };
 
-  function scrollChatToBottom() {
-    if (chatBox) {
-      chatBox.scrollTop = chatBox.scrollHeight;
-    }
-  }
 
-  // Scroll so that the latest user question sits at the top of the chat area
-  function scrollLastUserMessageToTop() {
+  // Scroll so that the latest message sits at the top of the chat area
+  function scrollToLatestMessage() {
     if (!chatBox) return;
-    const userMessages = chatBox.querySelectorAll(".plugin-msg.msg.user, .msg.user");
-    if (!userMessages || userMessages.length === 0) return;
-    const lastUser = userMessages[userMessages.length - 1];
-    if (!lastUser) return;
-
-    // Position the last user message at the top of the scroll container
-    const offsetTop = lastUser.offsetTop ?? 0;
-    chatBox.scrollTop = offsetTop;
+    const msgs = chatBox.querySelectorAll('.plugin-msg.msg, .msg');
+    if (msgs.length > 0) {
+      const lastMsg = msgs[msgs.length - 1];
+      chatBox.scrollTo({
+        top: lastMsg.offsetTop - 10,
+        behavior: 'smooth'
+      });
+    }
   }
 
   await new Promise(resolve => setTimeout(resolve, 100));
@@ -96,19 +91,16 @@ import "./styles.css";
   // Store original send button HTML for restoration
   if (sendBtn) {
     originalSendBtnHTML = sendBtn.innerHTML;
-    // Fallback if original HTML is empty or invalid
     if (!originalSendBtnHTML || originalSendBtnHTML.trim() === '') {
       originalSendBtnHTML = `<img src="${CONFIG.ui.iconsBaseUrl}/send.svg" alt="Send" class="plugin-icon icon"/>`;
     }
   }
 
-  // Try to load chat history from localStorage
   const historyLoaded = loadChatHistory();
   if (!historyLoaded) {
     initializeMessages();
   }
 
-  // Initialize user message counter based on any restored history
   userMessageCount = messages.filter(m => m && m.user).length;
 
   if (CONFIG?.ui) {
@@ -384,31 +376,16 @@ import "./styles.css";
       // Track how many user messages have been sent in this session
       userMessageCount += 1;
 
-      // For the very first exchange, keep existing behavior (scroll to bottom).
-      // From the second user message onwards, align the question at the top so
-      // that the response renders just beneath it.
-      if (userMessageCount <= 1) {
-        scrollChatToBottom();
-      } else {
-        scrollLastUserMessageToTop();
-      }
+      // As per requirement, every new response (and question) should be at the top
+      // after the initial welcome/first exchange window.
+      scrollToLatestMessage();
       input.value = "";
       input.dispatchEvent(new Event("input", { bubbles: true }));
 
       const typingIndicator = showTypingIndicator();
-      if (userMessageCount <= 1) {
-        scrollChatToBottom();
-      }
+      scrollToLatestMessage();
 
       const reply = await chatService.sendMessage(userMsg, { signal: abortController.signal });
-
-      // Check if this request is still valid (new chat might have been clicked)
-      if (currentRequestId !== requestId) {
-        // Reset send button before returning
-        showSendButton();
-        if (input) input.disabled = false;
-        return; // Request was cancelled by new chat, don't update UI
-      }
 
       removeTypingIndicator(typingIndicator);
       input.disabled = false;
@@ -416,9 +393,8 @@ import "./styles.css";
 
       // Check again before typing the message
       if (currentRequestId !== requestId) {
-        // Reset send button before returning
         showSendButton();
-        return; // Request was cancelled by new chat, don't update UI
+        return;
       }
 
       await typeAssistantMessage(reply.text, reply.sources, requestId, Boolean(reply?.is_generic || reply?.generic)).then(() => {
@@ -430,26 +406,31 @@ import "./styles.css";
         }
       });
     } catch (error) {
-      // Check if this request is still valid
-      if (currentRequestId !== requestId) {
-        // Reset send button before returning
-        showSendButton();
-        if (input) input.disabled = false;
-        return; // Request was cancelled by new chat, don't update UI
+      // Always remove typing indicator if it was created
+      if (typeof typingIndicator !== 'undefined' && typingIndicator) {
+        removeTypingIndicator(typingIndicator);
       }
 
-      // Re-enable input and send button on error
+      // Check if this request is still valid or if it was aborted
+      if (currentRequestId !== requestId || error?.name === 'AbortError') {
+        // Reset state and UI but don't show error message
+        showSendButton();
+        if (input) input.disabled = false;
+        inFlight = false;
+        abortController = null;
+        return;
+      }
+
+      // Re-enable input and send button on unexpected error
       input.disabled = false;
       showSendButton();
 
-      if (error?.name !== 'AbortError') {
-        addMessage({
-          user: false,
-          text: "Sorry, I encountered an error. Please try again.",
-          formatted: false,
-          isError: true
-        });
-      }
+      addMessage({
+        user: false,
+        text: "Sorry, I encountered an error. Please try again.",
+        formatted: false,
+        isError: true
+      });
     } finally {
       // Only reset if this is still the current request
       if (currentRequestId === requestId) {
@@ -462,12 +443,43 @@ import "./styles.css";
   }
 
   function handleStop() {
+    // Abort any ongoing API request
+    if (abortController) {
+      abortController.abort();
+      abortController = null;
+    }
+
+    // Invalidate current request ID so old responses won't update UI
+    currentRequestId = null;
+
+    // Reset state flags
+    inFlight = false;
+
+    // Stop any typing animation
     if (typeof currentTypingFinish === 'function') {
       clearInterval(typingInterval);
       typingInterval = null;
       currentTypingFinish();
-      if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
     }
+
+    // Remove any typing indicators (thinking spinner)
+    const typingIndicators = messages.filter(msg => msg.isTypingIndicator);
+    typingIndicators.forEach(indicator => {
+      const index = messages.indexOf(indicator);
+      if (index !== -1) {
+        messages.splice(index, 1);
+      }
+    });
+
+    renderMessages();
+
+    // Re-enable UI elements
+    if (input) {
+      input.disabled = false;
+    }
+    showSendButton();
+
+    if (chatBox) scrollToLatestMessage();
   }
 
   function handleNewChat() {
@@ -565,7 +577,7 @@ import "./styles.css";
 
   function showTypingIndicator() {
     const indicator = addMessage({ user: false, text: "", formatted: false, isTypingIndicator: true });
-    scrollChatToBottom();
+    scrollToLatestMessage();
     return indicator;
   }
 
@@ -633,7 +645,7 @@ import "./styles.css";
 
       // Store preserved sources with all fields, even if not displayed
       const typingMessage = addMessage({ user: false, text: "", formatted: true, isTyping: true, sources: preservedSources });
-      scrollChatToBottom();
+      scrollToLatestMessage();
       let completed = false;
 
       const finishTyping = () => {
@@ -661,7 +673,7 @@ import "./styles.css";
         abortController = null;
         currentTypingFinish = null;
         input.focus();
-        if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
+        if (chatBox) scrollToLatestMessage();
       };
 
       if (!enhancedText || document.hidden) {
@@ -822,7 +834,10 @@ import "./styles.css";
     const html = messages.map(renderMessageHtml).join("");
     chatBox.innerHTML = html;
 
-    if (wasNearBottom) chatBox.scrollTop = chatBox.scrollHeight;
+    // If we're currently typing or just sent a message, we might prefer staying where we are 
+    // or following the latest message top. scrollToLatestMessage handles the latter.
+    // We only force bottom if it was explicitly requested by wasNearBottom and we aren't in a "scroll to top" mode.
+    if (wasNearBottom && !inFlight) chatBox.scrollTop = chatBox.scrollHeight;
     else chatBox.scrollTop = previousScrollTop;
 
     if (chatEmpty) chatEmpty.style.display = messages.length ? "none" : "flex";
