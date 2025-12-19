@@ -361,6 +361,8 @@ export default function UserAdminUsers() {
         return 'bg-green-100 text-green-800';
       case 'plugin_user':
         return 'bg-orange-100 text-orange-800';
+      case 'user':
+        return 'bg-indigo-100 text-indigo-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
@@ -662,9 +664,8 @@ export default function UserAdminUsers() {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          user.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                        }`}>
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${user.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          }`}>
                           {user.is_active ? 'Active' : 'Inactive'}
                         </span>
                       </TableCell>

@@ -445,6 +445,8 @@ export default function SuperadminUsers() {
         return 'bg-green-100 text-green-800';
       case 'plugin_user':
         return 'bg-orange-100 text-orange-800';
+      case 'user':
+        return 'bg-indigo-100 text-indigo-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
