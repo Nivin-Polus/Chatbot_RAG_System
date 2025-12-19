@@ -331,11 +331,64 @@ async def delete_file(
     if role not in {"user_admin", "super_admin"}:
         raise HTTPException(status_code=403, detail="Only admin users can delete files")
 
+    # Handle Crawl Job Deletion
+    if file_id.startswith("crawl_"):
+        job_id = file_id.replace("crawl_", "")
+        from app.models.crawler_job import CrawlerJob
+        from app.services.crawler_service import CrawlerService
+        
+        job = db.query(CrawlerJob).filter(CrawlerJob.job_id == job_id).first()
+        if not job:
+             raise HTTPException(status_code=404, detail="Crawl job not found")
+             
+        # Permission check for crawl job
+        if role != "super_admin":
+             # If not superadmin, ensure user owns the job or admin owns the collection
+             if job.user_id != current_user.user_id:
+                  # Check if user is admin of the collection
+                  collection = db.query(Collection).filter(Collection.collection_id == job.collection_id).first()
+                  if not collection or collection.admin_user_id != current_user.user_id:
+                       raise HTTPException(status_code=403, detail="Access denied to delete this crawl job")
+
+        # Delete using crawler service
+        crawler_service = CrawlerService(db)
+        success = crawler_service.delete_job(job_id)
+        
+        if success:
+             logger.info(f"User {current_user.username} deleted crawl job {job_id} via files endpoint")
+             activity_tracker.log_activity(
+                activity_type="crawl_deleted",
+                user=getattr(current_user, 'username', 'unknown'),
+                details={
+                    "job_id": job_id,
+                    "source": "files_list"
+                }
+             )
+             return {"detail": f"Crawl data deleted successfully"}
+        else:
+             raise HTTPException(status_code=500, detail="Failed to delete crawl data")
+
+    # Regular File Deletion
     file_record = db.query(FileMetadata).filter(FileMetadata.file_id == file_id).first()
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
 
     try:
+        # Check permissions for regular file
+        if role != "super_admin":
+            current_user_id = str(current_user.user_id) if hasattr(current_user, 'user_id') else None
+            is_owner = str(file_record.uploader_id) == current_user_id
+            
+            # Check collection admin status
+            is_collection_admin = False
+            if file_record.collection_id:
+                collection = db.query(Collection).filter(Collection.collection_id == file_record.collection_id).first()
+                if collection and str(collection.admin_user_id) == current_user_id:
+                    is_collection_admin = True
+            
+            if not is_owner and not is_collection_admin:
+                 raise HTTPException(status_code=403, detail="Access denied")
+
         # Remove all chunks for this file from vector store
         vector_store = get_vector_store()
         vector_store.delete_documents_by_file_id(file_id)
@@ -371,6 +424,8 @@ async def delete_file(
         
         return {"detail": f"File {file_id} deleted successfully"}
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting file {file_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to delete file: {str(e)}")
@@ -487,7 +542,7 @@ async def list_files(
                         uploaded_by=job_username,
                         uploader_id=str(job.user_id) if job.user_id else None,
                         upload_timestamp=job.created_at.isoformat() if job.created_at else None,
-                        file_size=None,  # Crawled data doesn't have a file size
+                        file_size=job.total_characters if job.total_characters else 0,  # Use total_characters as file size
                         processing_status=job.status,
                         collection_id=str(job.collection_id) if job.collection_id else None,
                         source_type="crawled",

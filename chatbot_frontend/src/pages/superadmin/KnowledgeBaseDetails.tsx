@@ -564,12 +564,6 @@ export default function KnowledgeBaseDetails() {
               </Button>
             </div>
           </div>
-          <div>
-            <Button variant="outline" onClick={() => navigate('/superadmin')}>
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Knowledge Bases
-            </Button>
-          </div>
         </div>
 
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
@@ -832,12 +826,8 @@ export default function KnowledgeBaseDetails() {
                           </TableCell>
                           <TableCell>{new Date(file.upload_timestamp).toLocaleDateString()}</TableCell>
                           <TableCell className="text-right">
-                            {file.source_type === 'crawled' ? (
-                              <div className="text-xs text-muted-foreground">
-                                Crawled data
-                              </div>
-                            ) : (
-                              <div className="flex items-center justify-end space-x-2">
+                            <div className="flex items-center justify-end space-x-2">
+                              {file.source_type !== 'crawled' && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -847,17 +837,17 @@ export default function KnowledgeBaseDetails() {
                                   <Download className="h-4 w-4 mr-1" />
                                   Download
                                 </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleDeleteFile(file.file_id)}
-                                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                >
-                                  <Trash2 className="h-4 w-4 mr-1" />
-                                  Delete
-                                </Button>
-                              </div>
-                            )}
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteFile(file.file_id)}
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              >
+                                <Trash2 className="h-4 w-4 mr-1" />
+                                Delete
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
