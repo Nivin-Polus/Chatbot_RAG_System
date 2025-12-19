@@ -292,9 +292,9 @@ button {
 .chat-box {
   flex: 1;
   padding: 12px;
-  padding-bottom: 80%; /* Allow room to scroll last message to top */
   overflow-y: auto;
   background: #f9fafb;
+  position: relative;
 }
 
 .chat-empty {

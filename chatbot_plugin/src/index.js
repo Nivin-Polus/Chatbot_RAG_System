@@ -66,18 +66,23 @@ import "./styles.css";
     }
   };
 
-
-  // Scroll so that the latest message sits at the top of the chat area
-  function scrollToLatestMessage() {
-    if (!chatBox) return;
-    const msgs = chatBox.querySelectorAll('.plugin-msg.msg, .msg');
-    if (msgs.length > 0) {
-      const lastMsg = msgs[msgs.length - 1];
-      chatBox.scrollTo({
-        top: lastMsg.offsetTop - 10,
-        behavior: 'smooth'
-      });
+  function scrollChatToBottom() {
+    if (chatBox) {
+      chatBox.scrollTop = chatBox.scrollHeight;
     }
+  }
+
+  // Scroll so that the latest user question sits at the top of the chat area
+  function scrollLastUserMessageToTop() {
+    if (!chatBox) return;
+    const userMessages = chatBox.querySelectorAll(".plugin-msg.msg.user, .msg.user");
+    if (!userMessages || userMessages.length === 0) return;
+    const lastUser = userMessages[userMessages.length - 1];
+    if (!lastUser) return;
+
+    // Position the last user message at the top of the scroll container
+    const offsetTop = lastUser.offsetTop ?? 0;
+    chatBox.scrollTop = offsetTop;
   }
 
   await new Promise(resolve => setTimeout(resolve, 100));
@@ -91,16 +96,19 @@ import "./styles.css";
   // Store original send button HTML for restoration
   if (sendBtn) {
     originalSendBtnHTML = sendBtn.innerHTML;
+    // Fallback if original HTML is empty or invalid
     if (!originalSendBtnHTML || originalSendBtnHTML.trim() === '') {
       originalSendBtnHTML = `<img src="${CONFIG.ui.iconsBaseUrl}/send.svg" alt="Send" class="plugin-icon icon"/>`;
     }
   }
 
+  // Try to load chat history from localStorage
   const historyLoaded = loadChatHistory();
   if (!historyLoaded) {
     initializeMessages();
   }
 
+  // Initialize user message counter based on any restored history
   userMessageCount = messages.filter(m => m && m.user).length;
 
   if (CONFIG?.ui) {
@@ -376,14 +384,21 @@ import "./styles.css";
       // Track how many user messages have been sent in this session
       userMessageCount += 1;
 
-      // As per requirement, every new response (and question) should be at the top
-      // after the initial welcome/first exchange window.
-      scrollToLatestMessage();
+      // For the very first exchange, keep existing behavior (scroll to bottom).
+      // From the second user message onwards, align the question at the top so
+      // that the response renders just beneath it.
+      if (userMessageCount <= 1) {
+        scrollChatToBottom();
+      } else {
+        scrollLastUserMessageToTop();
+      }
       input.value = "";
       input.dispatchEvent(new Event("input", { bubbles: true }));
 
       const typingIndicator = showTypingIndicator();
-      scrollToLatestMessage();
+      if (userMessageCount <= 1) {
+        scrollChatToBottom();
+      }
 
       const reply = await chatService.sendMessage(userMsg, { signal: abortController.signal });
 
@@ -479,7 +494,13 @@ import "./styles.css";
     }
     showSendButton();
 
-    if (chatBox) scrollToLatestMessage();
+    if (chatBox) {
+      if (userMessageCount <= 1) {
+        chatBox.scrollTop = chatBox.scrollHeight;
+      } else {
+        scrollLastUserMessageToTop();
+      }
+    }
   }
 
   function handleNewChat() {
@@ -577,7 +598,11 @@ import "./styles.css";
 
   function showTypingIndicator() {
     const indicator = addMessage({ user: false, text: "", formatted: false, isTypingIndicator: true });
-    scrollToLatestMessage();
+    if (userMessageCount <= 1) {
+      scrollChatToBottom();
+    } else {
+      scrollLastUserMessageToTop();
+    }
     return indicator;
   }
 
@@ -645,7 +670,11 @@ import "./styles.css";
 
       // Store preserved sources with all fields, even if not displayed
       const typingMessage = addMessage({ user: false, text: "", formatted: true, isTyping: true, sources: preservedSources });
-      scrollToLatestMessage();
+      if (userMessageCount <= 1) {
+        scrollChatToBottom();
+      } else {
+        scrollLastUserMessageToTop();
+      }
       let completed = false;
 
       const finishTyping = () => {
@@ -673,7 +702,13 @@ import "./styles.css";
         abortController = null;
         currentTypingFinish = null;
         input.focus();
-        if (chatBox) scrollToLatestMessage();
+        if (chatBox) {
+          if (userMessageCount <= 1) {
+            chatBox.scrollTop = chatBox.scrollHeight;
+          } else {
+            scrollLastUserMessageToTop();
+          }
+        }
       };
 
       if (!enhancedText || document.hidden) {
@@ -834,10 +869,7 @@ import "./styles.css";
     const html = messages.map(renderMessageHtml).join("");
     chatBox.innerHTML = html;
 
-    // If we're currently typing or just sent a message, we might prefer staying where we are 
-    // or following the latest message top. scrollToLatestMessage handles the latter.
-    // We only force bottom if it was explicitly requested by wasNearBottom and we aren't in a "scroll to top" mode.
-    if (wasNearBottom && !inFlight) chatBox.scrollTop = chatBox.scrollHeight;
+    if (wasNearBottom) chatBox.scrollTop = chatBox.scrollHeight;
     else chatBox.scrollTop = previousScrollTop;
 
     if (chatEmpty) chatEmpty.style.display = messages.length ? "none" : "flex";
