@@ -304,8 +304,35 @@ class CrawlerEngine:
             if self.config.use_sitemap:
                 self._discover_from_sitemap()
             
-            # 3. Add start URL
+            # 3. Add start URL with highest priority
+            # NOTE:
+            # - Previously, the target_url was appended to the crawl queue
+            #   AFTER all sitemap URLs. On large sites this meant that the
+            #   starting URL might never be crawled if max_pages was reached
+            #   before the queue reached it.
+            # - We now ensure the normalized target_url is always placed at
+            #   the FRONT of the queue so it is crawled first.
             self._add_url_to_visit(self.config.target_url, depth=0)
+
+            # Move normalized start URL to the front of the queue
+            try:
+                normalized_start = self._normalize_url(self.config.target_url)
+                # Remove any existing occurrences of the start URL in the queue
+                self.to_visit = [
+                    (url, depth) for (url, depth) in self.to_visit
+                    if url != normalized_start
+                ]
+                # Insert at front with depth 0
+                self.to_visit.insert(0, (normalized_start, 0))
+
+                # Update discovered pages count to reflect the adjusted queue
+                self.stats.pages_discovered = max(
+                    self.stats.pages_discovered,
+                    len(self.to_visit) + len(self.visited_urls)
+                )
+            except Exception as e:
+                # If anything goes wrong here, we still proceed with the crawl
+                logger.debug(f"Failed to prioritize start URL in queue: {e}")
             
             # 4. Start browser and crawl
             await self._run_browser_crawl()
@@ -753,10 +780,12 @@ class CrawlerEngine:
                 logger.debug(f"Static fetch pre-check failed for {url}: {e}")
         
         # Define fallback strategies: try different wait conditions and timeouts
+        # Use 'domcontentloaded' first (faster, more reliable) instead of 'networkidle' 
+        # which can timeout on slow sites like MIT
         strategies = [
-            ('networkidle', 30000),  # First try: wait for network idle, 30s
-            ('domcontentloaded', 20000),  # Fallback 1: DOM ready, 20s
-            ('load', 15000),  # Fallback 2: basic load, 15s
+            ('domcontentloaded', 45000),  # First try: DOM ready, 45s (increased for slow sites)
+            ('load', 30000),  # Fallback 1: basic load, 30s
+            ('domcontentloaded', 20000),  # Fallback 2: DOM ready with shorter timeout, 20s
         ]
         
         current_strategy = strategies[min(retry_count, len(strategies) - 1)]
@@ -955,6 +984,19 @@ class CrawlerEngine:
             
         except Exception as e:
             error_msg = str(e)
+            
+            # Check for Playwright timeout (different from asyncio.TimeoutError)
+            if "Timeout" in error_msg or "timeout" in error_msg.lower() or "exceeded" in error_msg.lower():
+                logger.warning(f"Playwright timeout on {url} (attempt {retry_count + 1}): {error_msg[:100]}")
+                if retry_count < 2:
+                    # Wait a bit longer before retry for slow pages
+                    await asyncio.sleep(2)
+                    return await self._process_page(page, url, depth, retry_count + 1)
+                self.stats.failed_urls.append({
+                    "url": url,
+                    "reason": f"Playwright timeout after {retry_count + 1} attempts"
+                })
+                return False
             
             # Check for download error (Playwright)
             if "Download is starting" in error_msg:

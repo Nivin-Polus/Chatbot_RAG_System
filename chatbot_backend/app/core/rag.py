@@ -249,8 +249,12 @@ class RAG:
 
         return system_prompt, model, max_tokens, temperature
 
-    def call_ai(self, prompt: str, model: Optional[str] = None, max_tokens: Optional[int] = None, temperature: Optional[float] = None) -> str:
-        """Call the configured AI provider (Anthropic or Bedrock)."""
+    def call_ai(self, prompt: str, model: Optional[str] = None, max_tokens: Optional[int] = None, temperature: Optional[float] = None) -> Tuple[str, Optional[int]]:
+        """Call the configured AI provider (Anthropic or Bedrock).
+
+        Returns:
+            A tuple of (raw_text_response, total_tokens_used or None)
+        """
         model = model or self.default_model
         max_tokens = max_tokens or self.default_max_tokens
         temperature = temperature or self.default_temperature
@@ -275,7 +279,20 @@ class RAG:
                 )
                 response.raise_for_status()
                 data = response.json()
-                return data.get("content", [{}])[0].get("text", "").strip()
+
+                # Extract text
+                text = data.get("content", [{}])[0].get("text", "").strip()
+
+                # Extract token usage if available
+                usage = data.get("usage") or {}
+                input_tokens = usage.get("input_tokens") or 0
+                output_tokens = usage.get("output_tokens") or 0
+                try:
+                    tokens_used = int(input_tokens) + int(output_tokens)
+                except (TypeError, ValueError):
+                    tokens_used = None
+
+                return text, tokens_used
 
             # --- Case 2: AWS Bedrock ---
             elif self.ai_provider == "bedrock":
@@ -291,14 +308,26 @@ class RAG:
                     body=body
                 )
                 data = json.loads(response["body"].read())
-                return data["content"][0]["text"].strip()
+
+                text = data.get("content", [{}])[0].get("text", "").strip()
+
+                # Bedrock responses may or may not include usage; handle defensively
+                usage = data.get("usage") or {}
+                input_tokens = usage.get("input_tokens") or 0
+                output_tokens = usage.get("output_tokens") or 0
+                try:
+                    tokens_used = int(input_tokens) + int(output_tokens)
+                except (TypeError, ValueError):
+                    tokens_used = None
+
+                return text, tokens_used
 
             else:
                 raise ValueError(f"Unsupported AI_PROVIDER: {self.ai_provider}")
 
         except Exception as e:
             logging.error(f"AI Provider Error ({self.ai_provider}): {e}")
-            return "I wasn't able to retrieve a confident answer, please refine your question."
+            return "I wasn't able to retrieve a confident answer, please refine your question.", None
 
     def answer(self, query: str, top_k: int = 5, collection_id: Optional[str] = None) -> Union[str, Dict[str, any]]:
         """Main pipeline: retrieve → medium-detailed answer with source references using collection-specific prompt.
@@ -352,7 +381,12 @@ Answer:"""
         max_tokens_value = max_tokens if isinstance(max_tokens, int) else getattr(max_tokens, 'max_tokens', self.default_max_tokens)
         temperature_value = temperature if isinstance(temperature, (int, float)) else getattr(temperature, 'temperature', self.default_temperature)
         
-        raw_answer = self.call_ai(enhanced_prompt, model=model_value, max_tokens=max_tokens_value, temperature=temperature_value)
+        raw_answer, tokens_used = self.call_ai(
+            enhanced_prompt,
+            model=model_value,
+            max_tokens=max_tokens_value,
+            temperature=temperature_value,
+        )
         
         # Parse AI response to extract classification
         parsed = self._parse_ai_response(raw_answer)
@@ -378,7 +412,7 @@ Answer:"""
         if source_list:
             answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
 
-        return {"answer": answer, "is_generic": is_generic}
+        return {"answer": answer, "is_generic": is_generic, "tokens_used": tokens_used}
 
     def answer_with_context(
         self,
@@ -458,7 +492,12 @@ Answer:"""
         max_tokens_value = max_tokens if isinstance(max_tokens, int) else getattr(max_tokens, 'max_tokens', self.default_max_tokens)
         temperature_value = temperature if isinstance(temperature, (int, float)) else getattr(temperature, 'temperature', self.default_temperature)
         
-        raw_answer = self.call_ai(enhanced_prompt, model=model_value, max_tokens=max_tokens_value, temperature=temperature_value)
+        raw_answer, tokens_used = self.call_ai(
+            enhanced_prompt,
+            model=model_value,
+            max_tokens=max_tokens_value,
+            temperature=temperature_value,
+        )
         
         # Parse AI response to extract classification
         parsed = self._parse_ai_response(raw_answer)
@@ -484,4 +523,4 @@ Answer:"""
         if source_list:
             answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
 
-        return {"answer": answer, "is_generic": is_generic}
+        return {"answer": answer, "is_generic": is_generic, "tokens_used": tokens_used}

@@ -32,8 +32,12 @@ class CrawlConfig:
     chunk_overlap: int = 100  # overlap between chunks
     
     # Filtering
+    # NOTE:
+    # - Use segment-specific patterns (e.g., "/admin/") to avoid
+    #   accidentally matching common words like "administration"
+    #   in paths such as "/research-administration/...".
     exclude_patterns: List[str] = field(default_factory=lambda: [
-        "/login", "/signin", "/auth", "/admin", "/logout",
+        "/login", "/signin", "/auth", "/admin/", "/logout",
         "/cart", "/checkout", "/account", "/profile",
         "/search", "/tag/", "/category/", "/author/"
     ])

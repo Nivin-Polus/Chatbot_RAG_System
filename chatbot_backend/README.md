@@ -116,6 +116,8 @@ docker run -p 6379:6379 redis:alpine
 # Using Python 3.10 directly
 py -3.10 -m app.main
 
+python start_server.py
+
 # Or using uvicorn with Python 3.10
 py -3.10 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```

@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
+
 from app.core.permissions import get_current_user
 from app.services.health_monitor import HealthMonitorService
 from app.services.file_storage import FileStorageService
@@ -311,6 +313,48 @@ async def chat_statistics(current_user = Depends(get_current_user), db: Session 
         raise HTTPException(status_code=403, detail="Admin access required")
     
     return chat_service.get_chat_analytics(db)
+
+
+@router.get("/stats/token-usage")
+async def global_token_usage(current_user = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Get global token usage statistics across all websites.
+    Restricted to super admins.
+    """
+    if not current_user.is_super_admin():
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    try:
+        from app.models.query_log import QueryLog
+
+        stats = db.query(
+            func.count(QueryLog.query_id).label("total_queries"),
+            func.sum(QueryLog.tokens_used).label("total_tokens"),
+        ).first()
+
+        per_website = db.query(
+            QueryLog.website_id,
+            func.count(QueryLog.query_id).label("total_queries"),
+            func.sum(QueryLog.tokens_used).label("total_tokens"),
+        ).group_by(QueryLog.website_id).all()
+
+        return {
+            "total_queries": stats.total_queries or 0,
+            "total_tokens_used": stats.total_tokens or 0,
+            "per_website": [
+                {
+                    "website_id": row.website_id,
+                    "total_queries": row.total_queries or 0,
+                    "total_tokens_used": row.total_tokens or 0,
+                }
+                for row in per_website
+            ],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get global token usage: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve token usage statistics")
 
 
 @router.get("/stats/overview")

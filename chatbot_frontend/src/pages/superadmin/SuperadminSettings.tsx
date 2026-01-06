@@ -29,6 +29,12 @@ type HealthOverview = {
   raw?: any;
 };
 
+type TokenUsage = {
+  total_tokens_used: number;
+  total_queries: number;
+  scope: 'website' | 'global';
+};
+
 const STATUS_COLORS: Record<string, string> = {
   healthy: 'text-emerald-600',
   warning: 'text-amber-600',
@@ -94,6 +100,8 @@ export default function SuperadminSettings() {
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [health, setHealth] = useState<HealthOverview | null>(null);
   const [isHealthLoading, setIsHealthLoading] = useState(false);
+  const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
+  const [isTokenUsageLoading, setIsTokenUsageLoading] = useState(false);
 
   const fetchHealth = async () => {
     if (!user?.access_token) {
@@ -127,8 +135,65 @@ export default function SuperadminSettings() {
     }
   };
 
+  const fetchTokenUsage = async () => {
+    if (!user?.access_token) {
+      return;
+    }
+
+    setIsTokenUsageLoading(true);
+    try {
+      let url: string;
+      let scope: TokenUsage['scope'];
+
+      if (user.website_id) {
+        // Per-website usage
+        url = `${import.meta.env.VITE_API_BASE_URL}/websites/${user.website_id}/analytics`;
+        scope = 'website';
+      } else if (user.role === 'super_admin' || user.role === 'superadmin') {
+        // Global usage for superadmins without a website
+        url = `${import.meta.env.VITE_API_BASE_URL}/system/stats/token-usage`;
+        scope = 'global';
+      } else {
+        setTokenUsage(null);
+        return;
+      }
+
+      const response = await apiGet(url, user.access_token, false, false);
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || 'Failed to fetch token usage');
+      }
+
+      const data = await response.json();
+
+      if (scope === 'website') {
+        const analytics = data?.query_analytics || {};
+        setTokenUsage({
+          total_tokens_used: analytics.total_tokens_used ?? 0,
+          total_queries: analytics.total_queries ?? 0,
+          scope,
+        });
+      } else {
+        setTokenUsage({
+          total_tokens_used: data?.total_tokens_used ?? 0,
+          total_queries: data?.total_queries ?? 0,
+          scope,
+        });
+      }
+    } catch (error) {
+      console.error('Token usage fetch failed', error);
+      // Non-fatal for settings page; show subtle toast
+      toast.error('Unable to load token usage statistics');
+      setTokenUsage(null);
+    } finally {
+      setIsTokenUsageLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchHealth();
+    fetchTokenUsage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.access_token]);
 
@@ -188,6 +253,62 @@ export default function SuperadminSettings() {
         </div>
 
         <div className="grid gap-6">
+          {/* Token Usage Overview */}
+          <Card>
+            <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-2">
+                <Activity className="h-5 w-5" />
+                <div>
+                  <CardTitle>Token Usage</CardTitle>
+                  <CardDescription>
+                    {tokenUsage?.scope === 'global'
+                      ? 'Total tokens consumed by chat queries across all websites'
+                      : 'Total tokens consumed by chat queries for this website'}
+                  </CardDescription>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={fetchTokenUsage}
+                disabled={isTokenUsageLoading}
+              >
+                {isTokenUsageLoading ? 'Refreshing…' : 'Refresh Usage'}
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {tokenUsage ? (
+                <>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="rounded-xl border bg-muted/40 p-4">
+                      <div className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        Total Tokens Used
+                      </div>
+                      <div className="mt-2 text-2xl font-bold">
+                        {tokenUsage?.total_tokens_used?.toLocaleString() ?? '0'}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border bg-muted/40 p-4">
+                      <div className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        Total Chat Queries
+                      </div>
+                      <div className="mt-2 text-2xl font-bold">
+                        {tokenUsage?.total_queries?.toLocaleString() ?? '0'}
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Token counts are based on LLM-reported usage per chat request and may lag slightly behind real-time.
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Token usage statistics are not available for this account.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
           {/* System Health Overview */}
           <Card>
             <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">

@@ -17,6 +17,8 @@ from app.services.chat_tracking import ChatTrackingService
 from app.services.activity_tracker import activity_tracker
 from app.utils.chat_history_logger import log_chat_interaction
 from app.models.collection import Collection, CollectionUser
+from app.models.query_log import QueryLog
+from app.utils.rate_limiter import rate_limiter
 import redis
 import logging
 import json
@@ -314,9 +316,11 @@ def _process_chat_request(
             )
         
         # Handle new dict return format from RAG (contains 'answer' and 'is_generic')
+        tokens_used = None
         if isinstance(rag_result, dict):
             answer_text = rag_result.get("answer", "")
             is_generic_from_ai = rag_result.get("is_generic", False)
+            tokens_used = rag_result.get("tokens_used")
         else:
             # Fallback for string return (shouldn't happen with updated RAG)
             answer_text = rag_result
@@ -340,14 +344,15 @@ def _process_chat_request(
 
     logger.debug(f"User: {identity_username}, Question: {question}, Answer: {answer_text}")
 
+    context_info = {
+        "chunks_retrieved": len(chunks),
+        "maintain_context": maintain_context,
+        "conversation_history_length": len(conversation_history),
+        "top_k": top_k,
+    }
+
     if effective_session_id:
         try:
-            context_info = {
-                "chunks_retrieved": len(chunks),
-                "maintain_context": maintain_context,
-                "conversation_history_length": len(conversation_history),
-                "top_k": top_k,
-            }
             chat_service.log_query(
                 session_id=effective_session_id,
                 collection_id=effective_collection_id,
@@ -359,6 +364,55 @@ def _process_chat_request(
             )
         except Exception as e:
             logger.error(f"Failed to track query: {str(e)}")
+
+    # Log token and query usage into QueryLog for analytics
+    try:
+        website_id = identity.get("website_id")
+
+        # For super admins or contexts without website_id, derive it from the collection
+        if not website_id and effective_collection_id:
+            try:
+                collection_obj = (
+                    db.query(Collection)
+                    .filter(Collection.collection_id == effective_collection_id)
+                    .first()
+                )
+                if collection_obj and getattr(collection_obj, "website_id", None):
+                    website_id = collection_obj.website_id
+            except Exception as e:
+                logger.error(f"Failed to resolve website_id from collection {effective_collection_id}: {e}")
+        if website_id and user_id:
+            # Build list of accessed file IDs from sources
+            file_ids = [
+                s.get("file_id")
+                for s in sources_payload or []
+                if isinstance(s, dict) and s.get("file_id")
+            ]
+
+            ql = QueryLog(
+                user_id=user_id,
+                website_id=website_id,
+                session_id=effective_session_id,
+                user_query=question,
+                ai_response=answer_text,
+                query_type="chat",
+                processing_time_ms=processing_time,
+                tokens_used=tokens_used,
+                chunks_retrieved=len(chunks),
+                status="success",
+            )
+
+            # Attach context and files metadata using helpers
+            if context_info:
+                ql.set_context_data(context_info)
+            if file_ids:
+                ql.set_files_accessed_list(file_ids)
+
+            db.add(ql)
+            db.commit()
+    except Exception as e:
+        logger.error(f"Failed to log query usage: {str(e)}")
+        db.rollback()
 
     try:
         if effective_session_id and not conversation_history:
@@ -418,7 +472,11 @@ def _process_chat_request(
 
 
 # Chat endpoint
-@router.post("/ask", response_model=ChatResponse)
+@router.post(
+    "/ask",
+    response_model=ChatResponse,
+    dependencies=[Depends(rate_limiter(limit=60, window_seconds=60))],
+)
 async def ask_question(request: ChatRequest, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     resolved_collection_id = request.collection_id or current_user.get("collection_id")
     resolved_session_id = request.session_id or current_user.get("session_id")
@@ -435,7 +493,11 @@ async def ask_question(request: ChatRequest, current_user: dict = Depends(get_cu
     )
 
 
-@router.post("/public/ask", response_model=ChatResponse)
+@router.post(
+    "/public/ask",
+    response_model=ChatResponse,
+    dependencies=[Depends(rate_limiter(limit=120, window_seconds=60))],
+)
 async def public_chat(request: PublicChatRequest, db: Session = Depends(get_db)):
     domain = normalize_domain(request.website_url)
 

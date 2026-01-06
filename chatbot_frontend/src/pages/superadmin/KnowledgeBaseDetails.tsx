@@ -33,24 +33,22 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  ArrowLeft,
-  Upload,
-  Download,
-  Trash2,
-  Search,
-  Loader2,
-  Plus,
-  Pencil,
+import { 
+  ArrowLeft, 
+  Upload, 
+  Download, 
+  Trash2, 
+  Search, 
+  Loader2, 
+  Plus, 
+  Pencil, 
   Database,
   FileCode,
-  Settings,
-  Globe
+  Settings
 } from 'lucide-react';
 import { Collection, FileItem, Prompt } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost, apiPut, apiDelete, apiUpload } from '@/utils/api';
-import CrawlerView from '@/components/CrawlerView';
 
 export default function KnowledgeBaseDetails() {
   const { id } = useParams<{ id: string }>();
@@ -74,7 +72,7 @@ export default function KnowledgeBaseDetails() {
   });
   const getInitialTab = () => {
     const tabParam = searchParams.get('tab');
-    if (tabParam === 'files' || tabParam === 'prompts' || tabParam === 'crawler') {
+    if (tabParam === 'files' || tabParam === 'prompts') {
       return tabParam;
     }
     return 'overview';
@@ -100,13 +98,13 @@ export default function KnowledgeBaseDetails() {
 
   const fetchCollection = useCallback(async () => {
     if (!id) return;
-
+    
     try {
       const response = await apiGet(
         `${import.meta.env.VITE_API_BASE_URL}/collections/${id}`,
         user?.access_token
       );
-
+      
       if (response.ok) {
         const data = await response.json();
         setCollection(data);
@@ -128,7 +126,7 @@ export default function KnowledgeBaseDetails() {
 
   useEffect(() => {
     const tabParam = searchParams.get('tab');
-    if (tabParam && (tabParam === 'overview' || tabParam === 'files' || tabParam === 'prompts' || tabParam === 'crawler') && tabParam !== activeTab) {
+    if (tabParam && (tabParam === 'overview' || tabParam === 'files' || tabParam === 'prompts') && tabParam !== activeTab) {
       setActiveTab(tabParam);
     }
   }, [searchParams, activeTab]);
@@ -142,7 +140,7 @@ export default function KnowledgeBaseDetails() {
             `${import.meta.env.VITE_API_BASE_URL}/files/list?collection_id=${id}`,
             user?.access_token
           );
-
+          
           if (response.ok) {
             const data = await response.json();
             setFiles(data);
@@ -167,7 +165,7 @@ export default function KnowledgeBaseDetails() {
             `${import.meta.env.VITE_API_BASE_URL}/prompts/?collection_id=${id}`,
             user?.access_token
           );
-
+          
           if (response.ok) {
             const data = await response.json();
             setPrompts(data);
@@ -217,7 +215,7 @@ export default function KnowledgeBaseDetails() {
             errorMessage = errorData.detail;
           } else if (Array.isArray(errorData?.detail)) {
             errorMessage = errorData.detail
-              .map((item) => (typeof item?.msg === 'string' ? item.msg : ''))
+              .map((item) => (typeof item?.msg === 'string' ? item.msg : '') )
               .filter(Boolean)
               .join('; ') || errorMessage;
           }
@@ -304,7 +302,7 @@ export default function KnowledgeBaseDetails() {
 
       if (response.ok) {
         toast.success('File deleted successfully');
-
+        
         // Refresh files
         const refreshResponse = await apiGet(
           `${import.meta.env.VITE_API_BASE_URL}/files/list?collection_id=${id}`,
@@ -344,7 +342,7 @@ export default function KnowledgeBaseDetails() {
         toast.success('Prompt created successfully');
         setIsPromptDialogOpen(false);
         setPromptFormData({ name: '', description: '', content: '', is_active: true, is_default: false });
-
+        
         // Refresh prompts
         const refreshResponse = await apiGet(
           `${import.meta.env.VITE_API_BASE_URL}/prompts/?collection_id=${id}`,
@@ -384,7 +382,7 @@ export default function KnowledgeBaseDetails() {
         setIsPromptDialogOpen(false);
         setEditingPrompt(null);
         setPromptFormData({ name: '', description: '', content: '', is_active: true, is_default: false });
-
+        
         // Refresh prompts
         const refreshResponse = await apiGet(
           `${import.meta.env.VITE_API_BASE_URL}/prompts/?collection_id=${id}`,
@@ -413,7 +411,7 @@ export default function KnowledgeBaseDetails() {
 
       if (response.ok) {
         toast.success('Prompt deleted successfully');
-
+        
         // Refresh prompts
         const refreshResponse = await apiGet(
           `${import.meta.env.VITE_API_BASE_URL}/prompts/?collection_id=${id}`,
@@ -433,13 +431,13 @@ export default function KnowledgeBaseDetails() {
 
   const openEditPromptDialog = (prompt: Prompt) => {
     setEditingPrompt(prompt);
-    setPromptFormData({
-      name: prompt.name,
-      description: prompt.description || '',
-      content: prompt.system_prompt,
-      is_active: prompt.is_active,
-      is_default: prompt.is_default,
-    });
+      setPromptFormData({
+        name: prompt.name,
+        description: prompt.description || '',
+        content: prompt.system_prompt,
+        is_active: prompt.is_active,
+        is_default: prompt.is_default,
+      });
     setIsPromptDialogOpen(true);
   };
 
@@ -449,8 +447,7 @@ export default function KnowledgeBaseDetails() {
     setPromptFormData({ name: '', description: '', content: '', is_active: true, is_default: false });
   };
 
-  const formatFileSize = (bytes: number | null) => {
-    if (bytes === null || bytes === undefined) return 'N/A';
+  const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
@@ -551,10 +548,11 @@ export default function KnowledgeBaseDetails() {
             </div>
             <div className="flex items-center space-x-2">
               <span
-                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${collection.is_active
-                  ? 'bg-green-100 text-green-800'
-                  : 'bg-gray-100 text-gray-800'
-                  }`}
+                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                  collection.is_active
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-gray-100 text-gray-800'
+                }`}
               >
                 {collection.is_active ? 'Active' : 'Inactive'}
               </span>
@@ -563,6 +561,12 @@ export default function KnowledgeBaseDetails() {
                 Edit
               </Button>
             </div>
+          </div>
+          <div>
+            <Button variant="outline" onClick={() => navigate('/superadmin')}>
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Knowledge Bases
+            </Button>
           </div>
         </div>
 
@@ -634,17 +638,11 @@ export default function KnowledgeBaseDetails() {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-          <TabsList>
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="files">Files</TabsTrigger>
-            <TabsTrigger value="prompts">Prompts</TabsTrigger>
-            <TabsTrigger value="crawler">Web Crawler</TabsTrigger>
-          </TabsList>
-
-          {/* Crawler Tab */}
-          <TabsContent value="crawler">
-            <CrawlerView collectionId={id} />
-          </TabsContent>
+           <TabsList>
+             <TabsTrigger value="overview">Overview</TabsTrigger>
+             <TabsTrigger value="files">Files</TabsTrigger>
+             <TabsTrigger value="prompts">Prompts</TabsTrigger>
+           </TabsList>
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
@@ -730,12 +728,13 @@ export default function KnowledgeBaseDetails() {
                                     {fileName}
                                   </span>
                                   <span
-                                    className={`text-xs font-medium ${status === 'success'
-                                      ? 'text-green-600'
-                                      : status === 'error'
+                                    className={`text-xs font-medium ${
+                                      status === 'success'
+                                        ? 'text-green-600'
+                                        : status === 'error'
                                         ? 'text-red-600'
                                         : 'text-muted-foreground'
-                                      }`}
+                                    }`}
                                   >
                                     {status === 'pending' && 'Uploading...'}
                                     {status === 'success' && 'Uploaded'}
@@ -779,78 +778,56 @@ export default function KnowledgeBaseDetails() {
                   </div>
                 ) : (
                   <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>File Name</TableHead>
-                        <TableHead>Size</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Uploaded</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
+                     <TableHeader>
+                       <TableRow>
+                         <TableHead>File Name</TableHead>
+                         <TableHead>Size</TableHead>
+                         <TableHead>Status</TableHead>
+                         <TableHead>Uploaded</TableHead>
+                         <TableHead className="text-right">Actions</TableHead>
+                       </TableRow>
+                     </TableHeader>
                     <TableBody>
-                      {filteredFiles.map((file) => (
-                        <TableRow key={file.file_id}>
-                          <TableCell className="font-medium">
-                            <div className="flex items-center gap-2">
-                              {file.file_name}
-                              {file.source_type === 'crawled' && (
-                                <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
-                                  Crawled
-                                </span>
-                              )}
-                            </div>
-                            {file.source_type === 'crawled' && file.target_url && (
-                              <div className="text-xs text-muted-foreground mt-1">
-                                URL: {file.target_url}
-                              </div>
-                            )}
-                            {file.source_type === 'crawled' && file.pages_crawled !== undefined && (
-                              <div className="text-xs text-muted-foreground mt-1">
-                                Pages: {file.pages_crawled} | Chunks: {file.chunks_created || 0}
-                              </div>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {file.file_size !== null ? formatFileSize(file.file_size) : 'N/A'}
-                          </TableCell>
-                          <TableCell>
-                            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${file.processing_status === 'completed'
-                              ? 'bg-green-100 text-green-800'
-                              : file.processing_status === 'processing' || file.processing_status === 'running'
-                                ? 'bg-yellow-100 text-yellow-800'
-                                : 'bg-red-100 text-red-800'
-                              }`}>
-                              {file.processing_status}
-                            </span>
-                          </TableCell>
-                          <TableCell>{new Date(file.upload_timestamp).toLocaleDateString()}</TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end space-x-2">
-                              {file.source_type !== 'crawled' && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleDownload(file.file_id, file.file_name)}
-                                  disabled={file.processing_status !== 'completed'}
-                                >
-                                  <Download className="h-4 w-4 mr-1" />
-                                  Download
-                                </Button>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDeleteFile(file.file_id)}
-                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                              >
-                                <Trash2 className="h-4 w-4 mr-1" />
-                                Delete
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                       {filteredFiles.map((file) => (
+                         <TableRow key={file.file_id}>
+                           <TableCell className="font-medium">{file.file_name}</TableCell>
+                           <TableCell>{formatFileSize(file.file_size)}</TableCell>
+                           <TableCell>
+                             <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                               file.processing_status === 'completed'
+                                 ? 'bg-green-100 text-green-800'
+                                 : file.processing_status === 'processing'
+                                 ? 'bg-yellow-100 text-yellow-800'
+                                 : 'bg-red-100 text-red-800'
+                             }`}>
+                               {file.processing_status}
+                             </span>
+                           </TableCell>
+                           <TableCell>{new Date(file.upload_timestamp).toLocaleDateString()}</TableCell>
+                           <TableCell className="text-right">
+                             <div className="flex items-center justify-end space-x-2">
+                               <Button
+                                 variant="ghost"
+                                 size="sm"
+                                 onClick={() => handleDownload(file.file_id, file.file_name)}
+                                 disabled={file.processing_status !== 'completed'}
+                               >
+                                 <Download className="h-4 w-4 mr-1" />
+                                 Download
+                               </Button>
+                               <Button
+                                 variant="ghost"
+                                 size="sm"
+                                 onClick={() => handleDeleteFile(file.file_id)}
+                                 className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                               >
+                                 <Trash2 className="h-4 w-4 mr-1" />
+                                 Delete
+                               </Button>
+                             </div>
+                           </TableCell>
+                         </TableRow>
+                       ))}
                     </TableBody>
                   </Table>
                 )}
@@ -886,8 +863,8 @@ export default function KnowledgeBaseDetails() {
                             {editingPrompt ? 'Edit Prompt' : 'Create New Prompt'}
                           </DialogTitle>
                           <DialogDescription>
-                            {editingPrompt
-                              ? 'Update the prompt details'
+                            {editingPrompt 
+                              ? 'Update the prompt details' 
                               : 'Create a new prompt for this knowledge base'
                             }
                           </DialogDescription>
@@ -990,52 +967,53 @@ export default function KnowledgeBaseDetails() {
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
-                    <TableBody>
-                      {filteredPrompts.map((prompt) => (
-                        <TableRow key={prompt.prompt_id}>
-                          <TableCell className="font-medium">{prompt.name}</TableCell>
-                          <TableCell className="max-w-xs truncate">{prompt.description || 'No description'}</TableCell>
-                          <TableCell className="max-w-xs truncate">{prompt.system_prompt}</TableCell>
-                          <TableCell>
-                            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${prompt.is_active
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-gray-100 text-gray-800'
-                              }`}>
-                              {prompt.is_active ? 'Active' : 'Inactive'}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            {prompt.is_default && (
-                              <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800">
-                                Default
-                              </span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end space-x-2">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => openEditPromptDialog(prompt)}
-                              >
-                                <Pencil className="h-4 w-4 mr-1" />
-                                Edit
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDeletePrompt(prompt.prompt_id)}
-                                disabled={prompt.is_default && prompts.length === 1}
-                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                              >
-                                <Trash2 className="h-4 w-4 mr-1" />
-                                Delete
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
+                     <TableBody>
+                       {filteredPrompts.map((prompt) => (
+                         <TableRow key={prompt.prompt_id}>
+                           <TableCell className="font-medium">{prompt.name}</TableCell>
+                           <TableCell className="max-w-xs truncate">{prompt.description || 'No description'}</TableCell>
+                           <TableCell className="max-w-xs truncate">{prompt.system_prompt}</TableCell>
+                           <TableCell>
+                             <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                               prompt.is_active
+                                 ? 'bg-green-100 text-green-800'
+                                 : 'bg-gray-100 text-gray-800'
+                             }`}>
+                               {prompt.is_active ? 'Active' : 'Inactive'}
+                             </span>
+                           </TableCell>
+                           <TableCell>
+                             {prompt.is_default && (
+                               <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800">
+                                 Default
+                               </span>
+                             )}
+                           </TableCell>
+                           <TableCell className="text-right">
+                             <div className="flex items-center justify-end space-x-2">
+                               <Button
+                                 variant="ghost"
+                                 size="sm"
+                                 onClick={() => openEditPromptDialog(prompt)}
+                               >
+                                 <Pencil className="h-4 w-4 mr-1" />
+                                 Edit
+                               </Button>
+                               <Button
+                                 variant="ghost"
+                                 size="sm"
+                                 onClick={() => handleDeletePrompt(prompt.prompt_id)}
+                                 disabled={prompt.is_default && prompts.length === 1}
+                                 className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                               >
+                                 <Trash2 className="h-4 w-4 mr-1" />
+                                 Delete
+                               </Button>
+                             </div>
+                           </TableCell>
+                         </TableRow>
+                       ))}
+                     </TableBody>
                   </Table>
                 )}
               </CardContent>
