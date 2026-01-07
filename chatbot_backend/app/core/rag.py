@@ -396,21 +396,22 @@ Answer:"""
         # ALWAYS add formatted sources - remove any AI-generated sources section first
         # Format: [file_name](reference|source_type) for frontend parsing
         # reference = file_id for files, url for web_crawl
-        # Remove any existing sources section (case-insensitive)
-        answer = re.sub(r'\n+\**\s*[Ss]ources?:?\s*\**[\s\S]*$', '', answer).strip()
+        # Remove any existing sources section (case-insensitive) - handles with or without preceding newline
+        answer = re.sub(r'[\s\n]*\**\s*[Ss]ources?:?\s*\**[\s\S]*$', '', answer).strip()
         
-        # Build and append formatted sources
-        source_list = []
-        for file_name, info in sorted(source_files.items()):
-            source_type = info.get('source_type', 'file')
-            if source_type == 'web_crawl' and info.get('url'):
-                reference = info['url']
-            else:
-                reference = info.get('file_id', '')
-            source_list.append(f"- [{file_name}]({reference}|{source_type})")
-        
-        if source_list:
-            answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
+        # Build and append formatted sources ONLY if not a generic response
+        if not is_generic:
+            source_list = []
+            for file_name, info in sorted(source_files.items()):
+                source_type = info.get('source_type', 'file')
+                if source_type == 'web_crawl' and info.get('url'):
+                    reference = info['url']
+                else:
+                    reference = info.get('file_id', '')
+                source_list.append(f"- [{file_name}]({reference}|{source_type})")
+            
+            if source_list:
+                answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
 
         return {"answer": answer, "is_generic": is_generic, "tokens_used": tokens_used}
 
@@ -507,20 +508,21 @@ Answer:"""
         # ALWAYS add formatted sources - remove any AI-generated sources section first
         # Format: [file_name](reference|source_type) for frontend parsing
         # reference = file_id for files, url for web_crawl
-        # Remove any existing sources section (case-insensitive)
-        answer = re.sub(r'\n+\**\s*[Ss]ources?:?\s*\**[\s\S]*$', '', answer).strip()
+        # Remove any existing sources section (case-insensitive) - handles with or without preceding newline
+        answer = re.sub(r'[\s\n]*\**\s*[Ss]ources?:?\s*\**[\s\S]*$', '', answer).strip()
         
-        # Build and append formatted sources
-        source_list = []
-        for file_name, info in sorted(source_files.items()):
-            source_type = info.get('source_type', 'file')
-            if source_type == 'web_crawl' and info.get('url'):
-                reference = info['url']
-            else:
-                reference = info.get('file_id', '')
-            source_list.append(f"- [{file_name}]({reference}|{source_type})")
-        
-        if source_list:
-            answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
+        # Build and append formatted sources ONLY if not a generic response
+        if not is_generic:
+            source_list = []
+            for file_name, info in sorted(source_files.items()):
+                source_type = info.get('source_type', 'file')
+                if source_type == 'web_crawl' and info.get('url'):
+                    reference = info['url']
+                else:
+                    reference = info.get('file_id', '')
+                source_list.append(f"- [{file_name}]({reference}|{source_type})")
+            
+            if source_list:
+                answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
 
         return {"answer": answer, "is_generic": is_generic, "tokens_used": tokens_used}

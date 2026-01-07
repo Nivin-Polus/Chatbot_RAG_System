@@ -666,3 +666,196 @@ async def list_scheduled_jobs(
         jobs=[CrawlJobResponse(**job.to_dict()) for job in jobs],
         total=total
     )
+
+
+@router.get("/jobs/{job_id}/chunks")
+async def get_crawl_job_chunks(
+    job_id: str,
+    limit: int = Query(100, ge=1, le=1000, description="Maximum chunks to return"),
+    offset: int = Query(0, ge=0, description="Offset for pagination"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all text chunks for a crawl job.
+    
+    Returns the actual extracted text content stored in the vector database.
+    """
+    job = db.query(CrawlerJob).filter(CrawlerJob.job_id == job_id).first()
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Check access
+    if current_user.role not in ['super_admin', 'superadmin']:
+        # Check if user_admin of the collection
+        if current_user.role in ['user_admin', 'useradmin', 'admin']:
+            collection = db.query(Collection).filter(Collection.collection_id == job.collection_id).first()
+            if not collection or collection.admin_user_id != current_user.user_id:
+                if job.user_id != current_user.user_id:
+                    raise HTTPException(status_code=403, detail="Access denied")
+        elif job.user_id != current_user.user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Get chunks from vector store
+    from app.core.vector_singleton import get_vector_store
+    
+    try:
+        vector_store = get_vector_store()
+        all_chunks = vector_store.get_documents_by_crawl_job_id(job_id, limit=limit + offset)
+        
+        # Apply offset
+        chunks_to_return = all_chunks[offset:offset + limit] if offset < len(all_chunks) else []
+        
+        # Organize by URL for better display
+        chunks_by_url = {}
+        for chunk in chunks_to_return:
+            payload = chunk.get("payload", {})
+            url = payload.get("url") or payload.get("canonical_url", "unknown")
+            
+            if url not in chunks_by_url:
+                chunks_by_url[url] = {
+                    "url": url,
+                    "page_title": payload.get("page_title", ""),
+                    "chunks": []
+                }
+            
+            chunks_by_url[url]["chunks"].append({
+                "chunk_id": chunk.get("id"),
+                "text": payload.get("text", ""),
+                "chunk_index": payload.get("chunk_index", 0),
+                "section_header": payload.get("section_header", ""),
+                "block_type": payload.get("block_type", "paragraph"),
+                "word_count": len(payload.get("text", "").split()),
+                "char_count": len(payload.get("text", "")),
+            })
+        
+        # Sort chunks within each URL by chunk_index
+        for url_data in chunks_by_url.values():
+            url_data["chunks"].sort(key=lambda x: x.get("chunk_index", 0))
+        
+        return {
+            "job_id": job_id,
+            "target_url": job.target_url,
+            "total_chunks_in_job": job.chunks_created,
+            "chunks_returned": len(chunks_to_return),
+            "offset": offset,
+            "limit": limit,
+            "pages": list(chunks_by_url.values())
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch chunks for job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch chunks: {str(e)}")
+
+
+@router.delete("/jobs/{job_id}/chunks")
+async def delete_all_crawl_job_chunks(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete all chunks for a crawl job from the vector store.
+    
+    This removes the extracted content but keeps the job record.
+    """
+    job = db.query(CrawlerJob).filter(CrawlerJob.job_id == job_id).first()
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Check access - only admins can delete chunks
+    if current_user.role not in ['super_admin', 'superadmin', 'user_admin', 'useradmin', 'admin']:
+        raise HTTPException(status_code=403, detail="Only admins can delete chunks")
+    
+    if current_user.role not in ['super_admin', 'superadmin']:
+        # Check if user_admin of the collection
+        collection = db.query(Collection).filter(Collection.collection_id == job.collection_id).first()
+        if not collection or collection.admin_user_id != current_user.user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Delete chunks from vector store
+    from app.core.vector_singleton import get_vector_store
+    
+    try:
+        vector_store = get_vector_store()
+        deleted_count = vector_store.delete_documents_by_crawl_job_id(job_id)
+        
+        # Update job stats
+        job.chunks_created = 0
+        job.chunks_deleted = (job.chunks_deleted or 0) + (deleted_count if deleted_count > 0 else job.chunks_created)
+        db.commit()
+        
+        logger.info(f"User {current_user.username} deleted all chunks for job {job_id}")
+        
+        # Log activity
+        activity_tracker.log_activity(
+            activity_type="crawl_chunks_deleted",
+            user=current_user.username,
+            details={
+                "job_id": job_id,
+                "target_url": job.target_url,
+                "chunks_deleted": deleted_count if deleted_count > 0 else "all",
+            },
+        )
+        
+        return {
+            "status": "deleted",
+            "job_id": job_id,
+            "chunks_deleted": deleted_count if deleted_count > 0 else "all"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to delete chunks for job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete chunks: {str(e)}")
+
+
+@router.delete("/jobs/{job_id}/chunks/{chunk_id}")
+async def delete_single_chunk(
+    job_id: str,
+    chunk_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a single chunk from a crawl job.
+    """
+    job = db.query(CrawlerJob).filter(CrawlerJob.job_id == job_id).first()
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Check access - only admins can delete chunks
+    if current_user.role not in ['super_admin', 'superadmin', 'user_admin', 'useradmin', 'admin']:
+        raise HTTPException(status_code=403, detail="Only admins can delete chunks")
+    
+    if current_user.role not in ['super_admin', 'superadmin']:
+        collection = db.query(Collection).filter(Collection.collection_id == job.collection_id).first()
+        if not collection or collection.admin_user_id != current_user.user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Delete specific chunk from vector store
+    from app.core.vector_singleton import get_vector_store
+    
+    try:
+        vector_store = get_vector_store()
+        vector_store.delete_document(chunk_id)
+        
+        # Update job stats
+        if job.chunks_created and job.chunks_created > 0:
+            job.chunks_created -= 1
+        job.chunks_deleted = (job.chunks_deleted or 0) + 1
+        db.commit()
+        
+        logger.info(f"User {current_user.username} deleted chunk {chunk_id} from job {job_id}")
+        
+        return {
+            "status": "deleted",
+            "job_id": job_id,
+            "chunk_id": chunk_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to delete chunk {chunk_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete chunk: {str(e)}")

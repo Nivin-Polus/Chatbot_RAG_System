@@ -18,13 +18,39 @@ import pandas as pd
 
 # Chunk size (number of words per chunk)
 CHUNK_SIZE = 200
+# Overlap between chunks to preserve context at boundaries
+CHUNK_OVERLAP = 50
 
 
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE) -> List[str]:
+def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
+    """
+    Split text into overlapping chunks for better context preservation.
+    
+    Args:
+        text: The text to chunk
+        chunk_size: Number of words per chunk
+        overlap: Number of words to overlap between consecutive chunks
+    
+    Returns:
+        List of text chunks with overlap
+    """
     words = text.split()
     chunks = []
-    for i in range(0, len(words), chunk_size):
-        chunks.append(" ".join(words[i:i + chunk_size]))
+    
+    if not words:
+        return chunks
+    
+    # Calculate step size (chunk_size - overlap)
+    step = max(1, chunk_size - overlap)
+    
+    for i in range(0, len(words), step):
+        chunk = " ".join(words[i:i + chunk_size])
+        if chunk:
+            chunks.append(chunk)
+        # Stop if we've reached the end
+        if i + chunk_size >= len(words):
+            break
+    
     return chunks
 
 

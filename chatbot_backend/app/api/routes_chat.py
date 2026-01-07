@@ -19,11 +19,11 @@ from app.utils.chat_history_logger import log_chat_interaction
 from app.models.collection import Collection, CollectionUser
 from app.models.query_log import QueryLog
 from app.utils.rate_limiter import rate_limiter
-import redis
 import logging
 import json
 import time
 import uuid
+import re
 
 # Initialize FastAPI router
 router = APIRouter()
@@ -34,11 +34,6 @@ logging.basicConfig(level=logging.INFO)
 
 # Initialize services
 chat_service = ChatTrackingService()
-
-# Initialize Redis if enabled
-r = None
-if settings.USE_REDIS:
-    r = redis.Redis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB)
 
 # Request / Response models
 class ConversationMessage(BaseModel):
@@ -218,19 +213,6 @@ def _process_chat_request(
 
     start_time = time.time()
 
-    cache_key_parts = ["faq", question.lower()]
-    if effective_collection_id:
-        cache_key_parts.append(f"collection:{effective_collection_id}")
-    cache_key = ":".join(cache_key_parts)
-
-    if r:
-        cached_answer = r.get(cache_key)
-        if cached_answer:
-            answer_text = cached_answer.decode("utf-8")
-            logger.debug(f"[CACHE HIT] User: {identity_username}, Question: {question}")
-            is_generic = _is_generic_query(question) or _is_generic_response(answer_text)
-            return ChatResponse(answer=answer_text, session_id=effective_session_id, is_generic=is_generic, sources=[])
-
     logger.debug(f"[RAG QUERY] User: {identity_username}, Question: {question}, top_k: {top_k}")
 
     # Import here to avoid PyO3 initialization issues during module import
@@ -326,6 +308,9 @@ def _process_chat_request(
             answer_text = rag_result
             is_generic_from_ai = _is_generic_query(question) or _is_generic_response(answer_text)
         
+        # Safety check: Remove any "Sources:" section from answer text (should be in sources field only)
+        answer_text = re.sub(r'[\s\n]*\**\s*[Ss]ources?:?\s*\**[\s\S]*$', '', answer_text).strip()
+        
     except Exception as e:
         logger.error(f"[RAG ERROR] Failed to generate answer: {str(e)}")
         return ChatResponse(
@@ -334,11 +319,6 @@ def _process_chat_request(
             is_generic=True,
             sources=sources_payload,
         )
-
-
-    if r:
-        r.set(cache_key, answer_text, ex=60 * 60 * 24)
-        logger.debug(f"[CACHE STORE] User: {identity_username}, Question: {question}")
 
     processing_time = int((time.time() - start_time) * 1000)
 
@@ -436,7 +416,6 @@ def _process_chat_request(
                 "has_context": maintain_context and len(conversation_history) > 0,
             },
             metadata={
-                "cache_hit": False,
                 "vector_db_type": "qdrant" if vector_store.client else "in_memory",
             },
         )

@@ -201,7 +201,7 @@ class MultiTenantVectorStore:
         website_id: Optional[str],
         accessible_file_ids: List[str],
         limit: int = 10,
-        score_threshold: float = 0.7,
+        score_threshold: float = 0.4,
         additional_filters: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """

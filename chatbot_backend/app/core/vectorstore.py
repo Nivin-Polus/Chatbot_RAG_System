@@ -212,6 +212,58 @@ class VectorStore:
             logger.debug(f"Deleted {len(to_delete)} chunks for crawl job {crawl_job_id} from memory")
             return len(to_delete)
 
+    def get_documents_by_crawl_job_id(self, crawl_job_id: str, limit: int = 10000) -> list:
+        """Get all document chunks belonging to a specific crawl job"""
+        if self.client:
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            try:
+                # Scroll through all points with matching crawl_job_id
+                results = []
+                offset = None
+                while True:
+                    response = self.client.scroll(
+                        collection_name=self.collection_name,
+                        scroll_filter=Filter(
+                            must=[
+                                FieldCondition(
+                                    key="crawl_job_id",
+                                    match=MatchValue(value=crawl_job_id)
+                                )
+                            ]
+                        ),
+                        limit=100,
+                        offset=offset,
+                        with_payload=True,
+                        with_vectors=False
+                    )
+                    points, offset = response
+                    if not points:
+                        break
+                    results.extend([{
+                        "id": str(p.id),
+                        "payload": p.payload
+                    } for p in points])
+                    if len(results) >= limit or offset is None:
+                        break
+                logger.debug(f"Retrieved {len(results)} chunks for crawl job {crawl_job_id} from Qdrant")
+                return results[:limit]
+            except Exception as e:
+                logger.error(f"Failed to get documents by crawl_job_id: {e}")
+                return []
+        else:
+            # For fallback storage
+            results = []
+            for doc_id, doc_data in self.documents.items():
+                if doc_data["payload"].get("crawl_job_id") == crawl_job_id:
+                    results.append({
+                        "id": doc_id,
+                        "payload": doc_data["payload"]
+                    })
+                    if len(results) >= limit:
+                        break
+            logger.debug(f"Retrieved {len(results)} chunks for crawl job {crawl_job_id} from memory")
+            return results
+
     def search(self, query: str, top_k: int = 5, collection_id: Optional[str] = None):
         query_vector = self.embeddings.encode(query)
         

@@ -523,6 +523,47 @@ export default function UserAdminDashboard() {
     }
   };
 
+  const handleDownloadCrawlData = async (file: FileItem) => {
+    if (!file.crawl_job_id && !file.file_id.startsWith('crawl_')) return;
+
+    const jobId = file.crawl_job_id || file.file_id.replace('crawl_', '');
+
+    try {
+      const response = await apiGet(
+        `${import.meta.env.VITE_API_BASE_URL}/files/download/crawl_${jobId}`,
+        user?.access_token
+      );
+
+      if (!response.ok) {
+        throw new Error('Download failed');
+      }
+
+      const blob = await response.blob();
+
+      // Try to infer filename from Content-Disposition header if present
+      const disposition = response.headers.get('content-disposition') || '';
+      let filename = '';
+      const match = disposition.match(/filename="?(?<name>[^"]+)"?/i);
+      if (match && match.groups?.name) {
+        filename = match.groups.name;
+      } else {
+        filename = `crawl_data_${jobId}.json`;
+      }
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Failed to download crawl data', error);
+      toast.error('Failed to download crawl data');
+    }
+  };
+
   const handleDeleteFile = async (fileId: string) => {
     if (!confirm('Are you sure you want to delete this file?')) {
       return;
@@ -1006,7 +1047,13 @@ export default function UserAdminDashboard() {
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => handleDownloadFile(file.file_id, file.file_name)}
+                                  onClick={() => {
+                                    if (file.source_type === 'crawled' || file.file_id.startsWith('crawl_')) {
+                                      handleDownloadCrawlData(file);
+                                    } else {
+                                      handleDownloadFile(file.file_id, file.file_name);
+                                    }
+                                  }}
                                   disabled={file.processing_status !== 'completed'}
                                 >
                                   <Download className="h-4 w-4 mr-1" />

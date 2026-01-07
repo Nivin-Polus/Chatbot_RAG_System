@@ -358,26 +358,113 @@ class ContentExtractor:
         return blocks
     
     def _extract_table_text(self, table: Tag) -> str:
-        """Extract table content as structured text."""
+        """
+        Extract table content as structured text.
+        Special handling for person/contact tables to create semantically rich text.
+        """
         rows = []
         
         # Get headers
         headers = []
+        header_lower = []
         thead = table.find('thead')
         if thead:
             for th in thead.find_all(['th', 'td']):
-                headers.append(th.get_text(strip=True))
+                header_text = th.get_text(strip=True)
+                headers.append(header_text)
+                header_lower.append(header_text.lower())
+        
+        # Also check first row for headers if no thead
+        if not headers:
+            first_row = table.find('tr')
+            if first_row:
+                for th in first_row.find_all(['th', 'td']):
+                    header_text = th.get_text(strip=True)
+                    headers.append(header_text)
+                    header_lower.append(header_text.lower())
+        
+        # Detect if this is a person/contact table
+        person_indicators = ['name', 'title', 'email', 'phone', 'address', 'role', 'position']
+        is_person_table = any(
+            any(indicator in h for indicator in person_indicators)
+            for h in header_lower
+        )
+        
+        # Find column indices for key fields
+        name_idx = None
+        title_idx = None
+        email_idx = None
+        phone_idx = None
+        address_idx = None
+        
+        for i, h in enumerate(header_lower):
+            if 'name' in h and name_idx is None:
+                name_idx = i
+            elif any(x in h for x in ['title', 'role', 'position']) and title_idx is None:
+                title_idx = i
+            elif 'email' in h and email_idx is None:
+                email_idx = i
+            elif 'phone' in h and phone_idx is None:
+                phone_idx = i
+            elif 'address' in h and address_idx is None:
+                address_idx = i
         
         # Get body rows
         tbody = table.find('tbody') or table
-        for tr in tbody.find_all('tr'):
+        all_rows = tbody.find_all('tr')
+        
+        # Skip first row if it was used as headers
+        start_idx = 1 if not thead and headers else 0
+        
+        for tr in all_rows[start_idx:]:
             cells = [td.get_text(strip=True) for td in tr.find_all(['td', 'th'])]
-            if cells and any(cells):
-                if headers and len(cells) == len(headers):
-                    row_text = ' | '.join(f"{h}: {c}" for h, c in zip(headers, cells))
+            if not cells or not any(cells):
+                continue
+            
+            # For person tables, create natural language descriptions
+            if is_person_table and len(cells) >= 2:
+                name = cells[name_idx] if name_idx is not None and name_idx < len(cells) else None
+                title = cells[title_idx] if title_idx is not None and title_idx < len(cells) else None
+                email = cells[email_idx] if email_idx is not None and email_idx < len(cells) else None
+                phone = cells[phone_idx] if phone_idx is not None and phone_idx < len(cells) else None
+                address = cells[address_idx] if address_idx is not None and address_idx < len(cells) else None
+                
+                # Build person-friendly description
+                parts = []
+                if name:
+                    if title:
+                        parts.append(f"{name} is a {title}")
+                    else:
+                        parts.append(f"{name}")
+                    
+                    contact_parts = []
+                    if email:
+                        contact_parts.append(f"email: {email}")
+                    if phone:
+                        contact_parts.append(f"phone: {phone}")
+                    if address:
+                        contact_parts.append(f"location: {address}")
+                    
+                    if contact_parts:
+                        parts.append(f"Contact: {', '.join(contact_parts)}")
+                    
+                    rows.append(' | '.join(parts) if len(parts) > 1 else parts[0])
                 else:
-                    row_text = ' | '.join(cells)
-                rows.append(row_text)
+                    # Fallback to standard format
+                    if headers and len(cells) == len(headers):
+                        row_text = ' | '.join(f"{h}: {c}" for h, c in zip(headers, cells) if c)
+                    else:
+                        row_text = ' | '.join(c for c in cells if c)
+                    if row_text:
+                        rows.append(row_text)
+            else:
+                # Standard table formatting
+                if headers and len(cells) == len(headers):
+                    row_text = ' | '.join(f"{h}: {c}" for h, c in zip(headers, cells) if c)
+                else:
+                    row_text = ' | '.join(c for c in cells if c)
+                if row_text:
+                    rows.append(row_text)
         
         return '\n'.join(rows)
     

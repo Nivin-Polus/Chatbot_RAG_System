@@ -572,6 +572,7 @@ async def download_file(
     from app.models.user import User
     from app.models.collection import CollectionUser
     from app.core.auth import decode_plugin_user_token
+    import json
 
     # Try to authenticate as plugin user first, then as regular user
     current_user = None
@@ -616,7 +617,123 @@ async def download_file(
         except:
             raise HTTPException(status_code=401, detail="Could not validate credentials")
     
-    # Try to find by file_id first
+    # Handle crawled data download (crawl_ prefixed identifiers)
+    if identifier.startswith("crawl_"):
+        job_id = identifier.replace("crawl_", "")
+        from app.models.crawler_job import CrawlerJob
+        
+        job = db.query(CrawlerJob).filter(CrawlerJob.job_id == job_id).first()
+        if not job:
+            raise HTTPException(status_code=404, detail="Crawl job not found")
+        
+        # Permission check for crawl job
+        role_str = str(role) if role is not None else ""
+        if role_str == "super_admin":
+            pass  # Full access
+        elif role_str == "user_admin":
+            # User admin can access crawl jobs in collections they administer
+            administered_collection = db.query(Collection).filter(
+                Collection.collection_id == job.collection_id,
+                Collection.admin_user_id == current_user_id
+            ).first()
+            if not administered_collection:
+                raise HTTPException(status_code=403, detail="You don't have permission to access this crawl data")
+        elif role_str in {"user", "plugin_user"}:
+            # Regular or plugin users can access crawl jobs in collections they're members of
+            if job.collection_id is None:
+                raise HTTPException(status_code=403, detail="Crawl job has no collection assignment")
+            
+            membership = db.query(CollectionUser).filter(
+                CollectionUser.collection_id == job.collection_id,
+                CollectionUser.user_id == current_user_id
+            ).first()
+            
+            if not membership:
+                raise HTTPException(status_code=403, detail="You don't have access to this collection")
+            
+            # For plugin users, also check specific download permission
+            if role_str == "plugin_user" and not membership.can_download:
+                raise HTTPException(status_code=403, detail="Plugin user does not have download permission")
+        else:
+            raise HTTPException(status_code=403, detail="Invalid role")
+        
+        # Build export data from crawl job
+        export_data = {
+            "job_id": job.job_id,
+            "target_url": job.target_url,
+            "status": job.status,
+            "pages_discovered": job.pages_discovered,
+            "pages_crawled": job.pages_crawled,
+            "pages_skipped": job.pages_skipped,
+            "pages_failed": job.pages_failed,
+            "chunks_created": job.chunks_created,
+            "total_characters": job.total_characters,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "started_at": job.started_at.isoformat() if job.started_at else None,
+            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+            "crawled_urls": job.crawled_urls or [],
+            "failed_urls": job.failed_urls or [],
+            "skipped_urls": job.skipped_urls or [],
+        }
+        
+        # Fetch actual crawled content from vector store
+        try:
+            vector_store = get_vector_store()
+            chunks = vector_store.get_documents_by_crawl_job_id(job_id)
+            
+            # Organize chunks by source URL
+            content_by_url = {}
+            for chunk in chunks:
+                payload = chunk.get("payload", {})
+                source_url = payload.get("source_url", "unknown")
+                text = payload.get("text", "")
+                title = payload.get("page_title", "")
+                chunk_index = payload.get("chunk_index", 0)
+                
+                if source_url not in content_by_url:
+                    content_by_url[source_url] = {
+                        "title": title,
+                        "url": source_url,
+                        "chunks": []
+                    }
+                
+                content_by_url[source_url]["chunks"].append({
+                    "chunk_index": chunk_index,
+                    "text": text
+                })
+            
+            # Sort chunks within each URL by chunk_index
+            for url_data in content_by_url.values():
+                url_data["chunks"].sort(key=lambda x: x.get("chunk_index", 0))
+            
+            # Add crawled content to export
+            export_data["crawled_content"] = list(content_by_url.values())
+            export_data["total_chunks_exported"] = len(chunks)
+            
+            logger.info(f"Exported {len(chunks)} chunks from {len(content_by_url)} pages for crawl job {job_id}")
+        except Exception as e:
+            logger.warning(f"Failed to fetch crawled content from vector store: {e}")
+            export_data["crawled_content"] = []
+            export_data["content_export_error"] = str(e)
+        
+        # Create JSON response
+        json_content = json.dumps(export_data, indent=2, ensure_ascii=False)
+        json_bytes = json_content.encode('utf-8')
+        
+        # Generate filename from target URL
+        from urllib.parse import urlparse
+        parsed_url = urlparse(job.target_url)
+        domain = parsed_url.netloc.replace(".", "_")
+        filename = f"crawl_data_{domain}_{job_id[:8]}.json"
+        
+        headers = {
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
+        
+        logger.info(f"User {username} downloading crawl job {job_id} as JSON")
+        return StreamingResponse(iter([json_bytes]), media_type="application/json", headers=headers)
+    
+    # Try to find by file_id first (for regular files)
     file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == identifier).first()
 
     # If not found, try by file_name
