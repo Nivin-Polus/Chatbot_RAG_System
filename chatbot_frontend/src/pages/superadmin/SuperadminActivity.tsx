@@ -50,8 +50,10 @@ export default function SuperadminActivity() {
   const [isLoading, setIsLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<'all' | '24h' | '7d' | '30d'>('24h');
   const [activityTypeFilter, setActivityTypeFilter] = useState<string>('all');
-  const [userFilter, setUserFilter] = useState<string>('');
-  const [collectionFilter, setCollectionFilter] = useState<string>('');
+  const [userFilter, setUserFilter] = useState<string>('all');
+  const [collectionFilter, setCollectionFilter] = useState<string>('all');
+  const [availableUsers, setAvailableUsers] = useState<{ id: string; username: string }[]>([]);
+  const [availableCollections, setAvailableCollections] = useState<{ id: string; name: string }[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [totalActivities, setTotalActivities] = useState(0);
@@ -114,8 +116,8 @@ export default function SuperadminActivity() {
         offset: offset.toString(),
         ...(sinceHours !== undefined && { since_hours: sinceHours.toString() }),
         ...(activityTypeFilter && activityTypeFilter !== 'all' && { activity_type: activityTypeFilter }),
-        ...(userFilter && { username: userFilter }),
-        ...(collectionFilter && { collection_id: collectionFilter })
+        ...(userFilter && userFilter !== 'all' && { username: userFilter }),
+        ...(collectionFilter && collectionFilter !== 'all' && { collection_id: collectionFilter })
       });
 
       const [recentResponse, statsResponse] = await Promise.all([
@@ -181,6 +183,38 @@ export default function SuperadminActivity() {
     }
   }, [user?.access_token, currentPage, itemsPerPage, timeFilter, activityTypeFilter, userFilter, collectionFilter]);
 
+  const fetchUsers = useCallback(async () => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/users/`, {
+        headers: {
+          Authorization: `Bearer ${user?.access_token}`,
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableUsers(data.map((u: any) => ({ id: u.user_id, username: u.username })));
+      }
+    } catch (error) {
+      console.error('Failed to fetch users', error);
+    }
+  }, [user?.access_token]);
+
+  const fetchCollections = useCallback(async () => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/collections/summary`, {
+        headers: {
+          Authorization: `Bearer ${user?.access_token}`,
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableCollections(data.map((c: any) => ({ id: c.collection_id, name: c.name })));
+      }
+    } catch (error) {
+      console.error('Failed to fetch collections', error);
+    }
+  }, [user?.access_token]);
+
   useEffect(() => {
     // Reset to page 1 when filters change
     setCurrentPage(1);
@@ -190,6 +224,12 @@ export default function SuperadminActivity() {
     // Fetch data when page or filters change
     fetchActivityData().catch(() => undefined);
   }, [fetchActivityData]);
+
+  useEffect(() => {
+    // Fetch lookup data on mount
+    fetchUsers().catch(() => undefined);
+    fetchCollections().catch(() => undefined);
+  }, [fetchUsers, fetchCollections]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -398,8 +438,8 @@ export default function SuperadminActivity() {
 
   const handleClearFilters = () => {
     setActivityTypeFilter('all');
-    setUserFilter('');
-    setCollectionFilter('');
+    setUserFilter('all');
+    setCollectionFilter('all');
     setTimeFilter('24h');
   };
 
@@ -466,20 +506,36 @@ export default function SuperadminActivity() {
 
               <div>
                 <label className="text-sm font-medium mb-1 block">User</label>
-                <Input
-                  placeholder="Filter by user"
-                  value={userFilter}
-                  onChange={(e) => setUserFilter(e.target.value)}
-                />
+                <Select value={userFilter} onValueChange={setUserFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All users" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All users</SelectItem>
+                    {availableUsers.map((u) => (
+                      <SelectItem key={u.id} value={u.username}>
+                        {u.username}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div>
                 <label className="text-sm font-medium mb-1 block">Collection</label>
-                <Input
-                  placeholder="Filter by collection"
-                  value={collectionFilter}
-                  onChange={(e) => setCollectionFilter(e.target.value)}
-                />
+                <Select value={collectionFilter} onValueChange={setCollectionFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All collections" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All collections</SelectItem>
+                    {availableCollections.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="flex items-end">
