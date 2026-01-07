@@ -198,30 +198,127 @@ class RAG:
             return None
 
     def retrieve_chunks(self, query: str, top_k: int = 5, collection_id: Optional[str] = None) -> List[Dict]:
-        """Search vector DB and return top matching chunks with metadata."""
+        """Search vector DB and return top matching chunks with metadata.
+        
+        Includes query expansion for 'who is X' type queries to improve person retrieval.
+        Also applies keyword-based score boosting when the query contains person names.
+        """
+        import logging
+        logger = logging.getLogger("rag")
+        
         # Handle None collection_id properly
         collection_id_str = collection_id if collection_id is not None else None
-        results = self.vector_store.search(query, top_k=top_k, collection_id=collection_id_str)
+        
+        # Query expansion for person-related queries
+        expanded_queries = [query]  # Always include original query
+        person_name = None
+        
+        # Detect "who is X" patterns and expand
+        who_is_pattern = re.match(r"(?:who\s+is|who's|tell\s+me\s+about|information\s+(?:on|about))\s+(.+)", query.lower().strip())
+        if who_is_pattern:
+            person_name = who_is_pattern.group(1).strip().rstrip("?.,!")
+            logger.info(f"[RAG QUERY EXPANSION] Detected person query for: '{person_name}'")
+            
+            # Add expanded queries for better person matching
+            # These are designed to match common patterns in staff directories
+            expanded_queries.extend([
+                person_name,  # Just the name
+                f"{person_name} staff directory contact",  # Staff directory match
+                f"{person_name} email phone",  # Contact info
+                f"staff {person_name}",  # Staff prefix
+                f"{person_name} role title position Senior Analyst",  # Job titles
+            ])
+        
+        # Collect results from all expanded queries
+        all_results = []
+        seen_texts = set()  # For deduplication
+        
+        for i, exp_query in enumerate(expanded_queries):
+            results = self.vector_store.search(exp_query, top_k=top_k * 2, collection_id=collection_id_str)
+            
+            if i == 0:
+                logger.info(f"[RAG RETRIEVE] Original query returned {len(results)} results")
+            else:
+                logger.debug(f"[RAG RETRIEVE] Expanded query '{exp_query}' returned {len(results)} results")
+            
+            for r in results:
+                payload = r.get("payload", {})
+                text = payload.get("text", "")
+                
+                # Deduplicate by text content
+                text_hash = hash(text[:200]) if text else hash("")
+                if text_hash in seen_texts:
+                    continue
+                seen_texts.add(text_hash)
+                
+                # Apply keyword boost for person name matches
+                # This is critical for finding people when semantic similarity is low
+                original_score = r.get("score", 0)
+                boosted_score = original_score
+                
+                if person_name:
+                    text_lower = text.lower()
+                    name_parts = person_name.lower().split()
+                    
+                    # Check for full name match (highest boost)
+                    if person_name.lower() in text_lower:
+                        boosted_score = max(boosted_score, 0.75)
+                        logger.info(f"[RAG BOOST] Full name '{person_name}' found, boosting score from {original_score:.4f} to {boosted_score:.4f}")
+                    # Check for partial name match (first or last name)
+                    elif any(part in text_lower for part in name_parts if len(part) > 2):
+                        matched_parts = [p for p in name_parts if p in text_lower and len(p) > 2]
+                        boosted_score = max(boosted_score, 0.6)
+                        logger.info(f"[RAG BOOST] Partial name '{matched_parts}' found, boosting score from {original_score:.4f} to {boosted_score:.4f}")
+                
+                r["score"] = boosted_score
+                r["original_score"] = original_score
+                all_results.append(r)
+        
+        logger.info(f"[RAG RETRIEVE] Total unique results after expansion: {len(all_results)}")
+        
+        # Sort by score (including boosts) and take top_k
+        all_results.sort(key=lambda x: x.get("score", 0), reverse=True)
+        results = all_results[:top_k]
+        
         chunks_with_sources = []
+        filtered_count = 0
+        
         for r in results:
             payload = r.get("payload", {})
+            score = r.get("score", 0)
 
             if collection_id is not None:
                 payload_collection_id = payload.get("collection_id")
                 if payload_collection_id is None:
                     # Skip chunks that are not explicitly tagged to avoid cross-collection bleed
+                    filtered_count += 1
                     continue
                 if str(payload_collection_id) != str(collection_id):
+                    filtered_count += 1
                     continue
-            chunks_with_sources.append({
+            
+            chunk_data = {
                 "text": payload.get("text", ""),
                 "file_name": payload.get("file_name", "Unknown File"),
                 "file_id": payload.get("file_id", ""),
                 "chunk_index": payload.get("chunk_index", 0),
                 "source_type": payload.get("source_type", "file"),
                 "url": payload.get("url", ""),
-                "canonical_url": payload.get("canonical_url", "")
-            })
+                "canonical_url": payload.get("canonical_url", ""),
+                "score": score  # Include score for debugging
+            }
+            chunks_with_sources.append(chunk_data)
+        
+        if filtered_count > 0:
+            logger.info(f"[RAG RETRIEVE] Filtered {filtered_count} chunks due to collection_id mismatch")
+        
+        logger.info(f"[RAG RETRIEVE] Returning {len(chunks_with_sources)} chunks for query: '{query[:50]}...'")
+        
+        # Log top chunks for debugging
+        for i, chunk in enumerate(chunks_with_sources[:3]):
+            text_preview = chunk["text"][:80].replace("\n", " ") if chunk["text"] else ""
+            logger.debug(f"[RAG RETRIEVE] Chunk {i+1} (score={chunk.get('score', 0):.4f}): {text_preview}...")
+        
         return chunks_with_sources
 
     def _resolve_prompt_settings(self, collection_id: Optional[str] = None):

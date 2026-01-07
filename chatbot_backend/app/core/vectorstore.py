@@ -264,8 +264,82 @@ class VectorStore:
             logger.debug(f"Retrieved {len(results)} chunks for crawl job {crawl_job_id} from memory")
             return results
 
-    def search(self, query: str, top_k: int = 5, collection_id: Optional[str] = None):
+    def iter_documents_by_crawl_job_id(self, crawl_job_id: str, batch_size: int = 100):
+        """
+        Generator that yields document chunks for a crawl job in batches.
+        This is memory-efficient for large exports as it doesn't accumulate all results.
+        
+        Yields:
+            list: Batches of document dicts with 'id' and 'payload' keys
+        """
+        if self.client:
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            try:
+                offset = None
+                total_yielded = 0
+                while True:
+                    response = self.client.scroll(
+                        collection_name=self.collection_name,
+                        scroll_filter=Filter(
+                            must=[
+                                FieldCondition(
+                                    key="crawl_job_id",
+                                    match=MatchValue(value=crawl_job_id)
+                                )
+                            ]
+                        ),
+                        limit=batch_size,
+                        offset=offset,
+                        with_payload=True,
+                        with_vectors=False
+                    )
+                    points, offset = response
+                    if not points:
+                        break
+                    
+                    batch = [{
+                        "id": str(p.id),
+                        "payload": p.payload
+                    } for p in points]
+                    total_yielded += len(batch)
+                    yield batch
+                    
+                    if offset is None:
+                        break
+                
+                logger.debug(f"Streamed {total_yielded} chunks for crawl job {crawl_job_id} from Qdrant")
+            except Exception as e:
+                logger.error(f"Failed to iterate documents by crawl_job_id: {e}")
+                return
+        else:
+            # For fallback storage - yield in batches
+            batch = []
+            for doc_id, doc_data in self.documents.items():
+                if doc_data["payload"].get("crawl_job_id") == crawl_job_id:
+                    batch.append({
+                        "id": doc_id,
+                        "payload": doc_data["payload"]
+                    })
+                    if len(batch) >= batch_size:
+                        yield batch
+                        batch = []
+            if batch:
+                yield batch
+            logger.debug(f"Streamed chunks for crawl job {crawl_job_id} from memory")
+
+    def search(self, query: str, top_k: int = 5, collection_id: Optional[str] = None, score_threshold: float = 0.0):
+        """
+        Search for similar documents.
+        
+        Args:
+            query: Search query text
+            top_k: Number of results to return
+            collection_id: Optional collection filter
+            score_threshold: Minimum similarity score (0.0 = no filtering)
+        """
         query_vector = self.embeddings.encode(query)
+        
+        logger.info(f"[RAG SEARCH] Query: '{query}' | top_k={top_k} | collection_id={collection_id}")
         
         if self.client:
             # Use Qdrant
@@ -285,23 +359,37 @@ class VectorStore:
                             )
                         ]
                     )
+                    logger.debug(f"[RAG SEARCH] Applied collection filter: {collection_id}")
                 except Exception as filter_error:
                     logger.warning(f"Failed to apply collection filter: {filter_error}")
 
             results = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_vector.tolist(),
-                limit=top_k,
+                limit=top_k * 2,  # Fetch extra to allow score filtering
                 query_filter=qdrant_filter
             )
-            try:
-                payload_collections = [r.payload.get("collection_id") for r in results[:5]]
-                logger.debug(
-                    f"[QDRANT SEARCH] filter={collection_id} returned {len(results)} results, sample collections={payload_collections}"
-                )
-            except Exception as log_error:
-                logger.warning(f"[QDRANT SEARCH] Failed to log payload collections: {log_error}")
-            return [{"payload": r.payload, "score": r.score} for r in results]
+            
+            # Enhanced logging for debugging retrieval issues
+            logger.info(f"[RAG SEARCH] Qdrant returned {len(results)} raw results")
+            
+            # Log top results with scores and text snippets
+            for i, r in enumerate(results[:5]):
+                text_snippet = r.payload.get("text", "")[:100].replace("\n", " ")
+                file_name = r.payload.get("file_name", "unknown")
+                source_type = r.payload.get("source_type", "file")
+                logger.info(f"[RAG SEARCH] Result {i+1}: score={r.score:.4f} | source={source_type} | file={file_name}")
+                logger.debug(f"[RAG SEARCH] Result {i+1} text: {text_snippet}...")
+            
+            # Apply score threshold filter
+            filtered_results = [r for r in results if r.score >= score_threshold]
+            if len(filtered_results) < len(results):
+                logger.info(f"[RAG SEARCH] Filtered {len(results) - len(filtered_results)} results below score threshold {score_threshold}")
+            
+            # Take top_k after filtering
+            final_results = filtered_results[:top_k]
+            
+            return [{"payload": r.payload, "score": r.score} for r in final_results]
         else:
             # Use fallback: simple cosine similarity
             import numpy as np

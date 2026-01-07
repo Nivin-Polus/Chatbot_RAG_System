@@ -657,7 +657,7 @@ async def download_file(
         else:
             raise HTTPException(status_code=403, detail="Invalid role")
         
-        # Build export data from crawl job
+        # Build export data from crawl job metadata
         export_data = {
             "job_id": job.job_id,
             "target_url": job.target_url,
@@ -676,50 +676,6 @@ async def download_file(
             "skipped_urls": job.skipped_urls or [],
         }
         
-        # Fetch actual crawled content from vector store
-        try:
-            vector_store = get_vector_store()
-            chunks = vector_store.get_documents_by_crawl_job_id(job_id)
-            
-            # Organize chunks by source URL
-            content_by_url = {}
-            for chunk in chunks:
-                payload = chunk.get("payload", {})
-                source_url = payload.get("source_url", "unknown")
-                text = payload.get("text", "")
-                title = payload.get("page_title", "")
-                chunk_index = payload.get("chunk_index", 0)
-                
-                if source_url not in content_by_url:
-                    content_by_url[source_url] = {
-                        "title": title,
-                        "url": source_url,
-                        "chunks": []
-                    }
-                
-                content_by_url[source_url]["chunks"].append({
-                    "chunk_index": chunk_index,
-                    "text": text
-                })
-            
-            # Sort chunks within each URL by chunk_index
-            for url_data in content_by_url.values():
-                url_data["chunks"].sort(key=lambda x: x.get("chunk_index", 0))
-            
-            # Add crawled content to export
-            export_data["crawled_content"] = list(content_by_url.values())
-            export_data["total_chunks_exported"] = len(chunks)
-            
-            logger.info(f"Exported {len(chunks)} chunks from {len(content_by_url)} pages for crawl job {job_id}")
-        except Exception as e:
-            logger.warning(f"Failed to fetch crawled content from vector store: {e}")
-            export_data["crawled_content"] = []
-            export_data["content_export_error"] = str(e)
-        
-        # Create JSON response
-        json_content = json.dumps(export_data, indent=2, ensure_ascii=False)
-        json_bytes = json_content.encode('utf-8')
-        
         # Generate filename from target URL
         from urllib.parse import urlparse
         parsed_url = urlparse(job.target_url)
@@ -730,8 +686,86 @@ async def download_file(
             "Content-Disposition": f'attachment; filename="{filename}"'
         }
         
-        logger.info(f"User {username} downloading crawl job {job_id} as JSON")
-        return StreamingResponse(iter([json_bytes]), media_type="application/json", headers=headers)
+        # Use streaming JSON generator for memory-efficient downloads
+        async def stream_crawl_json():
+            """Generator that streams JSON content without loading all chunks into memory."""
+            # Start JSON object
+            yield '{\n'
+            
+            # Write metadata fields first
+            metadata_fields = ["job_id", "target_url", "status", "pages_discovered", 
+                             "pages_crawled", "pages_skipped", "pages_failed", 
+                             "chunks_created", "total_characters", "created_at", 
+                             "started_at", "completed_at", "crawled_urls", 
+                             "failed_urls", "skipped_urls"]
+            
+            for i, field in enumerate(metadata_fields):
+                value = export_data.get(field)
+                json_value = json.dumps(value, ensure_ascii=False)
+                yield f'  "{field}": {json_value}'
+                yield ',\n'
+            
+            # Stream crawled content array
+            yield '  "crawled_content": [\n'
+            
+            try:
+                vector_store = get_vector_store()
+                content_by_url = {}
+                total_chunks = 0
+                
+                # Process chunks in batches using the iterator
+                for batch in vector_store.iter_documents_by_crawl_job_id(job_id, batch_size=100):
+                    for chunk in batch:
+                        payload = chunk.get("payload", {})
+                        source_url = payload.get("source_url", "unknown")
+                        text = payload.get("text", "")
+                        title = payload.get("page_title", "")
+                        chunk_index = payload.get("chunk_index", 0)
+                        
+                        if source_url not in content_by_url:
+                            content_by_url[source_url] = {
+                                "title": title,
+                                "url": source_url,
+                                "chunks": []
+                            }
+                        
+                        content_by_url[source_url]["chunks"].append({
+                            "chunk_index": chunk_index,
+                            "text": text
+                        })
+                        total_chunks += 1
+                
+                # Sort chunks within each URL and stream the results
+                url_list = list(content_by_url.values())
+                for url_data in url_list:
+                    url_data["chunks"].sort(key=lambda x: x.get("chunk_index", 0))
+                
+                # Stream each page's content
+                for i, page_data in enumerate(url_list):
+                    page_json = json.dumps(page_data, indent=4, ensure_ascii=False)
+                    # Indent each line for proper formatting
+                    indented = '\n'.join('    ' + line for line in page_json.split('\n'))
+                    yield indented
+                    if i < len(url_list) - 1:
+                        yield ',\n'
+                    else:
+                        yield '\n'
+                
+                yield '  ],\n'
+                yield f'  "total_chunks_exported": {total_chunks}\n'
+                
+                logger.info(f"Streamed {total_chunks} chunks from {len(url_list)} pages for crawl job {job_id}")
+                
+            except Exception as e:
+                logger.warning(f"Failed to stream crawled content from vector store: {e}")
+                yield '  ],\n'
+                yield f'  "content_export_error": {json.dumps(str(e))}\n'
+            
+            # Close JSON object
+            yield '}\n'
+        
+        logger.info(f"User {username} streaming crawl job {job_id} as JSON")
+        return StreamingResponse(stream_crawl_json(), media_type="application/json", headers=headers)
     
     # Try to find by file_id first (for regular files)
     file_metadata = db.query(FileMetadata).filter(FileMetadata.file_id == identifier).first()

@@ -360,7 +360,8 @@ class ContentExtractor:
     def _extract_table_text(self, table: Tag) -> str:
         """
         Extract table content as structured text.
-        Special handling for person/contact tables to create semantically rich text.
+        Special handling for person/contact tables to create semantically rich text
+        that is optimized for RAG retrieval of person queries like "who is X".
         """
         rows = []
         
@@ -421,7 +422,7 @@ class ContentExtractor:
             if not cells or not any(cells):
                 continue
             
-            # For person tables, create natural language descriptions
+            # For person tables, create multiple natural language sentences optimized for semantic search
             if is_person_table and len(cells) >= 2:
                 name = cells[name_idx] if name_idx is not None and name_idx < len(cells) else None
                 title = cells[title_idx] if title_idx is not None and title_idx < len(cells) else None
@@ -429,26 +430,42 @@ class ContentExtractor:
                 phone = cells[phone_idx] if phone_idx is not None and phone_idx < len(cells) else None
                 address = cells[address_idx] if address_idx is not None and address_idx < len(cells) else None
                 
-                # Build person-friendly description
-                parts = []
                 if name:
+                    # Create multiple natural language sentences for better semantic matching
+                    person_sentences = []
+                    
+                    # Main identity sentence - critical for "who is X" queries
                     if title:
-                        parts.append(f"{name} is a {title}")
+                        person_sentences.append(f"{name} works as a {title}.")
+                        person_sentences.append(f"{name} is a {title}.")
+                        # Add first name only variant for queries like "who is Pedro"
+                        first_name = name.split()[0] if name else ""
+                        if first_name and first_name != name:
+                            person_sentences.append(f"{first_name} ({name}) is a {title}.")
                     else:
-                        parts.append(f"{name}")
+                        person_sentences.append(f"{name} is a team member.")
                     
-                    contact_parts = []
+                    # Contact information sentences
                     if email:
-                        contact_parts.append(f"email: {email}")
+                        person_sentences.append(f"You can contact {name} via email at {email}.")
                     if phone:
-                        contact_parts.append(f"phone: {phone}")
+                        person_sentences.append(f"The phone number for {name} is {phone}.")
                     if address:
-                        contact_parts.append(f"location: {address}")
+                        person_sentences.append(f"{name} is located at {address}.")
                     
-                    if contact_parts:
-                        parts.append(f"Contact: {', '.join(contact_parts)}")
+                    # Combined summary for dense retrieval
+                    summary_parts = [f"{name}"]
+                    if title:
+                        summary_parts.append(f"({title})")
+                    if email:
+                        summary_parts.append(f"- Email: {email}")
+                    if phone:
+                        summary_parts.append(f"- Phone: {phone}")
+                    if address:
+                        summary_parts.append(f"- Location: {address}")
+                    person_sentences.append(" ".join(summary_parts))
                     
-                    rows.append(' | '.join(parts) if len(parts) > 1 else parts[0])
+                    rows.append(" ".join(person_sentences))
                 else:
                     # Fallback to standard format
                     if headers and len(cells) == len(headers):

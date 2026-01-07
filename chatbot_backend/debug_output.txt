@@ -1,0 +1,192 @@
+WARNING:vectorstore_logger:[DEBUG] collection_exists check failed: 'QdrantClient' object has no attribute 'collection_exists'
+INFO:httpx:HTTP Request: PUT http://13.201.217.104:6333/collections/kb_docs "HTTP/1.1 400 Bad Request"
+INFO:sentence_transformers.SentenceTransformer:Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+INFO:sentence_transformers.SentenceTransformer:Use pytorch device_name: cpu
+============================================================
+Searching for 'pedro viejo'...
+
+Batches:   0%|          | 0/1 [00:00<?, ?it/s]
+Batches: 100%|##########| 1/1 [00:00<00:00,  1.43it/s]
+Batches: 100%|##########| 1/1 [00:00<00:00,  1.43it/s]
+INFO:vectorstore_logger:[RAG SEARCH] Query: 'pedro viejo' | top_k=10 | collection_id=None
+INFO:httpx:HTTP Request: POST http://13.201.217.104:6333/collections/kb_docs/points/search "HTTP/1.1 200 OK"
+INFO:vectorstore_logger:[RAG SEARCH] Qdrant returned 20 raw results
+INFO:vectorstore_logger:[RAG SEARCH] Result 1: score=0.2389 | source=web_crawl | file=A Third Update on Research Administration - MIT Faculty Newsletter
+INFO:vectorstore_logger:[RAG SEARCH] Result 2: score=0.2328 | source=web_crawl | file=Lincoln Laboratory leadership transition | MIT Organization Chart
+INFO:vectorstore_logger:[RAG SEARCH] Result 3: score=0.2083 | source=web_crawl | file=What We Do | MIT Office of the Vice President for Research
+INFO:vectorstore_logger:[RAG SEARCH] Result 4: score=0.2005 | source=web_crawl | file=Resources for postdocs | MIT Organization Chart
+INFO:vectorstore_logger:[RAG SEARCH] Result 5: score=0.1919 | source=web_crawl | file=Compositions Systems and Methods for Generating Inner Ear Hair Cells for Treatment of Hearing Loss | MIT Technology Licensing Office
+Found 10 results
+
+1. Score: 0.2389
+   Collection: col_b072f5cc
+   Source: web_crawl
+   File: A Third Update on Research Administration - MIT Faculty Newsletter
+   Text: Sally Haslanger , Jonathan A. King , Ceasar McDowell , Nasser Rabbat , Balakrishnan Rajagopal  Sally Haslanger , Jonathan A. King , Ceasar McDowell , Nasser Rabbat , Balakrishnan Rajagopal  November/December 2023 Vol. XXXVI No. 2...
+
+2. Score: 0.2328
+   Collection: col_b072f5cc
+   Source: web_crawl
+   File: Lincoln Laboratory leadership transition | MIT Organization Chart
+   Text: Section: The search for a successor  I will shortly appoint a search committee to advise me on the selection of the next director of Lincoln Laboratory. The committee will be chaired by Professor and Media Lab Director Dava Newman. I welcome your input and ideas regarding the best candidates for thi...
+
+3. Score: 0.2083
+   Collection: col_b072f5cc
+   Source: web_crawl
+   File: What We Do | MIT Office of the Vice President for Research
+
+   Text: Section: Resources and Services  The Office of the Vice President for Research also supports research computing, postdoctoral scholars, and international scholars.  ò Office of Research Computing and Data (ORCD) ò Postdoctoral Services ò International Scholars Office (ISchO)...
+
+4. Score: 0.2005
+   Collection: col_b072f5cc
+   Source: web_crawl
+   File: Resources for postdocs | MIT Organization Chart
+   Text: Section: Resources for postdocs  You can also reach out directly to Ann Skoczenski , director of MIT Postdoctoral Services , to ask for help. Sincerely, Ian A. Waitz Vice President for Research...
+
+5. Score: 0.1919
+   Collection: col_b072f5cc
+   Source: web_crawl
+   File: Compositions Systems and Methods for Generating Inner Ear Hair Cells for Treatment of Hearing Loss | MIT Technology Licensing Office
+   Text: Section: Optimized Alum-Anchored HIV EnvImmunogens  Darrell J Irvine / William Schief / Jon Steichen / Christopher Cottrell / Kristen Rodrigues  Drug Delivery / Drug Discovery and Research Tools / Therapeutics...
+
+6. Score: 0.1767
+   Collection: col_b072f5cc
+   Source: web_crawl
+   File: John Marshall and Erin Kara receive postdoctoral mentoring award | MIT News | Massachusetts Institute of Technology
+   Text: Section: Press Contact:  Caroline                      Perry  MIT Office of the Vice President for Research  Shining a light on the critical role of mentors in a postdocÆs career, the MIT Postdoctoral Association presented the fourth annual Excellence in Postdoctoral Mentoring Awards to professors J...
+
+7. Score: 0.1747
+   Collection: col_b072f5cc
+   Source: web_crawl
+   File: News and Announcements | MIT Office of the Vice President for Research
+   Text: Section: Letter: Changes to administration of visiting students  Ian A. Waitz and Maria T. Zuber  Updating contacts and resources, as administration of theávisiting students programámoves from the Office of the Vice President for Research (OVPR) to the Office of the Vice Chancellor (OVC)....
+
+8. Score: 0.1730
+   Collection: col_b072f5cc
+   Source: web_crawl
+   File: Diazene Directed Modular Synthesis of Oligocyclotryptamines | MIT Technology Licensing Office
+   Text: Section: Researchers  Mo Movassaghi /                Petra Lindovska  Departments: Department of Chemistry  Technology Areas: Biotechnology: Biomanufacturing  / Chemicals & Materials: Catalysis & Synthesis  / Therapeutics: Small Molecules  Impact Areas: Healthy Living , Uncharted Frontiers , Advance...
+
+9. Score: 0.1726
+   Collection: col_b072f5cc
+   Source: web_crawl
+   File: Convergent and Biomimetic Enantioselective Total Synthesis of (-)-Communesin F | MIT Technology Licensing Office
+   Text: Section: Researchers  Mo Movassaghi /                Wen-Tau Chang  /                Matthew Pompeo  /                Stephen Lathrop  Departments: Department of Chemistry  Technology Areas: Chemicals & Materials: Catalysis & Synthesis  / Therapeutics: Small Molecules  ò convergent and enantioselect...
+
+10. Score: 0.1724
+   Collection: col_b072f5cc
+   Source: web_crawl
+   File: Streptococcus Canis Cas9 for Tunable Genome Engineering and Regulation | MIT Technology Licensing Office
+   Text: Section: Publications  Pranam Chatterjee, Noah Jakimo, and Joseph M. Jacobson. "Divergent PAM Specificity of a Highly-Similar SpCas9 Ortholog." doi: https://doi.org/10.1101/258939 ....
+
+============================================================
+Searching for 'pedro'...
+Batches:   0%|          | 0/1 [00:00<?, ?it/s]
+Batches: 100%|##########| 1/1 [00:00<00:00, 124.52it/s]
+INFO:vectorstore_logger:[RAG SEARCH] Query: 'pedro' | top_k=5 | collection_id=None
+INFO:httpx:HTTP Request: POST http://13.201.217.104:6333/collections/kb_docs/points/search "HTTP/1.1 200 OK"
+INFO:vectorstore_logger:[RAG SEARCH] Qdrant returned 10 raw results
+INFO:vectorstore_logger:[RAG SEARCH] Result 1: score=0.2006 | source=web_crawl | file=Financial Transactions | MIT Office of the Vice President for Research
+INFO:vectorstore_logger:[RAG SEARCH] Result 2: score=0.1977 | source=web_crawl | file=Diazene Directed Modular Synthesis of Oligocyclotryptamines | MIT Technology Licensing Office
+INFO:vectorstore_logger:[RAG SEARCH] Result 3: score=0.1921 | source=web_crawl | file=Diazene Directed Modular Synthesis of Oligocyclotryptamines | MIT Technology Licensing Office
+INFO:vectorstore_logger:[RAG SEARCH] Result 4: score=0.1880 | source=web_crawl | file=Diazene Directed Modular Synthesis of Oligocyclotryptamines | MIT Technology Licensing Office
+INFO:vectorstore_logger:[RAG SEARCH] Result 5: score=0.1857 | source=web_crawl | file=Compositions Systems and Methods for Generating Inner Ear Hair Cells for Treatment of Hearing Loss | MIT Technology Licensing Office
+Found 5 results
+
+============================================================
+Searching for text containing 'Pedro'...
+
+Batches:   0%|          | 0/1 [00:00<?, ?it/s]
+Batches: 100%|##########| 1/1 [00:00<00:00, 97.54it/s]
+INFO:vectorstore_logger:[RAG SEARCH] Query: 'Senior Business Analyst person contact' | top_k=10 | collection_id=None
+INFO:httpx:HTTP Request: POST http://13.201.217.104:6333/collections/kb_docs/points/search "HTTP/1.1 200 OK"
+INFO:vectorstore_logger:[RAG SEARCH] Qdrant returned 20 raw results
+INFO:vectorstore_logger:[RAG SEARCH] Result 1: score=0.4968 | source=web_crawl | file=Kuali Coeus Electronic Document Storage (EDS) | MIT Research Administration Services
+INFO:vectorstore_logger:[RAG SEARCH] Result 2: score=0.4968 | source=web_crawl | file=Kuali Coeus Electronic Document Storage (EDS) | MIT Research Administration Services
+INFO:vectorstore_logger:[RAG SEARCH] Result 3: score=0.4968 | source=web_crawl | file=Kuali Coeus Electronic Document Storage (EDS) | MIT Research Administration Services
+INFO:vectorstore_logger:[RAG SEARCH] Result 4: score=0.4968 | source=web_crawl | file=Kuali Coeus Electronic Document Storage (EDS) | MIT Research Administration Services
+INFO:vectorstore_logger:[RAG SEARCH] Result 5: score=0.4808 | source=web_crawl | file=Staff Directory | MIT Office of the Vice President for Research
+Found Pedro in result 5!
+   Score: 0.4808
+   Collection: col_b072f5cc
+   Text: Section: Research Administration
+
+Associate Director of Licensing
+
+Associate Director of Intellectual Property
+
+Associate Director of Operations
+
+Associate Director of Licensing
+
+Refer to the full TLO staff directory for additional contacts. ò Title Name Address Email Phone Senior Director of Cost Analysis Kimberly Croft NE18-901 kcroft@mit.edu 258-5565 Senior Cost Analyst Joseph Foley NE18-901 jo...
+Found Pedro in result 6!
+   Score: 0.4808
+   Collection: col_b072f5cc
+   Text: Section: Research Administration
+
+Associate Director of Licensing
+
+Associate Director of Intellectual Property
+
+Associate Director of Operations
+
+Associate Director of Licensing
+
+Refer to the full TLO staff directory for additional contacts. ò Title Name Address Email Phone Senior Director of Cost Analysis Kimberly Croft NE18-901 kcroft@mit.edu 258-5565 Senior Cost Analyst Joseph Foley NE18-901 jo...
+Found Pedro in result 7!
+   Score: 0.4808
+   Collection: col_b072f5cc
+   Text: Section: Research Administration
+
+Associate Director of Licensing
+
+Associate Director of Intellectual Property
+
+Associate Director of Operations
+
+Associate Director of Licensing
+
+Refer to the full TLO staff directory for additional contacts. ò Title Name Address Email Phone Senior Director of Cost Analysis Kimberly Croft NE18-901 kcroft@mit.edu 258-5565 Senior Cost Analyst Joseph Foley NE18-901 jo...
+Found Pedro in result 8!
+   Score: 0.4808
+   Collection: col_b072f5cc
+   Text: Section: Research Administration
+
+Associate Director of Licensing
+
+Associate Director of Intellectual Property
+
+Associate Director of Operations
+
+Associate Director of Licensing
+
+Refer to the full TLO staff directory for additional contacts. ò Title Name Address Email Phone Senior Director of Cost Analysis Kimberly Croft NE18-901 kcroft@mit.edu 258-5565 Senior Cost Analyst Joseph Foley NE18-901 jo...
+Found Pedro in result 9!
+   Score: 0.4808
+   Collection: col_b072f5cc
+   Text: Section: Research Administration
+
+Associate Director of Licensing
+
+Associate Director of Intellectual Property
+
+Associate Director of Operations
+
+Associate Director of Licensing
+
+Refer to the full TLO staff directory for additional contacts. ò Title Name Address Email Phone Senior Director of Cost Analysis Kimberly Croft NE18-901 kcroft@mit.edu 258-5565 Senior Cost Analyst Joseph Foley NE18-901 jo...
+Found Pedro in result 10!
+   Score: 0.4808
+   Collection: col_b072f5cc
+   Text: Section: Research Administration
+
+Associate Director of Licensing
+
+Associate Director of Intellectual Property
+
+Associate Director of Operations
+
+Associate Director of Licensing
+
+Refer to the full TLO staff directory for additional contacts. ò Title Name Address Email Phone Senior Director of Cost Analysis Kimberly Croft NE18-901 kcroft@mit.edu 258-5565 Senior Cost Analyst Joseph Foley NE18-901 jo...

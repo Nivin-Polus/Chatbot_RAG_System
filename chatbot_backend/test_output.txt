@@ -1,0 +1,101 @@
+INFO:rag:[RAG QUERY EXPANSION] Detected person query for: 'pedro'
+WARNING:vectorstore_logger:[DEBUG] collection_exists check failed: 'QdrantClient' object has no attribute 'collection_exists'
+INFO:httpx:HTTP Request: PUT http://13.201.217.104:6333/collections/kb_docs "HTTP/1.1 400 Bad Request"
+INFO:sentence_transformers.SentenceTransformer:Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+INFO:sentence_transformers.SentenceTransformer:Use pytorch device_name: cpu
+============================================================
+Testing: 'who is pedro'
+============================================================
+
+Batches:   0%|          | 0/1 [00:00<?, ?it/s]
+Batches: 100%|##########| 1/1 [00:00<00:00,  1.43it/s]
+Batches: 100%|##########| 1/1 [00:00<00:00,  1.43it/s]
+INFO:vectorstore_logger:[RAG SEARCH] Query: 'who is pedro' | top_k=10 | collection_id=None
+INFO:httpx:HTTP Request: POST http://13.201.217.104:6333/collections/kb_docs/points/search "HTTP/1.1 200 OK"
+INFO:vectorstore_logger:[RAG SEARCH] Qdrant returned 20 raw results
+INFO:vectorstore_logger:[RAG SEARCH] Result 1: score=0.2241 | source=web_crawl | file=Financial Transactions | MIT Office of the Vice President for Research
+INFO:vectorstore_logger:[RAG SEARCH] Result 2: score=0.2154 | source=web_crawl | file=Diazene Directed Modular Synthesis of Oligocyclotryptamines | MIT Technology Licensing Office
+INFO:vectorstore_logger:[RAG SEARCH] Result 3: score=0.2094 | source=web_crawl | file=Diazene Directed Modular Synthesis of Oligocyclotryptamines | MIT Technology Licensing Office
+INFO:vectorstore_logger:[RAG SEARCH] Result 4: score=0.2064 | source=web_crawl | file=Diazene Directed Modular Synthesis of Oligocyclotryptamines | MIT Technology Licensing Office
+INFO:vectorstore_logger:[RAG SEARCH] Result 5: score=0.1902 | source=web_crawl | file=Engineering a Swine Macro-Organ Colorectal Cancer Platform to Combat Transport-Induced Chemotherapy Resistance | MIT Technology Licensing Office
+INFO:rag:[RAG RETRIEVE] Original query returned 10 results
+
+Batches:   0%|          | 0/1 [00:00<?, ?it/s]
+Batches: 100%|##########| 1/1 [00:00<00:00, 140.99it/s]
+INFO:vectorstore_logger:[RAG SEARCH] Query: 'pedro' | top_k=10 | collection_id=None
+INFO:httpx:HTTP Request: POST http://13.201.217.104:6333/collections/kb_docs/points/search "HTTP/1.1 200 OK"
+INFO:vectorstore_logger:[RAG SEARCH] Qdrant returned 20 raw results
+INFO:vectorstore_logger:[RAG SEARCH] Result 1: score=0.2006 | source=web_crawl | file=Financial Transactions | MIT Office of the Vice President for Research
+INFO:vectorstore_logger:[RAG SEARCH] Result 2: score=0.1977 | source=web_crawl | file=Diazene Directed Modular Synthesis of Oligocyclotryptamines | MIT Technology Licensing Office
+INFO:vectorstore_logger:[RAG SEARCH] Result 3: score=0.1921 | source=web_crawl | file=Diazene Directed Modular Synthesis of Oligocyclotryptamines | MIT Technology Licensing Office
+INFO:vectorstore_logger:[RAG SEARCH] Result 4: score=0.1880 | source=web_crawl | file=Diazene Directed Modular Synthesis of Oligocyclotryptamines | MIT Technology Licensing Office
+INFO:vectorstore_logger:[RAG SEARCH] Result 5: score=0.1857 | source=web_crawl | file=Compositions Systems and Methods for Generating Inner Ear Hair Cells for Treatment of Hearing Loss | MIT Technology Licensing Office
+
+Batches:   0%|          | 0/1 [00:00<?, ?it/s]
+Batches: 100%|##########| 1/1 [00:00<00:00, 146.75it/s]
+INFO:vectorstore_logger:[RAG SEARCH] Query: 'pedro staff directory contact' | top_k=10 | collection_id=None
+INFO:httpx:HTTP Request: POST http://13.201.217.104:6333/collections/kb_docs/points/search "HTTP/1.1 200 OK"
+INFO:vectorstore_logger:[RAG SEARCH] Qdrant returned 20 raw results
+INFO:vectorstore_logger:[RAG SEARCH] Result 1: score=0.4050 | source=web_crawl | file=RAS Assignments by Department | MIT Research Administration Services
+INFO:vectorstore_logger:[RAG SEARCH] Result 2: score=0.4050 | source=web_crawl | file=RAS Assignments by Department | MIT Research Administration Services
+INFO:vectorstore_logger:[RAG SEARCH] Result 3: score=0.4032 | source=web_crawl | file=RAS Assignments by Department | MIT Research Administration Services
+INFO:vectorstore_logger:[RAG SEARCH] Result 4: score=0.4032 | source=web_crawl | file=RAS Assignments by Department | MIT Research Administration Services
+INFO:vectorstore_logger:[RAG SEARCH] Result 5: score=0.4032 | source=web_crawl | file=RAS Assignments by Department | MIT Research Administration Services
+
+Batches:   0%|          | 0/1 [00:00<?, ?it/s]
+Batches: 100%|##########| 1/1 [00:00<00:00, 177.76it/s]
+INFO:vectorstore_logger:[RAG SEARCH] Query: 'pedro email phone' | top_k=10 | collection_id=None
+INFO:httpx:HTTP Request: POST http://13.201.217.104:6333/collections/kb_docs/points/search "HTTP/1.1 200 OK"
+INFO:vectorstore_logger:[RAG SEARCH] Qdrant returned 20 raw results
+INFO:vectorstore_logger:[RAG SEARCH] Result 1: score=0.2972 | source=web_crawl | file=Staff Directory | MIT Office of the Vice President for Research
+INFO:vectorstore_logger:[RAG SEARCH] Result 2: score=0.2915 | source=web_crawl | file=Bill Green to direct MIT Energy Initiative
+INFO:vectorstore_logger:[RAG SEARCH] Result 3: score=0.2812 | source=web_crawl | file=https://ras.mit.edu/document/osp-service-tracker-ost-guidelines-dlc-users
+INFO:vectorstore_logger:[RAG SEARCH] Result 4: score=0.2593 | source=web_crawl | file=https://ras.mit.edu/document/proposal-submission-methods-flowchart
+INFO:vectorstore_logger:[RAG SEARCH] Result 5: score=0.2593 | source=web_crawl | file=https://ras.mit.edu/document/noaa-proposal-checklist-december-2022
+
+Batches:   0%|          | 0/1 [00:00<?, ?it/s]
+Batches: 100%|##########| 1/1 [00:00<00:00, 133.82it/s]
+INFO:vectorstore_logger:[RAG SEARCH] Query: 'staff pedro' | top_k=10 | collection_id=None
+INFO:httpx:HTTP Request: POST http://13.201.217.104:6333/collections/kb_docs/points/search "HTTP/1.1 200 OK"
+INFO:vectorstore_logger:[RAG SEARCH] Qdrant returned 20 raw results
+INFO:vectorstore_logger:[RAG SEARCH] Result 1: score=0.2722 | source=web_crawl | file=Lincoln Laboratory leadership transition | MIT Organization Chart
+INFO:vectorstore_logger:[RAG SEARCH] Result 2: score=0.2556 | source=web_crawl | file=News and Announcements | MIT Office of the Vice President for Research
+INFO:vectorstore_logger:[RAG SEARCH] Result 3: score=0.2506 | source=web_crawl | file=News and Announcements | MIT Office of the Vice President for Research
+INFO:vectorstore_logger:[RAG SEARCH] Result 4: score=0.2449 | source=web_crawl | file=WhatÆs New in VPR Research Administration | MIT Office of the Vice President for Research
+INFO:vectorstore_logger:[RAG SEARCH] Result 5: score=0.2449 | source=web_crawl | file=A Two-Phase Gripper to Reorient and Grasp | MIT Technology Licensing Office
+
+Batches:   0%|          | 0/1 [00:00<?, ?it/s]
+Batches: 100%|##########| 1/1 [00:00<00:00, 141.30it/s]
+INFO:vectorstore_logger:[RAG SEARCH] Query: 'pedro role title position Senior Analyst' | top_k=10 | collection_id=None
+INFO:httpx:HTTP Request: POST http://13.201.217.104:6333/collections/kb_docs/points/search "HTTP/1.1 200 OK"
+INFO:vectorstore_logger:[RAG SEARCH] Qdrant returned 20 raw results
+INFO:vectorstore_logger:[RAG SEARCH] Result 1: score=0.3381 | source=web_crawl | file=WhatÆs New in VPR Research Administration | MIT Office of the Vice President for Research
+INFO:vectorstore_logger:[RAG SEARCH] Result 2: score=0.3353 | source=web_crawl | file=Lincoln Laboratory leadership transition | MIT Organization Chart
+INFO:vectorstore_logger:[RAG SEARCH] Result 3: score=0.2857 | source=web_crawl | file=News and Announcements | MIT Office of the Vice President for Research
+INFO:vectorstore_logger:[RAG SEARCH] Result 4: score=0.2816 | source=web_crawl | file=Research Council | MIT Office of the Vice President for Research
+INFO:vectorstore_logger:[RAG SEARCH] Result 5: score=0.2793 | source=web_crawl | file=Staff Directory | MIT Office of the Vice President for Research
+INFO:rag:[RAG BOOST] Full name 'pedro' found, boosting score from 0.2793 to 0.7500
+INFO:rag:[RAG RETRIEVE] Total unique results after expansion: 34
+INFO:rag:[RAG RETRIEVE] Returning 5 chunks for query: 'who is pedro...'
+
+Found 5 chunks
+
+1. Score: 0.7500 
+   File: Staff Directory | MIT Office of the Vice President for Research
+   Text: Section: Research Administration  Associate Director of Licensing  Associate Director of Intellectual Property  Associate Director of Operations  Associate Director of Licensing  Refer to the full TLO staff directory for additional contacts. ò Title Name Address Email Phone Senior Director of Cost A...
+
+2. Score: 0.4050 
+   File: RAS Assignments by Department | MIT Research Administration Services
+   Text: Section: RAS Assignments by Department  McGonagle | Phone: 617-258-8017 Department: MTL/RLE PIs Bryce/Coary Team | CodeSort ascending: 268001 | Administrator: Louise Tanguay-Ricker | Phone: 617-253-3884 Department: RLE - Sheehan / Marte Team | CodeSort ascending: 267600 | Administrator: Katrina McCa...
+
+3. Score: 0.4032 
+   File: RAS Assignments by Department | MIT Research Administration Services
+   Text: Section: RAS Assignments by Department  McGonagle | Phone: 617-258-8017 DepartmentSort ascending: RLE Jaga Purevsuren/Coary Team | Code: 268006 | Administrator: Louise Tanguay-Ricker | Phone: 617-253-3884 DepartmentSort ascending: RLE - Wentworth / Coary Team | Code: 267400 | Administrator: Louise T...
+
+4. Score: 0.3944 
+   File: RAS Assignments by Administrator | MIT Research Administration Services
+   Text: Section: RAS Assignments by Administrator  McGonagle | Department: RLE - Keke Xu / Coary Team | CodeSort ascending: 268005 | Phone: 617-258-8017 Administrator: Louise Tanguay-Ricker | Department: MTL/RLE PIs Bryce/Coary Team | CodeSort ascending: 268001 | Phone: 617-253-3884 Administrator: Katrina M...
+
+5. Score: 0.3925 
+   File: Staff Directory | MIT Office of the Vice President for Research
+   Text: Section: Resources and Services  ò Title Name Address Email Phone Director, ISchO Penny Rosser E18-209 pennysun@mit.edu -- Assistant Director Amanda Doran E18-209 adoran@mit.edu -- Assistant Director Fumiko Futai E18-209 fumiko@mit.edu -- ISchO Main Contact ischo@mit.edu 253-2851 Refer to the full I...

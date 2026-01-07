@@ -652,6 +652,10 @@ export default function SuperadminChat() {
         let match: RegExpExecArray | null;
 
         const pushText = (text: string) => {
+          if (block && !text.trim()) {
+            // Drop empty block lines to avoid extra spacing
+            return;
+          }
           elements.push(
             <span key={nextKey()} className={`${block ? 'block ' : ''}whitespace-pre-wrap`}>
               {text || (block ? ' ' : '\u00a0')}
@@ -806,20 +810,14 @@ export default function SuperadminChat() {
         );
       };
 
+      const sourcesNodes: ReactNode[] = [];
+
       for (let i = 0; i < lines.length; i += 1) {
         const rawLine = lines[i];
         const trimmed = rawLine.trim();
         const isSourcesHeading = /^\**\s*sources?\s*:?\s*\**$/i.test(trimmed);
 
         if (isSourcesHeading) {
-          nodes.push(
-            <span
-              key={nextKey()}
-              className="block text-xs font-semibold uppercase text-muted-foreground"
-            >
-              Sources:
-            </span>
-          );
           inSourcesSection = true;
           continue;
         }
@@ -841,24 +839,24 @@ export default function SuperadminChat() {
           if (metadata && (metadata.source_type === 'web_crawl' || metadata.url)) {
             // Web crawl source - open URL in new tab
             const url = metadata.url || '';
-            nodes.push(
+            sourcesNodes.push(
               <a
                 key={nextKey()}
                 href={url.startsWith('http') ? url : `https://${url}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
               >
                 {sourceName} ↗
               </a>
             );
           } else if (metadata && metadata.file_id) {
             // File source with known file_id - trigger download
-            nodes.push(
+            sourcesNodes.push(
               <button
                 key={nextKey()}
                 type="button"
-                className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
                 onClick={() => handleDownloadSource(metadata.file_id!, sourceName)}
               >
                 {sourceName}
@@ -887,24 +885,24 @@ export default function SuperadminChat() {
 
             if (sourceType === 'web_crawl') {
               // Web crawl source - open URL in new tab
-              nodes.push(
+              sourcesNodes.push(
                 <a
                   key={nextKey()}
                   href={linkTarget.startsWith('http') ? linkTarget : `https://${linkTarget}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
                 >
                   {fileName} ↗
                 </a>
               );
             } else {
               // File source - trigger download
-              nodes.push(
+              sourcesNodes.push(
                 <button
                   key={nextKey()}
                   type="button"
-                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
                   onClick={() => handleDownloadSource(resolvedFileId, fileName)}
                 >
                   {fileName}
@@ -916,23 +914,23 @@ export default function SuperadminChat() {
             const plainMetadata = sourceMetadataLookup.get(label.trim().toLowerCase());
             if (plainMetadata && (plainMetadata.source_type === 'web_crawl' || plainMetadata.url)) {
               const url = plainMetadata.url || '';
-              nodes.push(
+              sourcesNodes.push(
                 <a
                   key={nextKey()}
                   href={url.startsWith('http') ? url : `https://${url}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
                 >
                   {label} ↗
                 </a>
               );
             } else if (plainMetadata && plainMetadata.file_id) {
-              nodes.push(
+              sourcesNodes.push(
                 <button
                   key={nextKey()}
                   type="button"
-                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
                   onClick={() => handleDownloadSource(plainMetadata.file_id!, label)}
                 >
                   {label}
@@ -943,19 +941,19 @@ export default function SuperadminChat() {
               const { displayText, downloadName, sourceRef, matchedFileId } = extractSourceInfo(label);
               const reference = matchedFileId ?? sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
               if (reference) {
-                nodes.push(
+                sourcesNodes.push(
                   <button
                     key={nextKey()}
                     type="button"
-                    className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                    className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
                     onClick={() => handleDownloadSource(reference, downloadName ?? displayText)}
                   >
                     {displayText}
                   </button>
                 );
               } else {
-                nodes.push(
-                  <span key={nextKey()} className="block whitespace-pre-wrap">
+                sourcesNodes.push(
+                  <span key={nextKey()} className="block whitespace-pre-wrap text-sm">
                     {label}
                   </span>
                 );
@@ -966,11 +964,6 @@ export default function SuperadminChat() {
         }
 
         if (inSourcesSection && trimmed.length === 0) {
-          nodes.push(
-            <span key={nextKey()} className="block whitespace-pre-wrap">
-              {' '}
-            </span>
-          );
           continue;
         }
 
@@ -996,6 +989,19 @@ export default function SuperadminChat() {
         }
 
         nodes.push(...createInlineElements(rawLine));
+      }
+
+      if (sourcesNodes.length > 0) {
+        nodes.push(
+          <div key={`${messageId}-sources-container`} className="mt-4 pt-3 border-t border-border/40 bg-muted/50 rounded-lg p-3 space-y-2 dark:bg-gray-800/50">
+            <span className="block text-xs font-bold uppercase text-muted-foreground/80 mb-1">
+              Sources:
+            </span>
+            <div className="flex flex-col gap-1">
+              {sourcesNodes}
+            </div>
+          </div>
+        );
       }
 
       return nodes;
@@ -1127,7 +1133,7 @@ export default function SuperadminChat() {
                                 {formatTime(message.timestamp)}
                               </p>
                             </div>
-                            <div className="space-y-2 text-sm leading-relaxed">
+                            <div className="flex flex-col gap-1 text-sm leading-relaxed">
                               {renderMessageContent(message.content, message.id, message.sources)}
                             </div>
                           </div>

@@ -409,10 +409,13 @@ export default function SuperadminUsers() {
     const email = candidate.email?.toLowerCase() ?? '';
     const collectionsForUser = candidate.collection_ids ?? [];
 
+    const formattedRole = formatRoleLabel(candidate.role).toLowerCase();
+
     const matchesSearch =
       normalizedSearch.length === 0 ||
       username.includes(normalizedSearch) ||
       role.includes(normalizedSearch) ||
+      formattedRole.includes(normalizedSearch) ||
       fullName.includes(normalizedSearch) ||
       email.includes(normalizedSearch);
 
