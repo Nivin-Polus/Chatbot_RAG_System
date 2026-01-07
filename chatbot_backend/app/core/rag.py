@@ -200,8 +200,8 @@ class RAG:
     def retrieve_chunks(self, query: str, top_k: int = 5, collection_id: Optional[str] = None) -> List[Dict]:
         """Search vector DB and return top matching chunks with metadata.
         
-        Includes query expansion for 'who is X' type queries to improve person retrieval.
-        Also applies keyword-based score boosting when the query contains person names.
+        Includes query expansion for 'who is X' or title-based queries.
+        Applies keyword-based score boosting for both names and job titles.
         """
         import logging
         logger = logging.getLogger("rag")
@@ -209,24 +209,32 @@ class RAG:
         # Handle None collection_id properly
         collection_id_str = collection_id if collection_id is not None else None
         
-        # Query expansion for person-related queries
-        expanded_queries = [query]  # Always include original query
-        person_name = None
+        # Detect search subjects (names or titles)
+        search_term = None
         
-        # Detect "who is X" patterns and expand
+        # 1. Check for "who is X" patterns
         who_is_pattern = re.match(r"(?:who\s+is|who's|tell\s+me\s+about|information\s+(?:on|about))\s+(.+)", query.lower().strip())
         if who_is_pattern:
-            person_name = who_is_pattern.group(1).strip().rstrip("?.,!")
-            logger.info(f"[RAG QUERY EXPANSION] Detected person query for: '{person_name}'")
+            search_term = who_is_pattern.group(1).strip().rstrip("?.,!")
+        # 2. If no prefix, but query is short, treat it as a potential name/title
+        elif len(query.split()) <= 4:
+            # Clean common filler words
+            search_term = re.sub(r"^(?:find|search|get|show|for|a)\s+", "", query.lower().strip())
+        
+        # Query expansion
+        expanded_queries = [query]  # Always include original query
+        
+        if search_term:
+            logger.info(f"[RAG QUERY EXPANSION] Detected search term: '{search_term}'")
             
-            # Add expanded queries for better person matching
-            # These are designed to match common patterns in staff directories
+            # Add expanded queries for better matching
+            # Includes directory patterns and role-specific variations
             expanded_queries.extend([
-                person_name,  # Just the name
-                f"{person_name} staff directory contact",  # Staff directory match
-                f"{person_name} email phone",  # Contact info
-                f"staff {person_name}",  # Staff prefix
-                f"{person_name} role title position Senior Analyst",  # Job titles
+                search_term,
+                f"{search_term} staff directory contacts",
+                f"{search_term} role position title",
+                f"staff {search_term}",
+                f"{search_term} email phone address"
             ])
         
         # Collect results from all expanded queries
@@ -234,7 +242,9 @@ class RAG:
         seen_texts = set()  # For deduplication
         
         for i, exp_query in enumerate(expanded_queries):
-            results = self.vector_store.search(exp_query, top_k=top_k * 2, collection_id=collection_id_str)
+            # Fetch more results to allow for boosting (especially for specific names/titles)
+            search_limit = max(50, top_k * 5)
+            results = self.vector_store.search(exp_query, top_k=search_limit, collection_id=collection_id_str)
             
             if i == 0:
                 logger.info(f"[RAG RETRIEVE] Original query returned {len(results)} results")
@@ -251,32 +261,45 @@ class RAG:
                     continue
                 seen_texts.add(text_hash)
                 
-                # Apply keyword boost for person name matches
-                # This is critical for finding people when semantic similarity is low
+                # Apply keyword boost for name/title matches
                 original_score = r.get("score", 0)
                 boosted_score = original_score
                 
-                if person_name:
+                if search_term:
                     text_lower = text.lower()
-                    name_parts = person_name.lower().split()
+                    search_parts = search_term.split()
+                    excluded_words = ["staff", "directory", "contact", "the", "and", "for", "with", "from", "about"]
+                    meaningful_parts = [p for p in search_parts if len(p) > 2 and p not in excluded_words]
                     
-                    # Check for full name match (highest boost)
-                    if person_name.lower() in text_lower:
-                        boosted_score = max(boosted_score, 0.75)
-                        logger.info(f"[RAG BOOST] Full name '{person_name}' found, boosting score from {original_score:.4f} to {boosted_score:.4f}")
-                    # Check for partial name match (first or last name)
-                    elif any(part in text_lower for part in name_parts if len(part) > 2):
-                        matched_parts = [p for p in name_parts if p in text_lower and len(p) > 2]
-                        boosted_score = max(boosted_score, 0.6)
-                        logger.info(f"[RAG BOOST] Partial name '{matched_parts}' found, boosting score from {original_score:.4f} to {boosted_score:.4f}")
+                    # 1. Exact sequence match (Highest priority)
+                    if search_term in text_lower:
+                        boosted_score = max(boosted_score, 0.85)
+                        logger.info(f"[RAG BOOST] Exact match for '{search_term}', boosting to {boosted_score:.4f}")
+                    else:
+                        # 2. Match ratio (Multiple keyword matches)
+                        matches = [p for p in meaningful_parts if p in text_lower]
+                        if meaningful_parts:
+                            match_ratio = len(matches) / len(meaningful_parts)
+                            
+                            if match_ratio >= 1.0:
+                                boosted_score = max(boosted_score, 0.80)
+                                logger.info(f"[RAG BOOST] All keywords matched, boosting to {boosted_score:.4f}")
+                            elif match_ratio >= 0.75:
+                                boosted_score = max(boosted_score, 0.75)
+                                logger.info(f"[RAG BOOST] High match ratio ({match_ratio:.2f}), boosting to {boosted_score:.4f}")
+                            elif match_ratio >= 0.5:
+                                boosted_score = max(boosted_score, 0.65)
+                                logger.info(f"[RAG BOOST] Partial match ratio ({match_ratio:.2f}), boosting to {boosted_score:.4f}")
+                            elif matches:
+                                boosted_score = max(boosted_score, 0.60)
                 
                 r["score"] = boosted_score
                 r["original_score"] = original_score
                 all_results.append(r)
         
-        logger.info(f"[RAG RETRIEVE] Total unique results after expansion: {len(all_results)}")
+        logger.info(f"[RAG RETRIEVE] Total unique results: {len(all_results)}")
         
-        # Sort by score (including boosts) and take top_k
+        # Sort by boosted scores
         all_results.sort(key=lambda x: x.get("score", 0), reverse=True)
         results = all_results[:top_k]
         
@@ -290,14 +313,13 @@ class RAG:
             if collection_id is not None:
                 payload_collection_id = payload.get("collection_id")
                 if payload_collection_id is None:
-                    # Skip chunks that are not explicitly tagged to avoid cross-collection bleed
                     filtered_count += 1
                     continue
                 if str(payload_collection_id) != str(collection_id):
                     filtered_count += 1
                     continue
             
-            chunk_data = {
+            chunks_with_sources.append({
                 "text": payload.get("text", ""),
                 "file_name": payload.get("file_name", "Unknown File"),
                 "file_id": payload.get("file_id", ""),
@@ -305,19 +327,11 @@ class RAG:
                 "source_type": payload.get("source_type", "file"),
                 "url": payload.get("url", ""),
                 "canonical_url": payload.get("canonical_url", ""),
-                "score": score  # Include score for debugging
-            }
-            chunks_with_sources.append(chunk_data)
+                "score": score
+            })
         
         if filtered_count > 0:
             logger.info(f"[RAG RETRIEVE] Filtered {filtered_count} chunks due to collection_id mismatch")
-        
-        logger.info(f"[RAG RETRIEVE] Returning {len(chunks_with_sources)} chunks for query: '{query[:50]}...'")
-        
-        # Log top chunks for debugging
-        for i, chunk in enumerate(chunks_with_sources[:3]):
-            text_preview = chunk["text"][:80].replace("\n", " ") if chunk["text"] else ""
-            logger.debug(f"[RAG RETRIEVE] Chunk {i+1} (score={chunk.get('score', 0):.4f}): {text_preview}...")
         
         return chunks_with_sources
 

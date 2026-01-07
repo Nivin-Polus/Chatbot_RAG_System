@@ -393,6 +393,22 @@ export default function SuperadminUsers() {
     }));
   };
 
+  const formatRoleLabel = (role: string) => {
+    switch (role) {
+      case 'super_admin':
+        return 'Super Admin';
+      case 'superadmin':
+        return 'Superadmin';
+      case 'useradmin':
+      case 'user_admin':
+        return 'User Admin';
+      case 'plugin_user':
+        return 'Plugin User';
+      default:
+        return role.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+    }
+  };
+
   const roleOptions = Array.from(
     new Set(
       users
@@ -454,23 +470,6 @@ export default function SuperadminUsers() {
         return 'bg-gray-100 text-gray-800';
     }
   };
-
-  const formatRoleLabel = (role: string) => {
-    switch (role) {
-      case 'super_admin':
-        return 'Super Admin';
-      case 'superadmin':
-        return 'Superadmin';
-      case 'useradmin':
-      case 'user_admin':
-        return 'User Admin';
-      case 'plugin_user':
-        return 'Plugin User';
-      default:
-        return role.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
-    }
-  };
-
   return (
     <DashboardLayout>
       {confirmDialog}

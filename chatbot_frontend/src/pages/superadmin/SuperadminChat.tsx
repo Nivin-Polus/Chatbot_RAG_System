@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { User, Send, Loader2, MessageSquare } from 'lucide-react';
+import { Trash2, Users, Search, Loader2, MoreHorizontal, Bot, MessageSquare, User, Send } from 'lucide-react';
 import { ChatMessage, ChatSource } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost } from '@/utils/api';
@@ -74,12 +74,10 @@ export default function SuperadminChat() {
     isAutoScrollRef.current = isAutoScroll;
   }, [isAutoScroll]);
 
-  const scrollToBottom = useCallback(() => {
-    requestAnimationFrame(() => {
-      if (isAutoScrollRef.current) {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }
-    });
+  const scrollToBottom = useCallback((smooth = true) => {
+    if (messagesEndRef.current && isAutoScrollRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+    }
   }, []);
 
   // Initialize sessionId if not set
@@ -184,7 +182,11 @@ export default function SuperadminChat() {
               msg.id === messageId ? { ...msg, content, sources } : msg
             )
           );
-          scrollToBottom();
+          if (isStreaming) {
+            scrollToBottom(false);
+          } else {
+            scrollToBottom();
+          }
           stopStreamingRef.current = null;
           setIsStreaming(false);
           resolve();
@@ -553,7 +555,8 @@ export default function SuperadminChat() {
       const sourceMetadataLookup = new Map<string, { url?: string; source_type?: string; file_id?: string }>();
       if (Array.isArray(messageSources)) {
         for (const source of messageSources) {
-          if (!source || !source.file_name) continue;
+          if (!source || typeof source !== 'object') continue;
+          if (!source.file_name) continue;
           const normalized = source.file_name.trim().toLowerCase();
           if (!normalized) continue;
           if (!sourceIdLookup.has(normalized) && source.file_id) {
@@ -1026,6 +1029,8 @@ export default function SuperadminChat() {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const isThinking = isLoading && !isStreaming;
+
   return (
     <DashboardLayout>
       <div className="flex flex-col space-y-6 min-h-[calc(100vh-140px)]">
@@ -1141,7 +1146,7 @@ export default function SuperadminChat() {
                       );
                     })
                   )}
-                  {isLoading && !isStreaming && (
+                  {isThinking && (
                     <div className="flex justify-start">
                       <div className="bg-muted border rounded-lg px-4 py-3 dark:bg-gray-800 dark:text-gray-300">
                         <div className="flex items-center space-x-2">

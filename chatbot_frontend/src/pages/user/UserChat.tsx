@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { User, Send, Loader2, MessageSquare } from 'lucide-react';
+import { User, Send, Loader2, MessageSquare, Bot } from 'lucide-react';
 import { Collection, ChatMessage, ChatSource } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost } from '@/utils/api';
@@ -138,12 +138,10 @@ export default function UserChat() {
     }
   }, [user?.access_token, fetchCollections]);
 
-  const scrollToBottom = useCallback(() => {
-    requestAnimationFrame(() => {
-      if (isAutoScrollRef.current) {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }
-    });
+  const scrollToBottom = useCallback((smooth = true) => {
+    if (messagesEndRef.current && isAutoScrollRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+    }
   }, []);
 
   useEffect(() => {
@@ -204,7 +202,11 @@ export default function UserChat() {
               msg.id === messageId ? { ...msg, content, sources } : msg
             )
           );
-          scrollToBottom();
+          if (isStreaming) {
+            scrollToBottom(false);
+          } else {
+            scrollToBottom();
+          }
           stopStreamingRef.current = null;
           setIsStreaming(false);
           resolve();
@@ -384,7 +386,7 @@ export default function UserChat() {
     }
   };
 
-  const clearChat = async () => {
+  const clearChat = () => {
     if (stopStreamingRef.current) {
       stopStreamingRef.current();
     }
@@ -1041,7 +1043,7 @@ export default function UserChat() {
                     })
                   )}
                   {isLoading && !isStreaming && (
-                    <div className="flex justify-start">
+                    <div className="flex justify-start pt-2">
                       <div className="bg-muted border rounded-lg px-4 py-3 dark:bg-gray-800 dark:text-gray-300">
                         <div className="flex items-center space-x-2">
                           <img src="/chatbot/leto.svg" alt="Leto logo" className="h-4 w-4" />
