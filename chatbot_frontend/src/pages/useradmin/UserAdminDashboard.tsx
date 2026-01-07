@@ -78,6 +78,7 @@ export default function UserAdminDashboard() {
   const [isFileDialogOpen, setIsFileDialogOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<Record<string, UploadStatus>>({});
+  const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null);
 
   const [isPromptDialogOpen, setIsPromptDialogOpen] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState<Prompt | null>(null);
@@ -499,6 +500,7 @@ export default function UserAdminDashboard() {
   };
 
   const handleDownloadFile = async (fileId: string, fileName: string) => {
+    setDownloadingFileId(fileId);
     try {
       const response = await apiGet(
         `${import.meta.env.VITE_API_BASE_URL}/files/download/${fileId}`,
@@ -520,6 +522,8 @@ export default function UserAdminDashboard() {
       window.URL.revokeObjectURL(url);
     } catch (error) {
       toast.error('Failed to download file');
+    } finally {
+      setDownloadingFileId(null);
     }
   };
 
@@ -527,6 +531,7 @@ export default function UserAdminDashboard() {
     if (!file.crawl_job_id && !file.file_id.startsWith('crawl_')) return;
 
     const jobId = file.crawl_job_id || file.file_id.replace('crawl_', '');
+    setDownloadingFileId(file.file_id);
 
     try {
       const response = await apiGet(
@@ -561,6 +566,8 @@ export default function UserAdminDashboard() {
     } catch (error) {
       console.error('Failed to download crawl data', error);
       toast.error('Failed to download crawl data');
+    } finally {
+      setDownloadingFileId(null);
     }
   };
 
@@ -1054,10 +1061,19 @@ export default function UserAdminDashboard() {
                                       handleDownloadFile(file.file_id, file.file_name);
                                     }
                                   }}
-                                  disabled={file.processing_status !== 'completed'}
+                                  disabled={file.processing_status !== 'completed' || downloadingFileId === file.file_id}
                                 >
-                                  <Download className="h-4 w-4 mr-1" />
-                                  Download
+                                  {downloadingFileId === file.file_id ? (
+                                    <>
+                                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                      Downloading...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Download className="h-4 w-4 mr-1" />
+                                      Download
+                                    </>
+                                  )}
                                 </Button>
                                 <Button
                                   variant="ghost"

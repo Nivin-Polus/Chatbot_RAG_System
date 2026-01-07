@@ -34,6 +34,7 @@ export default function SuperadminFiles() {
   const [searchTerm, setSearchTerm] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<Record<string, 'pending' | 'success' | 'error'>>({});
+  const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchCollections();
@@ -165,6 +166,7 @@ export default function SuperadminFiles() {
   };
 
   const handleDownload = async (fileId: string, fileName: string) => {
+    setDownloadingFileId(fileId);
     try {
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/files/download/${fileId}`, {
         headers: {
@@ -187,6 +189,8 @@ export default function SuperadminFiles() {
       }
     } catch (error) {
       toast.error('Failed to download file');
+    } finally {
+      setDownloadingFileId(null);
     }
   };
 
@@ -356,9 +360,13 @@ export default function SuperadminFiles() {
                               variant="ghost"
                               size="icon"
                               onClick={() => handleDownload(file.file_id, file.file_name)}
-                              disabled={file.processing_status !== 'completed'}
+                              disabled={file.processing_status !== 'completed' || downloadingFileId === file.file_id}
                             >
-                              <Download className="h-4 w-4" />
+                              {downloadingFileId === file.file_id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Download className="h-4 w-4" />
+                              )}
                             </Button>
                             <Button
                               variant="ghost"

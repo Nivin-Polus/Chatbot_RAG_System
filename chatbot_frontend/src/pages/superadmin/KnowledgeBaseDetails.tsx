@@ -94,6 +94,7 @@ export default function KnowledgeBaseDetails() {
   const [isFileDialogOpen, setIsFileDialogOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<Record<string, 'pending' | 'success' | 'error'>>({});
+  const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null);
 
   // Prompt management state
   const [isPromptDialogOpen, setIsPromptDialogOpen] = useState(false);
@@ -298,6 +299,7 @@ export default function KnowledgeBaseDetails() {
   };
 
   const handleDownload = async (fileId: string, fileName: string) => {
+    setDownloadingFileId(fileId);
     try {
       const response = await apiGet(
         `${import.meta.env.VITE_API_BASE_URL}/files/download/${fileId}`,
@@ -319,6 +321,8 @@ export default function KnowledgeBaseDetails() {
       }
     } catch (error) {
       toast.error('Failed to download file');
+    } finally {
+      setDownloadingFileId(null);
     }
   };
 
@@ -326,6 +330,7 @@ export default function KnowledgeBaseDetails() {
     if (!file.crawl_job_id && !file.file_id.startsWith('crawl_')) return;
 
     const jobId = file.crawl_job_id || file.file_id.replace('crawl_', '');
+    setDownloadingFileId(file.file_id);
 
     try {
       const response = await apiGet(
@@ -360,6 +365,8 @@ export default function KnowledgeBaseDetails() {
     } catch (error) {
       console.error('Failed to download crawl data', error);
       toast.error('Failed to download crawl data');
+    } finally {
+      setDownloadingFileId(null);
     }
   };
 
@@ -976,10 +983,19 @@ export default function KnowledgeBaseDetails() {
                                     handleDownload(file.file_id, file.file_name);
                                   }
                                 }}
-                                disabled={file.processing_status !== 'completed'}
+                                disabled={file.processing_status !== 'completed' || downloadingFileId === file.file_id}
                               >
-                                <Download className="h-4 w-4 mr-1" />
-                                Download
+                                {downloadingFileId === file.file_id ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                    Downloading...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="h-4 w-4 mr-1" />
+                                    Download
+                                  </>
+                                )}
                               </Button>
                               <Button
                                 variant="ghost"
