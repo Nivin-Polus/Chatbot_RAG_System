@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     CLAUDE_API_KEY: str = Field(default="", validation_alias="CLAUDE_API_KEY")
     CLAUDE_API_URL: str = Field("https://api.anthropic.com/v1/messages", validation_alias="CLAUDE_API_URL")
     CLAUDE_MODEL: str = Field("claude-3-haiku-20240307", validation_alias="CLAUDE_MODEL")
-    CLAUDE_MAX_TOKENS: int = Field(1000, validation_alias="CLAUDE_MAX_TOKENS")
+    CLAUDE_MAX_TOKENS: int = Field(4096, validation_alias="CLAUDE_MAX_TOKENS")
     CLAUDE_TEMPERATURE: float = Field(0.0, validation_alias="CLAUDE_TEMPERATURE")
     SYSTEM_PROMPT: str = Field("", validation_alias="SYSTEM_PROMPT")  # Empty means use default
     
