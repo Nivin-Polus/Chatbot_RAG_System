@@ -45,8 +45,12 @@ export default function SuperadminPrompts() {
   const [editingPrompt, setEditingPrompt] = useState<Prompt | null>(null);
   const [formData, setFormData] = useState({
     name: '',
+    description: '',
     content: '',
     is_default: false,
+    max_tokens: 4096,
+    model_name: 'claude-3-haiku-20240307',
+    temperature: 0.0,
   });
 
   useEffect(() => {
@@ -106,8 +110,12 @@ export default function SuperadminPrompts() {
         },
         body: JSON.stringify({
           name: formData.name,
-          content: formData.content,
+          description: formData.description,
+          system_prompt: formData.content,
           is_default: formData.is_default,
+          max_tokens: formData.max_tokens,
+          model_name: formData.model_name,
+          temperature: formData.temperature,
           collection_id: selectedCollection,
         }),
       });
@@ -116,7 +124,7 @@ export default function SuperadminPrompts() {
 
       toast.success('Prompt created successfully');
       setIsDialogOpen(false);
-      setFormData({ name: '', content: '', is_default: false });
+      setFormData({ name: '', description: '', content: '', is_default: false, max_tokens: 4096, model_name: 'claude-3-haiku-20240307', temperature: 0.0 });
       fetchPrompts(selectedCollection);
     } catch (error) {
       toast.error('Failed to create prompt');
@@ -136,8 +144,11 @@ export default function SuperadminPrompts() {
         },
         body: JSON.stringify({
           name: formData.name,
-          content: formData.content,
+          system_prompt: formData.content,
           is_default: formData.is_default,
+          max_tokens: formData.max_tokens,
+          model_name: formData.model_name,
+          temperature: formData.temperature,
         }),
       });
 
@@ -146,7 +157,7 @@ export default function SuperadminPrompts() {
       toast.success('Prompt updated successfully');
       setIsDialogOpen(false);
       setEditingPrompt(null);
-      setFormData({ name: '', content: '', is_default: false });
+      setFormData({ name: '', description: '', content: '', is_default: false, max_tokens: 4096, model_name: 'claude-3-haiku-20240307', temperature: 0.0 });
       fetchPrompts(selectedCollection);
     } catch (error) {
       toast.error('Failed to update prompt');
@@ -184,8 +195,12 @@ export default function SuperadminPrompts() {
     setEditingPrompt(prompt);
     setFormData({
       name: prompt.name,
+      description: prompt.description || '',
       content: prompt.system_prompt,
       is_default: prompt.is_default,
+      max_tokens: prompt.max_tokens || 4096,
+      model_name: prompt.model_name || 'claude-3-haiku-20240307',
+      temperature: prompt.temperature ?? 0.0,
     });
     setIsDialogOpen(true);
   };
@@ -193,7 +208,7 @@ export default function SuperadminPrompts() {
   const closeDialog = () => {
     setIsDialogOpen(false);
     setEditingPrompt(null);
-    setFormData({ name: '', content: '', is_default: false });
+    setFormData({ name: '', description: '', content: '', is_default: false, max_tokens: 4096, model_name: 'claude-3-haiku-20240307', temperature: 0.0 });
   };
 
   return (
@@ -254,7 +269,7 @@ export default function SuperadminPrompts() {
                         Create Prompt
                       </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-2xl">
+                    <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
                       <form onSubmit={editingPrompt ? handleUpdatePrompt : handleCreatePrompt}>
                         <DialogHeader>
                           <DialogTitle>
@@ -287,6 +302,7 @@ export default function SuperadminPrompts() {
                               required
                             />
                           </div>
+
                           <div className="flex items-center space-x-2">
                             <Switch
                               id="is_default"

@@ -105,6 +105,9 @@ export default function KnowledgeBaseDetails() {
     content: '',
     is_active: true,
     is_default: false,
+    max_tokens: 4096,
+    model_name: 'claude-3-haiku-20240307',
+    temperature: 0.0,
   });
 
   // Chunks viewer state
@@ -412,6 +415,9 @@ export default function KnowledgeBaseDetails() {
           system_prompt: promptFormData.content,
           is_active: promptFormData.is_active,
           is_default: promptFormData.is_default,
+          max_tokens: promptFormData.max_tokens,
+          model_name: promptFormData.model_name,
+          temperature: promptFormData.temperature,
           collection_id: id,
         },
         user?.access_token
@@ -420,7 +426,7 @@ export default function KnowledgeBaseDetails() {
       if (response.ok) {
         toast.success('Prompt created successfully');
         setIsPromptDialogOpen(false);
-        setPromptFormData({ name: '', description: '', content: '', is_active: true, is_default: false });
+        setPromptFormData({ name: '', description: '', content: '', is_active: true, is_default: false, max_tokens: 4096, model_name: 'claude-3-haiku-20240307', temperature: 0.0 });
 
         // Refresh prompts
         const refreshResponse = await apiGet(
@@ -452,6 +458,9 @@ export default function KnowledgeBaseDetails() {
           system_prompt: promptFormData.content,
           is_active: promptFormData.is_active,
           is_default: promptFormData.is_default,
+          max_tokens: promptFormData.max_tokens,
+          model_name: promptFormData.model_name,
+          temperature: promptFormData.temperature,
         },
         user?.access_token
       );
@@ -460,7 +469,7 @@ export default function KnowledgeBaseDetails() {
         toast.success('Prompt updated successfully');
         setIsPromptDialogOpen(false);
         setEditingPrompt(null);
-        setPromptFormData({ name: '', description: '', content: '', is_active: true, is_default: false });
+        setPromptFormData({ name: '', description: '', content: '', is_active: true, is_default: false, max_tokens: 4096, model_name: 'claude-3-haiku-20240307', temperature: 0.0 });
 
         // Refresh prompts
         const refreshResponse = await apiGet(
@@ -516,6 +525,9 @@ export default function KnowledgeBaseDetails() {
       content: prompt.system_prompt,
       is_active: prompt.is_active,
       is_default: prompt.is_default,
+      max_tokens: prompt.max_tokens || 4096,
+      model_name: prompt.model_name || 'claude-3-haiku-20240307',
+      temperature: prompt.temperature ?? 0.0,
     });
     setIsPromptDialogOpen(true);
   };
@@ -523,7 +535,7 @@ export default function KnowledgeBaseDetails() {
   const closePromptDialog = () => {
     setIsPromptDialogOpen(false);
     setEditingPrompt(null);
-    setPromptFormData({ name: '', description: '', content: '', is_active: true, is_default: false });
+    setPromptFormData({ name: '', description: '', content: '', is_active: true, is_default: false, max_tokens: 4096, model_name: 'claude-3-haiku-20240307', temperature: 0.0 });
   };
 
   const formatFileSize = (bytes: number) => {
@@ -1038,7 +1050,7 @@ export default function KnowledgeBaseDetails() {
                         Create Prompt
                       </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-2xl">
+                    <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
                       <form onSubmit={editingPrompt ? handleUpdatePrompt : handleCreatePrompt}>
                         <DialogHeader>
                           <DialogTitle>
@@ -1082,6 +1094,7 @@ export default function KnowledgeBaseDetails() {
                               required
                             />
                           </div>
+
                           <div className="flex items-center space-x-6">
                             <div className="flex items-center space-x-2">
                               <input

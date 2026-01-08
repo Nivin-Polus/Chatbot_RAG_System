@@ -336,21 +336,26 @@ class RAG:
         return chunks_with_sources
 
     def _resolve_prompt_settings(self, collection_id: Optional[str] = None):
-        """Determine system prompt and model configuration for the given collection."""
+        """Determine system prompt and model configuration for the given collection.
+        
+        Note: model, max_tokens, and temperature are ALWAYS taken from environment
+        variables (self.default_*). Only the system_prompt text is taken from the
+        database if a collection-specific prompt exists.
+        """
         db_prompt = None
         if collection_id:
             db_prompt = self.get_prompt_for_collection(collection_id)
 
         if db_prompt:
+            # Use prompt text from database, but model settings from env
             system_prompt = db_prompt.system_prompt
-            model = db_prompt.model_name
-            max_tokens = db_prompt.max_tokens
-            temperature = db_prompt.temperature
         else:
             system_prompt = self.default_system_prompt
-            model = self.default_model
-            max_tokens = self.default_max_tokens
-            temperature = self.default_temperature
+        
+        # ALWAYS use env defaults for model configuration
+        model = self.default_model
+        max_tokens = self.default_max_tokens
+        temperature = self.default_temperature
 
         if db_prompt and self.db_session:
             try:
@@ -492,6 +497,11 @@ Answer:"""
         max_tokens_value = max_tokens if isinstance(max_tokens, int) else getattr(max_tokens, 'max_tokens', self.default_max_tokens)
         temperature_value = temperature if isinstance(temperature, (int, float)) else getattr(temperature, 'temperature', self.default_temperature)
         
+        # Debug logging to trace max_tokens value
+        import logging
+        logger = logging.getLogger("rag")
+        logger.info(f"[RAG AI CALL] Using max_tokens={max_tokens_value}, model={model_value}, temperature={temperature_value}")
+        
         raw_answer, tokens_used = self.call_ai(
             enhanced_prompt,
             model=model_value,
@@ -603,6 +613,11 @@ Answer:"""
         model_value = model if isinstance(model, str) else getattr(model, 'model_name', self.default_model)
         max_tokens_value = max_tokens if isinstance(max_tokens, int) else getattr(max_tokens, 'max_tokens', self.default_max_tokens)
         temperature_value = temperature if isinstance(temperature, (int, float)) else getattr(temperature, 'temperature', self.default_temperature)
+        
+        # Debug logging to trace max_tokens value
+        import logging
+        logger = logging.getLogger("rag")
+        logger.info(f"[RAG AI CALL WITH CONTEXT] Using max_tokens={max_tokens_value}, model={model_value}, temperature={temperature_value}")
         
         raw_answer, tokens_used = self.call_ai(
             enhanced_prompt,
