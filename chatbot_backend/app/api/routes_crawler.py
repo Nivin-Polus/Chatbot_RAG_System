@@ -38,7 +38,7 @@ class StartCrawlRequest(BaseModel):
     
     # Optional settings
     max_pages: int = Field(default=0, ge=0, le=100000, description="Maximum pages to crawl (0 = unlimited)")
-    max_depth: int = Field(default=5, ge=1, le=15, description="Maximum link depth")
+    max_depth: int = Field(default=0, ge=0, description="Maximum link depth (0 = unlimited)")
     use_sitemap: bool = Field(default=True, description="Use sitemap for URL discovery")
     process_documents: bool = Field(default=True, description="Download and process PDF/Word documents")
     
@@ -50,6 +50,13 @@ class StartCrawlRequest(BaseModel):
         default=None,
         description="Only crawl URLs containing these keywords"
     )
+    
+    @validator('max_depth')
+    def cap_max_depth(cls, v):
+        """Cap max_depth at 100 to prevent excessive crawling, but don't reject high values."""
+        if v > 100:
+            return 100  # Cap at 100 instead of crashing
+        return v
     
     @validator('target_url')
     def validate_url(cls, v):
@@ -433,7 +440,7 @@ async def delete_crawl_job(
     Delete a crawl job.
     
     Removes the job record. Running jobs will be cancelled first.
-    Note: Extracted content in the vector store is not removed.
+    Extracted content in the vector store IS removed.
     """
     job = db.query(CrawlerJob).filter(CrawlerJob.job_id == job_id).first()
     

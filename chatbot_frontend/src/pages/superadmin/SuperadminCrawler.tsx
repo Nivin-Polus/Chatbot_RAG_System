@@ -142,7 +142,7 @@ export default function SuperadminCrawler() {
   const [targetUrl, setTargetUrl] = useState('');
   const [selectedCollection, setSelectedCollection] = useState('');
   const [maxPages, setMaxPages] = useState<number | string>(0); // 0 = unlimited
-  const [maxDepth, setMaxDepth] = useState<number | string>(5);
+  const [maxDepth, setMaxDepth] = useState<number | string>(0);
   const [useSitemap, setUseSitemap] = useState(true);
   const [processDocuments, setProcessDocuments] = useState(false);
   const [excludePatterns, setExcludePatterns] = useState('/login\n/admin\n/cart');
@@ -620,7 +620,7 @@ export default function SuperadminCrawler() {
                                   Link Depth
                                 </p>
                                 <p className="text-[11px] leading-relaxed text-muted-foreground">
-                                  How many steps away from the start URL the crawler will go. Default is <span className="font-medium text-foreground">5</span>. Higher values follow deeper link structures.
+                                  How many steps away from the start URL the crawler will go. Set to <span className="font-medium text-foreground">0</span> for <span className="font-medium text-foreground">unlimited</span> depth. Default is <span className="font-medium text-foreground">5</span>.
                                 </p>
                               </div>
                             </TooltipContent>
@@ -629,10 +629,10 @@ export default function SuperadminCrawler() {
                         <Input
                           id="max-depth"
                           type="number"
-                          min={1}
-                          max={15}
+                          min={0}
                           value={maxDepth}
                           onChange={(e) => setMaxDepth(e.target.value)}
+                          placeholder="0 for unlimited"
                           className="bg-background"
                         />
                       </div>

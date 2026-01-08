@@ -443,7 +443,8 @@ class CrawlerEngine:
         if normalized in self.visited_urls:
             return
         
-        if depth > self.config.max_depth:
+        # Skip depth check if max_depth is 0 (unlimited)
+        if self.config.max_depth > 0 and depth > self.config.max_depth:
             return
         
         self.to_visit.append((normalized, depth))

@@ -133,8 +133,8 @@ export default function CrawlerView({ collectionId }: CrawlerViewProps) {
     // Form state
     const [targetUrl, setTargetUrl] = useState('');
     const [selectedCollection, setSelectedCollection] = useState(collectionId || '');
-    const [maxPages, setMaxPages] = useState<number | string>(0); // 0 = unlimited
-    const [maxDepth, setMaxDepth] = useState<number | string>(5);
+    const [maxPages, setMaxPages] = useState<number | string>(0); // 0 = max
+    const [maxDepth, setMaxDepth] = useState<number | string>(0);
     const [useSitemap, setUseSitemap] = useState(true);
     const [processDocuments, setProcessDocuments] = useState(true);
     const [excludePatterns, setExcludePatterns] = useState('/login\n/admin\n/cart');
@@ -555,25 +555,25 @@ export default function CrawlerView({ collectionId }: CrawlerViewProps) {
                     {showAdvanced && (
                         <div className="grid gap-4 md:grid-cols-2 p-4 bg-muted/50 rounded-lg">
                             <div className="space-y-2">
-                                <Label htmlFor="max-pages">Max Pages (0 = unlimited)</Label>
+                                <Label htmlFor="max-pages">Max Pages (0 = max)</Label>
                                 <Input
                                     id="max-pages"
                                     type="number"
                                     min={0}
                                     value={maxPages}
                                     onChange={(e) => setMaxPages(e.target.value)}
-                                    placeholder="0 for unlimited"
+                                    placeholder="0 = max"
                                 />
                             </div>
                             <div className="space-y-2">
-                                <Label htmlFor="max-depth">Max Depth</Label>
+                                <Label htmlFor="max-depth">Max Depth (0 = max)</Label>
                                 <Input
                                     id="max-depth"
                                     type="number"
-                                    min={1}
-                                    max={15}
+                                    min={0}
                                     value={maxDepth}
                                     onChange={(e) => setMaxDepth(e.target.value)}
+                                    placeholder="0 = max"
                                 />
                             </div>
                             <div className="space-y-2 md:col-span-2">
