@@ -509,16 +509,24 @@ Answer:"""
             temperature=temperature_value,
         )
         
+        # DEBUG: Log raw response to identify truncation source
+        logger.info(f"[RAG DEBUG] Raw answer length: {len(raw_answer)} chars")
+        logger.info(f"[RAG DEBUG] Raw answer preview: {raw_answer[:500]}..." if len(raw_answer) > 500 else f"[RAG DEBUG] Raw answer: {raw_answer}")
+        
         # Parse AI response to extract classification
         parsed = self._parse_ai_response(raw_answer)
         answer = parsed["answer"]
         is_generic = parsed["is_generic"]
+        
+        logger.info(f"[RAG DEBUG] Parsed answer length: {len(answer)} chars")
         
         # ALWAYS add formatted sources - remove any AI-generated sources section first
         # Format: [file_name](reference|source_type) for frontend parsing
         # reference = file_id for files, url for web_crawl
         # Remove any existing sources section (case-insensitive) - handles with or without preceding newline
         answer = re.sub(r'[\s\n]*\**\s*[Ss]ources?:?\s*\**[\s\S]*$', '', answer).strip()
+        
+        logger.info(f"[RAG DEBUG] After sources strip length: {len(answer)} chars")
         
         # Build and append formatted sources ONLY if not a generic response
         if not is_generic:
