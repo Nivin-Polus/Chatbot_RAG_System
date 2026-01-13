@@ -554,22 +554,28 @@ import "./styles.css";
     }
     showSendButton();
 
+    // Save current session before starting a new one
+    // Only save if there are user messages to avoid empty "New Chat" entries
+    const hasUserMessages = messages.some(m => m.user);
+    if (hasUserMessages && chatService.sessionId) {
+      saveChatHistory();
+    }
+
     // Clear context and messages
     chatService.clearContext();
     currentSessionId = chatService.sessionId; // Update tracker
 
+    // Start fresh
+    messages.length = 0;
     initializeMessages();
+    renderMessages();
 
-    // Do NOT clear all history (clearChatHistory removed)
-
-    ui.updateContextIndicator(chatService.getContextInfo());
-    input.value = "";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.focus();
-
-    // Refresh history UI
-    if (ui.isExpanded && ui.onExpandHistory) ui.onExpandHistory();
+    // Update history sidebar
+    if (ui.onExpandHistory) {
+      ui.onExpandHistory();
+    }
   }
+
 
   function addMessage(message) {
     // Ensure sources array preserves all fields from each source object
