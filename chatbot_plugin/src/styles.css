@@ -1135,3 +1135,154 @@ button {
     padding: 3px 6px;
   }
 }
+/* Expanded State */
+.plugin-chat-panel.is-expanded {
+  width: min(800px, calc(100vw - 40px));
+  height: min(700px, calc(100vh - 40px));
+}
+
+.plugin-chat-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  height: 100%;
+}
+
+.plugin-chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  position: relative;
+  background: #f9fafb;
+}
+
+.plugin-chat-sidebar {
+  width: 260px;
+  background: #f9fafb;
+  border-right: 1px solid rgba(17, 24, 39, 0.1);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  transition: width 0.3s ease;
+}
+
+.plugin-sidebar-header {
+  padding: 16px;
+  border-bottom: 1px solid rgba(17, 24, 39, 0.06);
+  background: #fff;
+}
+
+.plugin-sidebar-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.plugin-history-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.plugin-history-item {
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-bottom: 4px;
+  transition: background 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.plugin-history-item:hover {
+  background: rgba(17, 24, 39, 0.05);
+}
+
+.plugin-history-item.is-active {
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  border: 1px solid rgba(17, 24, 39, 0.05);
+}
+
+.plugin-history-content {
+  flex: 1;
+  min-width: 0;
+  margin-right: 8px;
+}
+
+.plugin-history-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plugin-history-date {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-top: 2px;
+}
+
+.plugin-history-actions {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.plugin-history-item:hover .plugin-history-actions {
+  opacity: 1;
+}
+
+.plugin-history-delete {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: #9ca3af;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.plugin-history-delete .icon {
+  width: 14px !important;
+  height: 14px !important;
+  background: #9ca3af !important;
+}
+
+.plugin-history-delete:hover {
+  background: #fee2e2;
+}
+.plugin-history-delete:hover .icon {
+  background: #dc2626 !important;
+}
+
+.plugin-history-empty {
+  text-align: center;
+  color: #6b7280;
+  padding: 20px;
+  font-size: 14px;
+}
+
+.plugin-chat-icon-btn {
+  background: white;
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.plugin-chat-icon-btn:hover {
+  transform: translateY(-1px);
+}
+

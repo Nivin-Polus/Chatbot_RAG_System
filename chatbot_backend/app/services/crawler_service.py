@@ -331,3 +331,67 @@ class CrawlerService:
     def is_job_active(cls, job_id: str) -> bool:
         """Check if a job is currently running."""
         return job_id in cls._active_jobs
+    
+    @classmethod
+    def is_job_stale(cls, job_id: str, stale_seconds: int = 300) -> bool:
+        """
+        Check if a running job appears stuck (no progress in N seconds).
+        
+        Args:
+            job_id: Job ID to check
+            stale_seconds: Seconds without activity to consider stale (default: 5 min)
+            
+        Returns:
+            True if the job is stale (no recent activity), False otherwise
+        """
+        if job_id not in cls._active_jobs:
+            return False
+        
+        engine = cls._active_jobs[job_id]
+        last_activity = engine.get_last_activity()
+        
+        if last_activity is None:
+            # Job started but hasn't processed any pages yet
+            return False
+        
+        elapsed = (datetime.utcnow() - last_activity).total_seconds()
+        return elapsed > stale_seconds
+    
+    @classmethod
+    def get_job_health(cls, job_id: str) -> dict:
+        """
+        Get detailed health status of an active job.
+        
+        Returns:
+            Dictionary with health information including:
+            - is_active: Whether the job is currently running
+            - is_stale: Whether the job appears stuck
+            - last_activity_seconds_ago: Time since last successful activity
+            - circuit_breaker_open: Whether backoff circuit is open
+            - consecutive_failures: Number of consecutive failures
+        """
+        if job_id not in cls._active_jobs:
+            return {
+                "is_active": False,
+                "is_stale": False,
+                "last_activity_seconds_ago": None,
+                "circuit_breaker_open": False,
+                "consecutive_failures": 0
+            }
+        
+        engine = cls._active_jobs[job_id]
+        last_activity = engine.get_last_activity()
+        
+        last_activity_secs = None
+        if last_activity:
+            last_activity_secs = (datetime.utcnow() - last_activity).total_seconds()
+        
+        stale_threshold = getattr(engine.config, 'stale_heartbeat_seconds', 300)
+        
+        return {
+            "is_active": True,
+            "is_stale": last_activity_secs is not None and last_activity_secs > stale_threshold,
+            "last_activity_seconds_ago": round(last_activity_secs, 1) if last_activity_secs else None,
+            "circuit_breaker_open": engine._circuit_open,
+            "consecutive_failures": engine._total_consecutive_failures
+        }

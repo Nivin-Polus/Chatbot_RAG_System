@@ -15,6 +15,11 @@ import "./styles.css";
   const { token, context: tokenContext } = authBootstrap || {};
 
   const ui = new ChatbotUI();
+  ui.onExpandHistory = () => {
+    // Sort sessions by timestamp desc
+    const sorted = [...sessions].sort((a, b) => b.timestamp - a.timestamp);
+    ui.renderHistoryList(sorted, chatService.sessionId, switchSession, deleteSession);
+  };
   ui.init();
 
   const chatService = new ChatService();
@@ -40,6 +45,10 @@ import "./styles.css";
   // LocalStorage keys for chat history
   const CHAT_HISTORY_KEY = 'chatbot_chat_history';
   const CHAT_SESSION_KEY = 'chatbot_chat_session_id';
+  const CHAT_SESSIONS_INDEX_KEY = 'chatbot_sessions_index';
+  const CHAT_MESSAGES_PREFIX = 'chatbot_messages_';
+
+  let sessions = []; // [{id, title, timestamp}]
   const downloadRegistry = {
     byName: new Map(),
     byId: new Map(),
@@ -547,15 +556,19 @@ import "./styles.css";
 
     // Clear context and messages
     chatService.clearContext();
+    currentSessionId = chatService.sessionId; // Update tracker
+
     initializeMessages();
 
-    // Clear chat history from localStorage
-    clearChatHistory();
+    // Do NOT clear all history (clearChatHistory removed)
 
     ui.updateContextIndicator(chatService.getContextInfo());
     input.value = "";
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.focus();
+
+    // Refresh history UI
+    if (ui.isExpanded && ui.onExpandHistory) ui.onExpandHistory();
   }
 
   function addMessage(message) {
@@ -750,12 +763,12 @@ import "./styles.css";
   // Save chat history to localStorage
   function saveChatHistory() {
     try {
-      // Normalize sources to ensure all fields are preserved
+      if (!chatService.sessionId) return;
+
       const normalizeSourcesForStorage = (sources) => {
         if (!Array.isArray(sources)) return [];
         return sources.map(source => {
           if (!source || typeof source !== 'object') return null;
-          // Preserve all source fields
           return {
             file_name: source.file_name || null,
             file_id: source.file_id || null,
@@ -766,10 +779,8 @@ import "./styles.css";
         }).filter(source => source !== null && source.file_name);
       };
 
-      // Filter out typing indicators and only save actual messages
       const messagesToSave = messages
         .filter(msg => !msg.isTypingIndicator && !msg.isTyping)
-        .slice(-10) // Keep only last 10 messages
         .map(msg => ({
           user: msg.user,
           text: msg.text,
@@ -778,37 +789,91 @@ import "./styles.css";
           sources: normalizeSourcesForStorage(msg.sources || [])
         }));
 
-      localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(messagesToSave));
-      localStorage.setItem(CHAT_SESSION_KEY, chatService.sessionId);
+      localStorage.setItem(CHAT_MESSAGES_PREFIX + chatService.sessionId, JSON.stringify(messagesToSave));
 
-      // Also sync conversation history with chatService for API context
+      const existingSessionIndex = sessions.findIndex(s => s.id === chatService.sessionId);
+
+      const firstUserMsg = messagesToSave.find(m => m.user);
+      let title = "New Chat";
+      if (firstUserMsg && firstUserMsg.text) {
+        title = firstUserMsg.text.slice(0, 30) + (firstUserMsg.text.length > 30 ? "..." : "");
+      }
+
+      if (existingSessionIndex >= 0) {
+        sessions[existingSessionIndex].timestamp = Date.now();
+        sessions[existingSessionIndex].title = title;
+      } else {
+        sessions.push({
+          id: chatService.sessionId,
+          timestamp: Date.now(),
+          title: title
+        });
+      }
+
+      localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
       chatService.restoreHistory(messagesToSave);
+
+      if (ui.isExpanded && ui.onExpandHistory) {
+        ui.onExpandHistory();
+      }
     } catch (err) {
-      // Failed to save chat history
+      console.error("Failed to save history", err);
     }
   }
 
   // Load chat history from localStorage
   function loadChatHistory() {
     try {
-      const storedMessages = localStorage.getItem(CHAT_HISTORY_KEY);
-      const storedSessionId = localStorage.getItem(CHAT_SESSION_KEY);
-
-      if (!storedMessages) {
-        return false;
+      const storedIndex = localStorage.getItem(CHAT_SESSIONS_INDEX_KEY);
+      if (storedIndex) {
+        sessions = JSON.parse(storedIndex);
       }
 
-      const parsed = JSON.parse(storedMessages);
-      if (!Array.isArray(parsed) || parsed.length === 0) {
-        return false;
+      if (sessions.length === 0) {
+        const legacyMsgs = localStorage.getItem(CHAT_HISTORY_KEY);
+        if (legacyMsgs) {
+          const legacySessionId = localStorage.getItem(CHAT_SESSION_KEY) || Date.now().toString();
+          sessions.push({
+            id: legacySessionId,
+            timestamp: Date.now(),
+            title: "Previous Chat"
+          });
+          localStorage.setItem(CHAT_MESSAGES_PREFIX + legacySessionId, legacyMsgs);
+          localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
+        }
       }
 
-      // Normalize sources when loading from storage
+      if (sessions.length > 0) {
+        const lastSession = sessions.sort((a, b) => b.timestamp - a.timestamp)[0];
+        switchSession(lastSession.id);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error("Failed to load history", err);
+      return false;
+    }
+  }
+
+  function switchSession(sessionId) {
+    if (currentSessionId === sessionId && messages.length > 0) return;
+
+    const storedMsgs = localStorage.getItem(CHAT_MESSAGES_PREFIX + sessionId);
+    if (!storedMsgs) return;
+
+    try {
+      const parsed = JSON.parse(storedMsgs);
+
+      chatService.clearContext();
+      chatService.sessionId = sessionId;
+      currentSessionId = sessionId;
+
+      messages.length = 0;
+
       const normalizeSourcesFromStorage = (sources) => {
         if (!Array.isArray(sources)) return [];
         return sources.map(source => {
           if (!source || typeof source !== 'object') return null;
-          // Restore all source fields
           return {
             file_name: source.file_name || null,
             file_id: source.file_id || null,
@@ -819,8 +884,6 @@ import "./styles.css";
         }).filter(source => source !== null && source.file_name);
       };
 
-      // Restore messages to UI
-      messages.length = 0;
       parsed.forEach(msg => {
         messages.push({
           user: Boolean(msg.user),
@@ -831,29 +894,36 @@ import "./styles.css";
         });
       });
 
-      // Restore session ID to chatService
-      if (storedSessionId) {
-        chatService.sessionId = storedSessionId;
-      }
-
-      // Restore conversation history to chatService for API context
-      chatService.restoreHistory(parsed);
-
       renderMessages();
-      return true;
-    } catch (err) {
-      return false;
+      chatService.restoreHistory(parsed);
+      ui.updateContextIndicator(chatService.getContextInfo());
+
+      if (ui.isExpanded && ui.onExpandHistory) ui.onExpandHistory();
+      scrollChatToBottom();
+    } catch (e) {
+      console.error("Failed to switch session", e);
     }
   }
 
-  // Clear chat history from localStorage
+  function deleteSession(sessionId) {
+    if (!confirm("Delete this chat?")) return;
+
+    sessions = sessions.filter(s => s.id !== sessionId);
+    localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
+    localStorage.removeItem(CHAT_MESSAGES_PREFIX + sessionId);
+
+    if (chatService.sessionId === sessionId) {
+      handleNewChat();
+    } else {
+      if (ui.isExpanded && ui.onExpandHistory) ui.onExpandHistory();
+    }
+  }
+
   function clearChatHistory() {
     try {
       localStorage.removeItem(CHAT_HISTORY_KEY);
       localStorage.removeItem(CHAT_SESSION_KEY);
-    } catch (err) {
-      // Failed to clear chat history
-    }
+    } catch (err) { }
   }
 
   function initializeMessages() {

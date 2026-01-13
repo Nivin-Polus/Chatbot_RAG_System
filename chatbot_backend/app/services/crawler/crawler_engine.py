@@ -272,13 +272,81 @@ class CrawlerEngine:
         # Cancellation flag
         self._cancelled = False
         
+        # Circuit breaker state for resilience during large crawls
+        self._circuit_open = False
+        self._circuit_opened_at: Optional[datetime] = None
+        self._total_consecutive_failures = 0
+        
+        # Heartbeat tracking for stuck job detection
+        self._last_activity_at: Optional[datetime] = None
+        
         # Temporary directory for document downloads
         self.temp_download_dir = None
     
     def cancel(self):
         """Cancel the ongoing crawl."""
         self._cancelled = True
+        self._circuit_open = False  # Reset circuit breaker on cancel
         logger.info("Crawl cancellation requested")
+    
+    def update_heartbeat(self):
+        """Update the last activity timestamp (called on successful operations)."""
+        self._last_activity_at = datetime.utcnow()
+    
+    def get_last_activity(self) -> Optional[datetime]:
+        """Get the timestamp of the last successful activity."""
+        return self._last_activity_at
+    
+    def _check_circuit_breaker(self) -> bool:
+        """
+        Check if circuit breaker should block crawling.
+        
+        Returns:
+            True if crawling should continue, False if blocked by circuit breaker
+        """
+        if not self._circuit_open:
+            return True
+        
+        # Check if enough time has passed to reset the circuit
+        if self._circuit_opened_at:
+            elapsed = (datetime.utcnow() - self._circuit_opened_at).total_seconds()
+            reset_seconds = getattr(self.config, 'circuit_breaker_reset_seconds', 30)
+            
+            if elapsed >= reset_seconds:
+                logger.info(f"🔄 Circuit breaker reset after {elapsed:.0f}s cooldown")
+                self._circuit_open = False
+                self._circuit_opened_at = None
+                self._total_consecutive_failures = 0
+                return True
+            else:
+                # Still in cooldown
+                return False
+        
+        return True
+    
+    def _record_failure(self):
+        """Record a failure and potentially open the circuit breaker."""
+        self._total_consecutive_failures += 1
+        self.consecutive_errors += 1
+        
+        threshold = getattr(self.config, 'circuit_breaker_threshold', 20)
+        
+        if self._total_consecutive_failures >= threshold and not self._circuit_open:
+            self._circuit_open = True
+            self._circuit_opened_at = datetime.utcnow()
+            reset_seconds = getattr(self.config, 'circuit_breaker_reset_seconds', 30)
+            logger.warning(
+                f"⚡ Circuit breaker OPENED after {self._total_consecutive_failures} consecutive failures. "
+                f"Pausing crawl for {reset_seconds}s to allow server recovery."
+            )
+    
+    def _record_success(self):
+        """Record a success and reset failure counters."""
+        self._total_consecutive_failures = 0
+        self.consecutive_errors = 0
+        self._circuit_open = False
+        self._circuit_opened_at = None
+        self.update_heartbeat()
     
     async def crawl(self, job_id: str) -> CrawlStats:
         """
@@ -547,6 +615,12 @@ class CrawlerEngine:
                         if self._cancelled:
                             return
                         
+                        # Check circuit breaker before processing
+                        if not self._check_circuit_breaker():
+                            # Put URL back in queue for later processing
+                            self.to_visit.append((url, depth))
+                            return
+                        
                         # Check limit BEFORE processing - atomic check
                         if self.config.max_pages > 0 and self.stats.pages_crawled >= self.config.max_pages:
                             return
@@ -569,14 +643,14 @@ class CrawlerEngine:
                                 # Atomically check and increment - only increment if under limit
                                 if self.config.max_pages == 0 or self.stats.pages_crawled < self.config.max_pages:
                                     self.stats.pages_crawled += 1
-                                    self.consecutive_errors = 0
+                                    self._record_success()  # Reset circuit breaker and update heartbeat
                                     self._decrease_delay()  # Speed up on success
                                 else:
                                     # Limit reached during processing, don't count this page
                                     logger.debug(f"Skipping page count for {url} - limit reached during processing")
                             else:
                                 self.stats.pages_failed += 1
-                                self.consecutive_errors += 1
+                                self._record_failure()  # Track failure for circuit breaker
                                 if self.consecutive_errors >= 5:
                                     self._increase_delay()
                             
@@ -589,6 +663,7 @@ class CrawlerEngine:
                             # Log but don't crash - continue with other URLs
                             logger.error(f"Worker error processing {url}: {e}")
                             self.stats.pages_failed += 1
+                            self._record_failure()  # Track exception as failure
                         finally:
                             try:
                                 await page.close()
@@ -598,6 +673,14 @@ class CrawlerEngine:
                 # Process URLs - continue until all processed or limits reached
                 processed_count = 0
                 while not self._cancelled:
+                    # Check circuit breaker - if open, wait for cooldown
+                    if self._circuit_open:
+                        reset_seconds = getattr(self.config, 'circuit_breaker_reset_seconds', 30)
+                        logger.info(f"⏸️ Circuit breaker open, waiting {reset_seconds}s before retry...")
+                        await asyncio.sleep(reset_seconds)
+                        self._check_circuit_breaker()  # Try to reset
+                        continue
+                    
                     # Check limits - skip if max_pages is 0 (unlimited)
                     if self.config.max_pages > 0 and self.stats.pages_crawled >= self.config.max_pages:
                         logger.info(f"Reached max pages limit: {self.config.max_pages}")
@@ -1170,15 +1253,24 @@ class CrawlerEngine:
         return links
     
     def _increase_delay(self):
-        """Increase delay due to errors (backpressure)."""
+        """Increase delay due to errors using exponential backoff with jitter."""
         if self.consecutive_errors >= 3:
-            self.current_delay = min(
-                self.current_delay * 1.5,
-                self.config.max_delay_seconds * 2
-            )
-            # Only log if delay actually changed significantly or hit max
-            if self.current_delay < self.config.max_delay_seconds * 2:
-                logger.debug(f"Increased delay to {self.current_delay:.1f}s due to errors")
+            # Exponential backoff with jitter to prevent synchronized retries
+            max_backoff = getattr(self.config, 'max_backoff_seconds', 60.0)
+            
+            # Exponential factor based on consecutive errors
+            backoff_factor = min(2 ** (self.consecutive_errors - 2), 32)  # Cap at 32x
+            base_delay = self.config.min_delay_seconds * backoff_factor
+            
+            # Add jitter (±25% randomization)
+            jitter = random.uniform(0.75, 1.25)
+            new_delay = base_delay * jitter
+            
+            self.current_delay = min(new_delay, max_backoff)
+            
+            # Only log if delay increased significantly
+            if self.current_delay > self.config.min_delay_seconds * 2:
+                logger.debug(f"📈 Backoff: delay increased to {self.current_delay:.1f}s (errors: {self.consecutive_errors})")
     
     def _decrease_delay(self):
         """Decrease delay on success."""

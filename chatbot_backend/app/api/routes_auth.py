@@ -88,6 +88,82 @@ async def login(
     }
 
 
+class RefreshTokenRequest(BaseModel):
+    access_token: str
+
+
+@router.post("/refresh")
+async def refresh_token(
+    request: RefreshTokenRequest,
+    db: Session = Depends(get_db),
+):
+    """Refresh an access token. Accepts tokens that are expired or about to expire."""
+    import jwt
+    from jwt import ExpiredSignatureError, InvalidTokenError
+    from datetime import datetime
+    
+    try:
+        # Decode token without verification first to get user info
+        # We'll verify the user exists and is active, then issue a new token
+        try:
+            # Try to decode with verification
+            payload = jwt.decode(
+                request.access_token, 
+                settings.SECRET_KEY, 
+                algorithms=[settings.ALGORITHM]
+            )
+        except ExpiredSignatureError:
+            # Token is expired, but we can still decode it without verifying expiration to get user info
+            payload = jwt.decode(
+                request.access_token, 
+                settings.SECRET_KEY, 
+                algorithms=[settings.ALGORITHM],
+                options={"verify_exp": False}  # Don't verify expiration, but still verify signature
+            )
+        
+        username: str = payload.get("sub")
+        user_id: str = payload.get("user_id")
+        
+        if not username or not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        
+        # Verify user still exists and is active
+        user = db.query(User).filter(
+            User.username == username,
+            User.user_id == user_id,
+            User.is_active == True
+        ).first()
+        
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found or inactive")
+        
+        # Issue a new token
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={
+                "sub": user.username,
+                "role": user.role,
+                "user_id": user.user_id,
+                "website_id": user.website_id,
+            },
+            expires_delta=access_token_expires,
+        )
+        
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "role": user.role,
+            "username": user.username,
+            "website_id": user.website_id,
+            "user_id": user.user_id,
+        }
+        
+    except InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Token refresh failed: {str(e)}")
+
+
 # Dependency to get current user from JWT
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     import jwt

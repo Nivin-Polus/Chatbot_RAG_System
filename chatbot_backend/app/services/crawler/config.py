@@ -78,6 +78,17 @@ class CrawlConfig:
     # LLM cleaning (optional, expensive)
     use_llm_cleaning: bool = False
     
+    # Timeout settings (milliseconds)
+    page_timeout_ms: int = 45000           # Initial page load timeout
+    network_idle_timeout_ms: int = 15000   # Network idle wait timeout
+    
+    # Resilience settings for large sites
+    max_retries_per_page: int = 3              # Max retries per individual page
+    circuit_breaker_threshold: int = 20        # Consecutive failures to trigger pause
+    circuit_breaker_reset_seconds: int = 30    # Seconds to wait before retry after circuit opens
+    max_backoff_seconds: float = 60.0          # Maximum backoff delay in seconds
+    stale_heartbeat_seconds: int = 300         # Consider stuck if no activity for 5 min
+    
     def to_dict(self) -> dict:
         """Convert to dictionary for storage."""
         return {
@@ -92,7 +103,14 @@ class CrawlConfig:
             "include_keywords": self.include_keywords,
             "similarity_threshold": self.similarity_threshold,
             "use_sitemap": self.use_sitemap,
-            "use_llm_cleaning": self.use_llm_cleaning
+            "use_llm_cleaning": self.use_llm_cleaning,
+            "page_timeout_ms": self.page_timeout_ms,
+            "network_idle_timeout_ms": self.network_idle_timeout_ms,
+            "max_retries_per_page": self.max_retries_per_page,
+            "circuit_breaker_threshold": self.circuit_breaker_threshold,
+            "circuit_breaker_reset_seconds": self.circuit_breaker_reset_seconds,
+            "max_backoff_seconds": self.max_backoff_seconds,
+            "stale_heartbeat_seconds": self.stale_heartbeat_seconds
         }
     
     @classmethod

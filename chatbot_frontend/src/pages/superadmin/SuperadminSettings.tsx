@@ -8,6 +8,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Settings, Key, Shield, User, Activity, ShieldCheck, Server, Cpu, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiGet, apiPost } from '@/utils/api';
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, ResponsiveContainer,
+  BarChart, Bar, Cell, Legend
+} from 'recharts';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '@/components/ui/select';
+import { format, subDays } from 'date-fns';
 
 type HealthComponent = {
   status?: string;
@@ -33,6 +45,9 @@ type TokenUsage = {
   total_tokens_used: number;
   total_queries: number;
   scope: 'website' | 'global';
+  daily_usage?: Array<{ date: string; queries: number; tokens: number }>;
+  model_breakdown?: Array<{ model_name: string; queries: number; tokens: number }>;
+  per_website?: Array<{ website_id: string; website_name: string; total_queries: number; total_tokens_used: number }>;
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -102,6 +117,11 @@ export default function SuperadminSettings() {
   const [isHealthLoading, setIsHealthLoading] = useState(false);
   const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
   const [isTokenUsageLoading, setIsTokenUsageLoading] = useState(false);
+  const [websites, setWebsites] = useState<Array<{ website_id: string; name: string }>>([]);
+
+  // Filters
+  const [filterDays, setFilterDays] = useState('30');
+  const [filterWebsiteId, setFilterWebsiteId] = useState<string>('all');
 
   const fetchHealth = async () => {
     if (!user?.access_token) {
@@ -145,13 +165,26 @@ export default function SuperadminSettings() {
       let url: string;
       let scope: TokenUsage['scope'];
 
+      // Calculate date range
+      const endDate = new Date();
+      const startDate = subDays(endDate, parseInt(filterDays));
+
+      const queryParams = new URLSearchParams({
+        start_date: startDate.toISOString(),
+        end_date: endDate.toISOString(),
+      });
+
+      if (filterWebsiteId !== 'all') {
+        queryParams.append('website_id', filterWebsiteId);
+      }
+
       if (user.website_id) {
         // Per-website usage
-        url = `${import.meta.env.VITE_API_BASE_URL}/websites/${user.website_id}/analytics`;
+        url = `${import.meta.env.VITE_API_BASE_URL}/websites/${user.website_id}/analytics?${queryParams.toString()}`;
         scope = 'website';
       } else if (user.role === 'super_admin' || user.role === 'superadmin') {
         // Global usage for superadmins without a website
-        url = `${import.meta.env.VITE_API_BASE_URL}/system/stats/token-usage`;
+        url = `${import.meta.env.VITE_API_BASE_URL}/system/stats/token-usage?${queryParams.toString()}`;
         scope = 'global';
       } else {
         setTokenUsage(null);
@@ -173,12 +206,17 @@ export default function SuperadminSettings() {
           total_tokens_used: analytics.total_tokens_used ?? 0,
           total_queries: analytics.total_queries ?? 0,
           scope,
+          daily_usage: data?.daily_usage || [],
+          model_breakdown: data?.model_breakdown || [],
         });
       } else {
         setTokenUsage({
           total_tokens_used: data?.total_tokens_used ?? 0,
           total_queries: data?.total_queries ?? 0,
           scope,
+          daily_usage: data?.daily_usage || [],
+          model_breakdown: data?.model_breakdown || [],
+          per_website: data?.per_website || [],
         });
       }
     } catch (error) {
@@ -191,11 +229,25 @@ export default function SuperadminSettings() {
     }
   };
 
+  const fetchWebsites = async () => {
+    if (!user?.access_token || user.role !== 'super_admin') return;
+    try {
+      const response = await apiGet(`${import.meta.env.VITE_API_BASE_URL}/websites/`, user.access_token);
+      if (response.ok) {
+        const data = await response.json();
+        setWebsites(data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch websites', error);
+    }
+  };
+
   useEffect(() => {
     fetchHealth();
     fetchTokenUsage();
+    fetchWebsites();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.access_token]);
+  }, [user?.access_token, filterDays, filterWebsiteId]);
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -249,40 +301,67 @@ export default function SuperadminSettings() {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold">Settings</h1>
-          
+
         </div>
 
         <div className="grid gap-6">
           {/* Token Usage Overview */}
           <Card>
-            <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div className="flex items-center gap-2">
                 <Activity className="h-5 w-5" />
                 <div>
-                  <CardTitle>Token Usage</CardTitle>
+                  <CardTitle>Token Usage & Analytics</CardTitle>
                   <CardDescription>
                     {tokenUsage?.scope === 'global'
-                      ? 'Total tokens consumed by chat queries across all websites'
-                      : 'Total tokens consumed by chat queries for this website'}
+                      ? 'Detailed token consumption and query analytics across all websites'
+                      : 'Detailed token consumption and query analytics for this website'}
                   </CardDescription>
                 </div>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={fetchTokenUsage}
-                disabled={isTokenUsageLoading}
-              >
-                {isTokenUsageLoading ? 'Refreshing…' : 'Refresh Usage'}
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                {user?.role === 'super_admin' && (
+                  <Select value={filterWebsiteId} onValueChange={setFilterWebsiteId}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="All Websites" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Websites</SelectItem>
+                      {websites.map((w) => (
+                        <SelectItem key={w.website_id} value={w.website_id}>
+                          {w.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <Select value={filterDays} onValueChange={setFilterDays}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="Last 30 days" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="7">Last 7 days</SelectItem>
+                    <SelectItem value="30">Last 30 days</SelectItem>
+                    <SelectItem value="90">Last 90 days</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={fetchTokenUsage}
+                  disabled={isTokenUsageLoading}
+                >
+                  {isTokenUsageLoading ? 'Refreshing…' : 'Refresh'}
+                </Button>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-8">
               {tokenUsage ? (
                 <>
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                     <div className="rounded-xl border bg-muted/40 p-4">
                       <div className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                        Total Tokens Used
+                        Total Tokens
                       </div>
                       <div className="mt-2 text-2xl font-bold">
                         {tokenUsage?.total_tokens_used?.toLocaleString() ?? '0'}
@@ -290,21 +369,161 @@ export default function SuperadminSettings() {
                     </div>
                     <div className="rounded-xl border bg-muted/40 p-4">
                       <div className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                        Total Chat Queries
+                        Total Queries
                       </div>
                       <div className="mt-2 text-2xl font-bold">
                         {tokenUsage?.total_queries?.toLocaleString() ?? '0'}
                       </div>
                     </div>
+                    <div className="rounded-xl border bg-muted/40 p-4">
+                      <div className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        Avg. Tokens/Query
+                      </div>
+                      <div className="mt-2 text-2xl font-bold">
+                        {tokenUsage.total_queries > 0
+                          ? Math.round(tokenUsage.total_tokens_used / tokenUsage.total_queries).toLocaleString()
+                          : '0'}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border bg-muted/40 p-4">
+                      <div className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        Active Models
+                      </div>
+                      <div className="mt-2 text-2xl font-bold">
+                        {tokenUsage.model_breakdown?.length ?? 0}
+                      </div>
+                    </div>
                   </div>
+
+                  <div className="grid gap-8 lg:grid-cols-3">
+                    <div className="lg:col-span-2 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Usage Over Time</h3>
+                      </div>
+                      <div className="h-[300px] w-full rounded-xl border bg-card p-4">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={tokenUsage.daily_usage}>
+                            <defs>
+                              <linearGradient id="colorTokens" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                                <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--muted-foreground))" opacity={0.1} />
+                            <XAxis
+                              dataKey="date"
+                              tickFormatter={(str) => format(new Date(str), 'MMM d')}
+                              fontSize={12}
+                              tickLine={false}
+                              axisLine={false}
+                            />
+                            <YAxis
+                              fontSize={12}
+                              tickLine={false}
+                              axisLine={false}
+                              tickFormatter={(value) => value >= 1000 ? `${(value / 1000).toFixed(1)}k` : value}
+                            />
+                            <ChartTooltip
+                              contentStyle={{
+                                backgroundColor: 'hsl(var(--card))',
+                                border: '1px solid hsl(var(--border))',
+                                borderRadius: '8px'
+                              }}
+                              labelFormatter={(label) => format(new Date(label), 'MMMM d, yyyy')}
+                            />
+                            <Area
+                              type="monotone"
+                              dataKey="tokens"
+                              stroke="hsl(var(--primary))"
+                              fillOpacity={1}
+                              fill="url(#colorTokens)"
+                              strokeWidth={2}
+                              name="Tokens"
+                            />
+                            <Area
+                              type="monotone"
+                              dataKey="queries"
+                              stroke="hsl(var(--secondary))"
+                              fillOpacity={0}
+                              strokeWidth={2}
+                              name="Queries"
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Model Distribution</h3>
+                      <div className="h-[300px] w-full rounded-xl border bg-card p-4">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={tokenUsage.model_breakdown} layout="vertical">
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="hsl(var(--muted-foreground))" opacity={0.1} />
+                            <XAxis type="number" hide />
+                            <YAxis
+                              dataKey="model_name"
+                              type="category"
+                              fontSize={11}
+                              width={100}
+                              tickLine={false}
+                              axisLine={false}
+                            />
+                            <ChartTooltip
+                              cursor={{ fill: 'transparent' }}
+                              contentStyle={{
+                                backgroundColor: 'hsl(var(--card))',
+                                border: '1px solid hsl(var(--border))',
+                                borderRadius: '8px'
+                              }}
+                            />
+                            <Bar dataKey="tokens" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} name="Tokens" />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+
+                  {tokenUsage.per_website && tokenUsage.per_website.length > 0 && (
+                    <div className="space-y-4">
+                      <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Detailed Website Usage</h3>
+                      <div className="overflow-hidden rounded-xl border">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-muted/50 text-left font-medium">
+                              <th className="p-3">Website</th>
+                              <th className="p-3 text-right">Total Queries</th>
+                              <th className="p-3 text-right">Total Tokens</th>
+                              <th className="p-3 text-right">Avg. Tokens/Query</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {tokenUsage.per_website.map((site) => (
+                              <tr key={site.website_id} className="hover:bg-muted/30 transition-colors">
+                                <td className="p-3 font-medium">{site.website_name}</td>
+                                <td className="p-3 text-right">{site.total_queries.toLocaleString()}</td>
+                                <td className="p-3 text-right">{site.total_tokens_used.toLocaleString()}</td>
+                                <td className="p-3 text-right">
+                                  {site.total_queries > 0
+                                    ? Math.round(site.total_tokens_used / site.total_queries).toLocaleString()
+                                    : '0'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
                   <p className="text-xs text-muted-foreground">
-                    Token counts are based on LLM-reported usage per chat request and may lag slightly behind real-time.
+                    Analytics are generated from chat interaction logs. Token counts represent approximate values as reported by the AI providers.
                   </p>
                 </>
               ) : (
-                <p className="text-sm text-muted-foreground">
-                  Token usage statistics are not available for this account.
-                </p>
+                <div className="py-12 text-center text-muted-foreground">
+                  <Activity className="mx-auto h-12 w-12 opacity-20" />
+                  <p className="mt-4">Loading token usage statistics...</p>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -316,7 +535,7 @@ export default function SuperadminSettings() {
                 <Activity className="h-5 w-5" />
                 <div>
                   <CardTitle>System Health Overview</CardTitle>
-                  
+
                 </div>
               </div>
               <Button variant="outline" size="sm" onClick={fetchHealth} disabled={isHealthLoading}>
@@ -327,9 +546,8 @@ export default function SuperadminSettings() {
               <div className="flex flex-wrap items-center gap-3">
                 <span className="text-sm text-muted-foreground">Overall status:</span>
                 <span
-                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold ${
-                    STATUS_COLORS[(health?.overall_status || '').toLowerCase()] || 'text-muted-foreground'
-                  }`}
+                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold ${STATUS_COLORS[(health?.overall_status || '').toLowerCase()] || 'text-muted-foreground'
+                    }`}
                 >
                   <ShieldCheck className="h-4 w-4" />
                   {formatStatus(health?.overall_status)}
@@ -349,9 +567,8 @@ export default function SuperadminSettings() {
                   </div>
                   <div className="mt-3 flex items-center gap-2 text-sm">
                     <span
-                      className={`font-semibold ${
-                        STATUS_COLORS[(health?.database?.status || '').toLowerCase()] || 'text-muted-foreground'
-                      }`}
+                      className={`font-semibold ${STATUS_COLORS[(health?.database?.status || '').toLowerCase()] || 'text-muted-foreground'
+                        }`}
                     >
                       {formatStatus(health?.database?.status)}
                     </span>
@@ -372,9 +589,8 @@ export default function SuperadminSettings() {
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-medium text-muted-foreground uppercase">Vector DB:</span>
                       <span
-                        className={`font-semibold ${
-                          STATUS_COLORS[(health?.vector_store?.status || '').toLowerCase()] || 'text-muted-foreground'
-                        }`}
+                        className={`font-semibold ${STATUS_COLORS[(health?.vector_store?.status || '').toLowerCase()] || 'text-muted-foreground'
+                          }`}
                       >
                         {formatStatus(health?.vector_store?.status)}
                       </span>
@@ -382,9 +598,8 @@ export default function SuperadminSettings() {
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-medium text-muted-foreground uppercase">AI Model:</span>
                       <span
-                        className={`font-semibold ${
-                          STATUS_COLORS[(health?.ai_model?.status || '').toLowerCase()] || 'text-muted-foreground'
-                        }`}
+                        className={`font-semibold ${STATUS_COLORS[(health?.ai_model?.status || '').toLowerCase()] || 'text-muted-foreground'
+                          }`}
                       >
                         {formatStatus(health?.ai_model?.status)}
                       </span>
@@ -401,9 +616,8 @@ export default function SuperadminSettings() {
                   </div>
                   <div className="mt-3 flex items-center gap-2 text-sm">
                     <span
-                      className={`font-semibold ${
-                        STATUS_COLORS[(health?.file_processing?.status || '').toLowerCase()] || 'text-muted-foreground'
-                      }`}
+                      className={`font-semibold ${STATUS_COLORS[(health?.file_processing?.status || '').toLowerCase()] || 'text-muted-foreground'
+                        }`}
                     >
                       {formatStatus(health?.file_processing?.status)}
                     </span>
@@ -422,9 +636,8 @@ export default function SuperadminSettings() {
                   </div>
                   <div className="mt-3 flex items-center gap-2 text-sm">
                     <span
-                      className={`font-semibold ${
-                        STATUS_COLORS[(health?.authentication?.status || '').toLowerCase()] || 'text-muted-foreground'
-                      }`}
+                      className={`font-semibold ${STATUS_COLORS[(health?.authentication?.status || '').toLowerCase()] || 'text-muted-foreground'
+                        }`}
                     >
                       {formatStatus(health?.authentication?.status)}
                     </span>
@@ -464,7 +677,7 @@ export default function SuperadminSettings() {
                 <User className="h-5 w-5" />
                 Account Information
               </CardTitle>
-            
+
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -497,11 +710,11 @@ export default function SuperadminSettings() {
                 <Shield className="h-5 w-5" />
                 Security Settings
               </CardTitle>
-              
+
             </CardHeader>
             <CardContent>
               <form onSubmit={handlePasswordChange} className="space-y-4">
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="newPassword">New Password</Label>
                   <Input
@@ -573,6 +786,6 @@ export default function SuperadminSettings() {
 
         </div>
       </div>
-    </DashboardLayout>
+    </DashboardLayout >
   );
 }

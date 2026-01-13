@@ -316,9 +316,16 @@ async def chat_statistics(current_user = Depends(get_current_user), db: Session 
 
 
 @router.get("/stats/token-usage")
-async def global_token_usage(current_user = Depends(get_current_user), db: Session = Depends(get_db)):
+async def global_token_usage(
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    website_id: Optional[str] = Query(None),
+    user_id: Optional[str] = Query(None),
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Get global token usage statistics across all websites.
+    Get global token usage statistics with filtering and detailed analytics.
     Restricted to super admins.
     """
     if not current_user.is_super_admin():
@@ -326,35 +333,99 @@ async def global_token_usage(current_user = Depends(get_current_user), db: Sessi
 
     try:
         from app.models.query_log import QueryLog
+        from app.models.website import Website
+        from datetime import datetime
+        from sqlalchemy import cast, Date
 
-        stats = db.query(
+        query = db.query(QueryLog)
+
+        # Apply filters
+        if start_date:
+            try:
+                start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                query = query.filter(QueryLog.created_at >= start_dt)
+            except ValueError:
+                pass
+        
+        if end_date:
+            try:
+                end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                query = query.filter(QueryLog.created_at <= end_dt)
+            except ValueError:
+                pass
+
+        if website_id:
+            query = query.filter(QueryLog.website_id == website_id)
+        
+        if user_id:
+            query = query.filter(QueryLog.user_id == user_id)
+
+        # 1. Total Stats
+        stats = query.with_entities(
             func.count(QueryLog.query_id).label("total_queries"),
             func.sum(QueryLog.tokens_used).label("total_tokens"),
         ).first()
 
-        per_website = db.query(
+        # 2. Daily Breakdown (Time Series)
+        daily_stats = query.with_entities(
+            func.date(QueryLog.created_at).label("day"),
+            func.count(QueryLog.query_id).label("queries"),
+            func.sum(QueryLog.tokens_used).label("tokens"),
+        ).group_by(func.date(QueryLog.created_at)).order_by(func.date(QueryLog.created_at)).all()
+
+        # 3. Model-wise Breakdown
+        model_stats = query.with_entities(
+            QueryLog.model_name,
+            func.count(QueryLog.query_id).label("queries"),
+            func.sum(QueryLog.tokens_used).label("tokens"),
+        ).group_by(QueryLog.model_name).all()
+
+        # 4. Website-wise Breakdown
+        website_stats = query.with_entities(
             QueryLog.website_id,
-            func.count(QueryLog.query_id).label("total_queries"),
-            func.sum(QueryLog.tokens_used).label("total_tokens"),
+            func.count(QueryLog.query_id).label("queries"),
+            func.sum(QueryLog.tokens_used).label("tokens"),
         ).group_by(QueryLog.website_id).all()
+
+        # Enrich website stats with names
+        website_names = {w.website_id: w.name for w in db.query(Website.website_id, Website.name).all()}
 
         return {
             "total_queries": stats.total_queries or 0,
-            "total_tokens_used": stats.total_tokens or 0,
+            "total_tokens_used": int(stats.total_tokens) if stats.total_tokens else 0,
+            "daily_usage": [
+                {
+                    "date": str(row.day),
+                    "queries": row.queries or 0,
+                    "tokens": int(row.tokens) if row.tokens else 0,
+                }
+                for row in daily_stats
+            ],
+            "model_breakdown": [
+                {
+                    "model_name": row.model_name or "Unknown",
+                    "queries": row.queries or 0,
+                    "tokens": int(row.tokens) if row.tokens else 0,
+                }
+                for row in model_stats
+            ],
             "per_website": [
                 {
                     "website_id": row.website_id,
-                    "total_queries": row.total_queries or 0,
-                    "total_tokens_used": row.total_tokens or 0,
+                    "website_name": website_names.get(row.website_id, "Unknown"),
+                    "total_queries": row.queries or 0,
+                    "total_tokens_used": int(row.tokens) if row.tokens else 0,
                 }
-                for row in per_website
+                for row in website_stats
             ],
         }
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get global token usage: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve token usage statistics")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve token usage statistics: {str(e)}")
 
 
 @router.get("/stats/overview")

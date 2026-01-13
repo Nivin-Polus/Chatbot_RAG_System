@@ -379,6 +379,7 @@ def _process_chat_request(
                 processing_time_ms=processing_time,
                 tokens_used=tokens_used,
                 chunks_retrieved=len(chunks),
+                model_name=str(model_value) if model_value else None,
                 status="success",
             )
 

@@ -34,6 +34,7 @@ class QueryLog(Base):
     context_used = Column(Text, nullable=True)  # JSON string of context
     files_accessed = Column(Text, nullable=True)  # JSON array of file IDs
     vector_search_score = Column(Float, nullable=True)
+    model_name = Column(String(100), nullable=True)
     
     # Status and error tracking
     status = Column(String(20), default="success", nullable=False)  # success, error, timeout
@@ -61,6 +62,7 @@ class QueryLog(Base):
             "context_used": self.context_used,
             "files_accessed": self.files_accessed,
             "vector_search_score": self.vector_search_score,
+            "model_name": self.model_name,
             "status": self.status,
             "error_message": self.error_message,
             "created_at": self.created_at.isoformat() if self.created_at else None
@@ -108,6 +110,7 @@ class QueryLogCreate(BaseModel):
     context_data: Optional[Dict[str, Any]] = None
     files_accessed: Optional[List[str]] = None
     vector_search_score: Optional[float] = None
+    model_name: Optional[str] = None
     status: str = "success"
     error_message: Optional[str] = None
 
@@ -124,6 +127,7 @@ class QueryLogResponse(BaseModel):
     tokens_used: Optional[int] = None
     chunks_retrieved: Optional[int] = None
     vector_search_score: Optional[float] = None
+    model_name: Optional[str] = None
     status: str
     error_message: Optional[str] = None
     created_at: str

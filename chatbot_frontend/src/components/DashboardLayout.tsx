@@ -5,15 +5,35 @@ import { Button } from '@/components/ui/button';
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { AppSidebar } from './AppSidebar';
 import { ThemeToggle } from './ThemeToggle';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface DashboardLayoutProps {
   children: ReactNode;
 }
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
+  const { user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const showBackButton = location.pathname !== '/superadmin';
+
+  const getHomePath = () => {
+    if (!user) return '/login';
+    switch (user.role) {
+      case 'super_admin':
+      case 'superadmin':
+        return '/superadmin';
+      case 'useradmin':
+      case 'user_admin':
+        return '/useradmin/knowledge-base';
+      case 'user':
+        return '/app/chat';
+      default:
+        return '/login';
+    }
+  };
+
+  const homePath = getHomePath();
+  const showBackButton = location.pathname !== homePath && location.pathname !== '/superadmin' && location.pathname !== '/useradmin/knowledge-base';
 
   return (
     <SidebarProvider>
@@ -27,8 +47,8 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => navigate('/superadmin')}
-                  title="Back to Knowledge Base"
+                  onClick={() => navigate(homePath)}
+                  title="Back"
                   className="h-7 w-7"
                 >
                   <ArrowLeft className="h-4 w-4" />

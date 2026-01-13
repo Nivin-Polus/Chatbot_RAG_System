@@ -6,6 +6,8 @@ A modern, embeddable chatbot plugin that integrates with your RAG (Retrieval-Aug
 
 - **🔐 OAuth2 Authentication** - Secure token-based authentication with automatic refresh
 - **💬 Real-time Chat** - Smooth chat interface with typing indicators
+- **🕒 Chat History** - Save and manage multiple chat sessions
+- **↔️ Expandable UI** - Toggle between compact and expanded view with history sidebar
 - **🎨 Modern UI** - Beautiful, responsive design with animations and enhanced input styling
 - **📱 Mobile Friendly** - Works seamlessly on desktop and mobile devices
 - **🔒 Secure** - HTML escaping and proper error handling
@@ -364,6 +366,12 @@ If you encounter any issues or have questions:
 3. Include browser console errors if applicable
 
 ## 🔄 Changelog
+
+### v1.2.0
+- ✅ **NEW**: Chat History Management (local storage persistence)
+- ✅ **NEW**: Expandable Chat Interface with Sidebar
+- ✅ **NEW**: Multiple Session Support with Delete capability
+- ✅ **NEW**: Settings and Expand buttons
 
 ### v1.1.0
 - ✅ **NEW**: Configurable UI text (header title, welcome message, input placeholder)

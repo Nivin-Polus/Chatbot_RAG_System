@@ -175,16 +175,23 @@ export default function SuperadminCrawler() {
   // Fetch crawl jobs
   const fetchJobs = useCallback(async () => {
     try {
+      // Suppress logout on 401 for polling to prevent disruption during long crawl jobs
       const response = await apiGet(
         `${import.meta.env.VITE_API_BASE_URL}/crawler/jobs`,
-        user?.access_token
+        user?.access_token,
+        false, // showErrorToast = false
+        false  // logoutOn401 = false - don't logout on expired token during polling
       );
       if (response.ok) {
         const data = await response.json();
         setJobs(data.jobs || []);
+      } else if (response.status === 401) {
+        // Token expired - silently fail to avoid disrupting long-running crawl monitoring
+        // User can manually refresh the page to re-authenticate if needed
+        console.warn('Token expired during crawl job polling');
       }
     } catch (error) {
-      // Failed to fetch jobs
+      // Failed to fetch jobs - silently handle to avoid disrupting monitoring
     } finally {
       setIsLoading(false);
     }
