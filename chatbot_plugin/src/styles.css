@@ -1318,3 +1318,30 @@ button {
   text-align: center;
 }
 
+
+/* Fix Icon Visibility */
+.chat-settings-btn, 
+.chat-expand-btn {
+  background: rgba(255, 255, 255, 0.2) !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+}
+
+.chat-settings-btn:hover, 
+.chat-expand-btn:hover {
+  background: rgba(255, 255, 255, 0.3) !important;
+}
+
+/* Ensure icons inside these buttons are white */
+.chat-settings-btn .icon,
+.chat-expand-btn .icon {
+  background-color: #ffffff !important;
+  -webkit-mask-image: var(--icon-url);
+  mask-image: var(--icon-url);
+  /* Fallback if mask fails */
+  background-image: none; 
+}
+
+/* For inline SVGs that are already colored or don't need masking (if I switch to bg-image)
+   But currently the design uses masks. Let's stick to masks but force the mask color (background-color) to white.
+*/
+

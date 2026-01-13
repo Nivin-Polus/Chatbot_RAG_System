@@ -36,11 +36,11 @@ import "./styles.css";
   // Wait for DOM to be ready before accessing elements
   let chatBox, chatEmpty, input, sendBtn, stopBtn;
   let inFlight = false;
-  let abortController = null;
   let currentTypingFinish = null;
   let currentRequestId = null; // Track current request to prevent old responses from updating UI
   let originalSendBtnHTML = null; // Store original send button HTML
   let userMessageCount = 0; // Track how many user messages have been sent in this session
+  let currentSessionId = null; // Track current session ID
 
   // LocalStorage keys for chat history
   const CHAT_HISTORY_KEY = 'chatbot_chat_history';
