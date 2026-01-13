@@ -18,7 +18,7 @@ import "./styles.css";
   ui.onExpandHistory = () => {
     // Sort sessions by timestamp desc
     const sorted = [...sessions].sort((a, b) => b.timestamp - a.timestamp);
-    ui.renderHistoryList(sorted, chatService.sessionId, switchSession, deleteSession);
+    ui.renderHistoryList(sorted, chatService.sessionId, switchSession, deleteSession, renameSession);
   };
   ui.init();
 
@@ -913,7 +913,6 @@ import "./styles.css";
   }
 
   function deleteSession(sessionId) {
-    if (!confirm("Delete this chat?")) return;
 
     sessions = sessions.filter(s => s.id !== sessionId);
     localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
@@ -922,6 +921,15 @@ import "./styles.css";
     if (chatService.sessionId === sessionId) {
       handleNewChat();
     } else {
+      if (ui.isExpanded && ui.onExpandHistory) ui.onExpandHistory();
+    }
+  }
+
+  function renameSession(sessionId, newTitle) {
+    const session = sessions.find(s => s.id === sessionId);
+    if (session) {
+      session.title = newTitle;
+      localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
       if (ui.isExpanded && ui.onExpandHistory) ui.onExpandHistory();
     }
   }

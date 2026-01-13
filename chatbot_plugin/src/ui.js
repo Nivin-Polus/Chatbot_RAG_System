@@ -21,7 +21,10 @@ export class ChatbotUI {
       minimize: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImJsYWNrIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTggM3YzYTIgMiAwIDAgMS0yIDJIMyI+PC9wYXRoPjxwYXRoIGQ9Ik0yMSA4aC0zYTIgMiAwIDAgMS0yLTJWMyI+PC9wYXRoPjxwYXRoIGQ9Ik0zIDE2aDNhMiAyIDAgMCAxIDIgMnYzIj48L3BhdGg+PHBhdGggZD0iTTE2IDIxdi0zYTIgMiAwIDAgMSAyLTJoMyI+PC9wYXRoPjwvc3ZnPg==",
       trash: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImJsYWNrIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTMgNmgxOCI+PC9wYXRoPjxwYXRoIGQ9Ik0xOSA2djE0YzAgMS0xIDItMiAySDdjLTEgMC0yLTEtMi0yVjYiPjwvcGF0aD48cGF0aCBkPSJNOCA2VjRjMC0xIDEtMiAyLTJoNGMxIDAgMiAxIDIgMnYyIj48L3BhdGg+PC9zdmc+",
       refresh: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImJsYWNrIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTMgMTJhOSA5IDAgMCAxIDktOSA5Ljc1IDkuNzUgMCAwIDEgNi43NCAyLjc0TDIxIDgiPjwvcGF0aD48cGF0aCBkPSJNMjEgM3Y1aC01Ij48L3BhdGg+PHBhdGggZD0iTTIxIDEyYTkgOSAwIDAgMS05IDkgOS43NSA5Ljc1IDAgMCAxLTYuNzQtMi43NEwzIDE2Ij48L3BhdGg+PHBhdGggZD0iTTggMTZIM3Y1Ij48L3BhdGg+PC9zdmc+",
-      close: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImJsYWNrIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE4IDYgNiAxOCI+PC9wYXRoPjxwYXRoIGQ9Im02IDYgMTIgMTIiPjwvcGF0aD48L3N2Zz4="
+      close: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImJsYWNrIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTE4IDYgNiAxOCI+PC9wYXRoPjxwYXRoIGQ9Im02IDYgMTIgMTIiPjwvcGF0aD48L3N2Zz4=",
+      plus: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImJsYWNrIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTIwIDEwVjE4QTIgMiAwIDAgMSAxOCAyMEg2TDMgMjNWOEEyIDIgMCAwIDEgNSA2SDE0IE0xOCAzVjkgTTE1IDZIMjEiIC8+PC9zdmc+",
+      edit: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImJsYWNrIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTExIDRINGEyIDIgMCAwIDAtMiAydjE0YTIgMiAwIDAgMCAyIDJoMTRhMiAyIDAgMCAwIDItMnYtNyI+PC9wYXRoPjxwYXRoIGQ9Ik0xOC41IDIuNWEyLjEyMSAyLjEyMSAwIDAgMSAzIDNMMTIgMTVsLTQgMSAxLTQgOS41LTkuNXoiPjwvcGF0aD48L3N2Zz4=",
+      menu: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImJsYWNrIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGxpbmUgeDE9IjMiIHkxPSIxMiIgeDI9IjIxIiB5Mj0iMTIiPjwvbGluZT48bGluZSB4MT0iMyIgeTE9IjYiIHgyPSIyMSIgeTI9IjYiPjwvbGluZT48bGluZSB4MT0iMyIgeTE9IjE4IiB4Mj0iMjEiIHkyPSIxOCI+PC9saW5lPjwvc3ZnPg=="
     };
 
     this.activeSidebarMode = 'history'; // 'history' | 'settings'
@@ -68,16 +71,16 @@ export class ChatbotUI {
           </div>
         </div>
         <div class="plugin-chat-header-right chat-header-right">
-          <div class="plugin-chat-icon-btn chat-settings-btn" id="chat-settings-btn" title="Settings" aria-label="Settings" data-tooltip="Settings" role="button" tabindex="0">
+          <div class="plugin-chat-icon-btn chat-settings-btn" id="chat-settings-btn" aria-label="Settings" data-tooltip="Settings" role="button" tabindex="0">
             <span class="plugin-icon icon" style="--icon-url: url('${this.ICONS.settings}');" aria-hidden="true"></span>
           </div>
-          <div class="plugin-chat-icon-btn chat-expand-btn" id="chat-expand-btn" title="Expand" aria-label="Expand" data-tooltip="Expand" role="button" tabindex="0">
+          <div class="plugin-chat-icon-btn chat-expand-btn" id="chat-expand-btn" aria-label="Expand" data-tooltip="Expand" role="button" tabindex="0">
              <span class="plugin-icon icon" style="--icon-url: url('${this.ICONS.expand}');" aria-hidden="true"></span>
           </div>
-          <div class="plugin-new-chat-btn new-chat-btn" id="new-chat-btn" title="Start new chat" aria-label="Start new chat" data-tooltip="Start new chat" role="button" tabindex="0">
-            <span class="plugin-icon icon" style="--icon-url: url('${this.ICONS.refresh}');" aria-hidden="true"></span>
+          <div class="plugin-new-chat-btn new-chat-btn" id="new-chat-btn" aria-label="Start new chat" data-tooltip="Start new chat" role="button" tabindex="0">
+            <span class="plugin-icon icon" style="--icon-url: url('${this.ICONS.plus}');" aria-hidden="true"></span>
           </div>
-          <div class="plugin-chat-close chat-close" title="Close chat" aria-label="Close chat" data-tooltip="Close chat" role="button" tabindex="0">
+          <div class="plugin-chat-close chat-close" aria-label="Close chat" data-tooltip="Close chat" role="button" tabindex="0">
             <span class="plugin-icon icon" style="--icon-url: url('${this.ICONS.close}');" aria-hidden="true"></span>
           </div>
         </div>
@@ -91,6 +94,9 @@ export class ChatbotUI {
             <div class="plugin-sidebar-content sidebar-content">
                 <div class="plugin-history-list history-list" id="chat-history-list"></div>
                 <div class="plugin-settings-panel settings-panel" id="chat-settings-panel" style="display:none;">
+                     <button class="plugin-settings-back" id="settings-back-btn">
+                        ← Back to History
+                     </button>
                      <!-- Basic Settings Content -->
                      <div class="plugin-settings-item">
                         <label>Plugin Version</label>
@@ -108,6 +114,9 @@ export class ChatbotUI {
         </div>
 
         <div class="plugin-chat-main chat-main">
+            <button class="plugin-sidebar-toggle sidebar-toggle" id="sidebar-toggle" aria-label="Toggle Menu">
+                <span class="plugin-icon icon" style="--icon-url: url('${this.ICONS.menu}');" aria-hidden="true"></span>
+            </button>
             <div class="plugin-chat-box chat-box" id="chat-box"></div>
 
             <div class="plugin-chat-empty chat-empty" id="chat-empty">
@@ -149,10 +158,26 @@ export class ChatbotUI {
     this.chatPanel.setAttribute("aria-hidden", "true");
 
     this.newChatBtn = this.chatPanel.querySelector("#new-chat-btn");
+    const sidebarToggleBtn = this.chatPanel.querySelector("#sidebar-toggle");
 
     // Wire up new buttons
     const expandBtn = this.chatPanel.querySelector("#chat-expand-btn");
     const settingsBtn = this.chatPanel.querySelector("#chat-settings-btn");
+
+    if (sidebarToggleBtn) {
+      sidebarToggleBtn.onclick = (e) => {
+        e.stopPropagation();
+        this.toggleSidebar();
+      };
+    }
+
+    const settingsBackBtn = this.chatPanel.querySelector("#settings-back-btn");
+    if (settingsBackBtn) {
+      settingsBackBtn.onclick = (e) => {
+        e.stopPropagation();
+        this.setSidebarMode('history');
+      };
+    }
 
     if (expandBtn) {
       expandBtn.onclick = (e) => {
@@ -234,6 +259,13 @@ export class ChatbotUI {
     }
   }
 
+  toggleSidebar() {
+    const sidebar = this.chatPanel.querySelector('#chat-sidebar');
+    if (sidebar) {
+      sidebar.classList.toggle('is-hidden');
+    }
+  }
+
   toggleExpand(forceMode) {
     // If specific mode requested, just switch to it if already expanded
     if (forceMode && this.isExpanded) {
@@ -256,6 +288,7 @@ export class ChatbotUI {
 
     if (this.isExpanded) {
       sidebar.style.display = "flex";
+      sidebar.classList.remove('is-hidden'); // Ensure visible when first expanding
 
       // Default to history if just expanding (unless forced)
       this.setSidebarMode(forceMode || 'history');
@@ -301,7 +334,7 @@ export class ChatbotUI {
     }
   }
 
-  renderHistoryList(sessions, activeSessionId, onSelect, onDelete) {
+  renderHistoryList(sessions, activeSessionId, onSelect, onDelete, onRename) {
     const list = this.chatPanel.querySelector("#chat-history-list");
     if (!list) return;
 
@@ -320,7 +353,6 @@ export class ChatbotUI {
       }
 
       const date = new Date(session.timestamp).toLocaleDateString();
-      // Use first message as title if available, else 'New Chat'
       const title = session.title || 'New Chat';
 
       item.innerHTML = `
@@ -329,13 +361,68 @@ export class ChatbotUI {
                 <div class="plugin-history-date">${date}</div>
             </div>
             <div class="plugin-history-actions">
+                <button class="plugin-history-edit" title="Rename">
+                     <span class="plugin-icon icon" style="--icon-url: url('${this.ICONS.edit}');" aria-hidden="true"></span>
+                </button>
                 <button class="plugin-history-delete" title="Delete">
                      <span class="plugin-icon icon" style="--icon-url: url('${this.ICONS.trash}');" aria-hidden="true"></span>
                 </button>
             </div>
         `;
 
-      item.onclick = () => onSelect(session.id);
+      // Select Helper
+      const handleSelect = (e) => {
+        // Don't select if we are interacting with actions
+        if (e.target.closest('.plugin-history-actions') || e.target.closest('input')) return;
+        onSelect(session.id);
+      };
+
+      item.addEventListener('click', handleSelect);
+
+      // Edit Handler
+      const editBtn = item.querySelector(".plugin-history-edit");
+      const titleEl = item.querySelector(".plugin-history-title");
+
+      editBtn.onclick = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+
+        const currentTitle = session.title || 'New Chat';
+        const input = document.createElement("input");
+        input.type = "text";
+        input.value = currentTitle;
+        input.className = "plugin-history-rename-input";
+
+        // Replace title with input
+        titleEl.replaceWith(input);
+        input.focus();
+
+        // Handle save
+        const save = () => {
+          const newTitle = input.value.trim();
+          if (newTitle && newTitle !== currentTitle) {
+            onRename(session.id, newTitle);
+          } else {
+            // Revert if empty or unchanged
+            input.replaceWith(titleEl);
+          }
+        };
+
+        // Save on blur or enter
+        input.onblur = save;
+        input.onkeydown = (ev) => {
+          if (ev.key === 'Enter') {
+            ev.preventDefault(); // Prevent chat submit
+            input.blur(); // Trigger save
+          }
+          if (ev.key === 'Escape') {
+            ev.preventDefault();
+            input.replaceWith(titleEl); // Cancel
+          }
+        };
+
+        input.onclick = (ev) => ev.stopPropagation(); // Prevent select
+      };
 
       const deleteBtn = item.querySelector(".plugin-history-delete");
       deleteBtn.onclick = (e) => {
