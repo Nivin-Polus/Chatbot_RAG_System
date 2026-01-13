@@ -812,7 +812,8 @@ button {
 /* Thinking indicator styles */
 .thinking-indicator,
 .plugin-thinking-indicator {
-  /* No additional padding needed - msg class already provides padding */
+  display: flex;
+  align-items: flex-start;
 }
 
 .thinking-content,
@@ -1135,6 +1136,7 @@ button {
     padding: 3px 6px;
   }
 }
+
 /* Expanded State */
 .plugin-chat-panel.is-expanded {
   width: min(800px, calc(100vw - 40px));
@@ -1203,7 +1205,7 @@ button {
 
 .plugin-history-item.is-active {
   background: #fff;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   border: 1px solid rgba(17, 24, 39, 0.05);
 }
 
@@ -1229,19 +1231,16 @@ button {
 }
 
 .plugin-history-actions {
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.plugin-history-item:hover .plugin-history-actions {
   opacity: 1;
+  display: flex;
+  align-items: center;
 }
 
 .plugin-history-delete {
   background: none;
   border: none;
   cursor: pointer;
-  padding: 4px;
+  padding: 6px;
   color: #9ca3af;
   border-radius: 4px;
   display: flex;
@@ -1250,16 +1249,25 @@ button {
 }
 
 .plugin-history-delete .icon {
-  width: 14px !important;
-  height: 14px !important;
-  background: #9ca3af !important;
+  width: 16px !important;
+  height: 16px !important;
+  background: #dc2626 !important;
+  -webkit-mask-image: var(--icon-url);
+  mask-image: var(--icon-url);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
 }
 
 .plugin-history-delete:hover {
   background: #fee2e2;
 }
+
 .plugin-history-delete:hover .icon {
-  background: #dc2626 !important;
+  background: #b91c1c !important;
 }
 
 .plugin-history-empty {
@@ -1319,24 +1327,40 @@ button {
 }
 
 
-/* Fix Icon Visibility */
-.chat-settings-btn, 
-.chat-expand-btn {
+/* Fix Icon Visibility for Settings and Expand buttons */
+.plugin-chat-icon-btn.chat-settings-btn,
+.plugin-chat-icon-btn.chat-expand-btn {
   background: white !important;
   border: 1px solid rgba(17, 24, 39, 0.12) !important;
+  width: 40px !important;
+  height: 40px !important;
+  border-radius: 10px !important;
+  cursor: pointer;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
 }
 
-.chat-settings-btn:hover, 
-.chat-expand-btn:hover {
+.plugin-chat-icon-btn.chat-settings-btn:hover,
+.plugin-chat-icon-btn.chat-expand-btn:hover {
   transform: translateY(-1px);
 }
 
-/* Ensure icons inside these buttons are primary color */
-.chat-settings-btn .icon,
-.chat-expand-btn .icon {
-  background-color: var(--chat-primary-solid) !important;
+/* Ensure icons inside settings and expand buttons are visible with primary color */
+.plugin-chat-icon-btn.chat-settings-btn .icon,
+.plugin-chat-icon-btn.chat-expand-btn .icon {
+  width: 18px !important;
+  height: 18px !important;
+  display: block !important;
+  background: var(--chat-primary) !important;
+  background-image: var(--chat-primary) !important;
   -webkit-mask-image: var(--icon-url);
   mask-image: var(--icon-url);
-  background-image: none; 
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
 }
-

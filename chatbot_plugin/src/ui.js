@@ -325,7 +325,7 @@ export class ChatbotUI {
             </div>
             <div class="plugin-history-actions">
                 <button class="plugin-history-delete" title="Delete">
-                     <span class="plugin-icon icon" style="--icon-url: url('${CONFIG.ui.apiBase}/dist/assets/close.svg');" aria-hidden="true"></span>
+                     <span class="plugin-icon icon" style="--icon-url: url('${CONFIG.ui.iconsBaseUrl}/trash.svg');" aria-hidden="true"></span>
                 </button>
             </div>
         `;
