@@ -12,6 +12,15 @@ export class ChatbotUI {
     this.newChatCooldownTimer = null;
     this.lastNewChatAt = 0;
     this.onExpandHistory = null;
+
+    // Embed icons to avoid external dependency issues
+    this.ICONS = {
+      settings: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='3'%3E%3C/circle%3E%3Cpath d='M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z'%3E%3C/path%3E%3C/svg%3E",
+      expand: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='15 3 21 3 21 9'%3E%3C/polyline%3E%3Cpolyline points='9 21 3 21 3 15'%3E%3C/polyline%3E%3Cline x1='21' y1='3' x2='14' y2='10'%3E%3C/line%3E%3Cline x1='3' y1='21' x2='10' y2='14'%3E%3C/line%3E%3C/svg%3E",
+      minimize: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3v3a2 2 0 0 1-2 2H3'%3E%3C/path%3E%3Cpath d='M21 8h-3a2 2 0 0 1-2-2V3'%3E%3C/path%3E%3Cpath d='M3 16h3a2 2 0 0 1 2 2v3'%3E%3C/path%3E%3Cpath d='M16 21v-3a2 2 0 0 1 2-2h3'%3E%3C/path%3E%3C/svg%3E"
+    };
+
+    this.activeSidebarMode = 'history'; // 'history' | 'settings'
   }
 
   init() {
@@ -56,10 +65,10 @@ export class ChatbotUI {
         </div>
         <div class="plugin-chat-header-right chat-header-right">
           <div class="plugin-chat-icon-btn chat-settings-btn" id="chat-settings-btn" title="Settings" aria-label="Settings" data-tooltip="Settings" role="button" tabindex="0">
-            <span class="plugin-icon icon" style="--icon-url: url('${CONFIG.ui.iconsBaseUrl}/settings.svg');" aria-hidden="true"></span>
+            <span class="plugin-icon icon" style="--icon-url: url('${this.ICONS.settings}');" aria-hidden="true"></span>
           </div>
           <div class="plugin-chat-icon-btn chat-expand-btn" id="chat-expand-btn" title="Expand" aria-label="Expand" data-tooltip="Expand" role="button" tabindex="0">
-             <span class="plugin-icon icon" style="--icon-url: url('${CONFIG.ui.iconsBaseUrl}/expand.svg');" aria-hidden="true"></span>
+             <span class="plugin-icon icon" style="--icon-url: url('${this.ICONS.expand}');" aria-hidden="true"></span>
           </div>
           <div class="plugin-new-chat-btn new-chat-btn" id="new-chat-btn" title="Start new chat" aria-label="Start new chat" data-tooltip="Start new chat" role="button" tabindex="0">
             <span class="plugin-icon icon" style="--icon-url: url('${CONFIG.ui.iconsBaseUrl}/refresh.svg');" aria-hidden="true"></span>
@@ -72,10 +81,26 @@ export class ChatbotUI {
 
       <div class="plugin-chat-body chat-body">
         <div class="plugin-chat-sidebar chat-sidebar" id="chat-sidebar" style="display:none;">
-            <div class="plugin-sidebar-header sidebar-header">
+            <div class="plugin-sidebar-header sidebar-header" id="sidebar-header">
                 <h3>Chat History</h3>
             </div>
-            <div class="plugin-history-list history-list" id="chat-history-list"></div>
+            <div class="plugin-sidebar-content sidebar-content">
+                <div class="plugin-history-list history-list" id="chat-history-list"></div>
+                <div class="plugin-settings-panel settings-panel" id="chat-settings-panel" style="display:none;">
+                     <!-- Basic Settings Content -->
+                     <div class="plugin-settings-item">
+                        <label>Plugin Version</label>
+                        <span>v1.2.0</span>
+                     </div>
+                     <div class="plugin-settings-item">
+                        <label>Theme</label>
+                        <span>System Default</span>
+                     </div>
+                     <div class="plugin-settings-info">
+                        More settings coming soon.
+                     </div>
+                </div>
+            </div>
         </div>
 
         <div class="plugin-chat-main chat-main">
@@ -122,11 +147,19 @@ export class ChatbotUI {
 
     // Wire up new buttons
     const expandBtn = this.chatPanel.querySelector("#chat-expand-btn");
+    const settingsBtn = this.chatPanel.querySelector("#chat-settings-btn");
 
     if (expandBtn) {
       expandBtn.onclick = (e) => {
         e.stopPropagation();
         this.toggleExpand();
+      };
+    }
+
+    if (settingsBtn) {
+      settingsBtn.onclick = (e) => {
+        e.stopPropagation();
+        this.toggleSettings();
       };
     }
 
@@ -196,21 +229,70 @@ export class ChatbotUI {
     }
   }
 
-  toggleExpand() {
+  toggleExpand(forceMode) {
+    // If specific mode requested, just switch to it if already expanded
+    if (forceMode && this.isExpanded) {
+      this.setSidebarMode(forceMode);
+      return;
+    }
+
+    // Default toggle behavior
     this.isExpanded = !this.isExpanded;
     this.chatPanel.classList.toggle("plugin-is-expanded", this.isExpanded);
     this.chatPanel.classList.toggle("is-expanded", this.isExpanded);
+
+    // Update expand icon
+    const expandBtnIcon = this.chatPanel.querySelector("#chat-expand-btn .icon");
+    if (expandBtnIcon) {
+      expandBtnIcon.style.setProperty("--icon-url", `url('${this.isExpanded ? this.ICONS.minimize : this.ICONS.expand}')`);
+    }
 
     const sidebar = this.chatPanel.querySelector("#chat-sidebar");
 
     if (this.isExpanded) {
       sidebar.style.display = "flex";
-      // Trigger history load
-      if (this.onExpandHistory) {
-        this.onExpandHistory();
-      }
+
+      // Default to history if just expanding (unless forced)
+      this.setSidebarMode(forceMode || 'history');
     } else {
       sidebar.style.display = "none";
+    }
+  }
+
+  toggleSettings() {
+    // If closed, open in settings mode
+    if (!this.isExpanded) {
+      this.toggleExpand('settings');
+      return;
+    }
+
+    // If already open and in settings mode, close sidebar (toggle expand)
+    if (this.activeSidebarMode === 'settings') {
+      this.toggleExpand(); // Close
+      return;
+    }
+
+    // If open in history mode, switch to settings
+    this.setSidebarMode('settings');
+  }
+
+  setSidebarMode(mode) {
+    this.activeSidebarMode = mode;
+
+    const historyList = this.chatPanel.querySelector("#chat-history-list");
+    const settingsPanel = this.chatPanel.querySelector("#chat-settings-panel");
+    const headerTitle = this.chatPanel.querySelector("#sidebar-header h3");
+
+    if (mode === 'settings') {
+      if (historyList) historyList.style.display = "none";
+      if (settingsPanel) settingsPanel.style.display = "block";
+      if (headerTitle) headerTitle.textContent = "Settings";
+    } else {
+      if (historyList) historyList.style.display = "block";
+      if (settingsPanel) settingsPanel.style.display = "none";
+      if (headerTitle) headerTitle.textContent = "Chat History";
+
+      if (this.onExpandHistory) this.onExpandHistory();
     }
   }
 
