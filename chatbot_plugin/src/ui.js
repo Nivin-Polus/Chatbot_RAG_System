@@ -87,6 +87,9 @@ export class ChatbotUI {
         <div class="plugin-chat-sidebar chat-sidebar" id="chat-sidebar" style="display:none;">
             <div class="plugin-sidebar-header sidebar-header" id="sidebar-header">
                 <h3>Chat History</h3>
+                <button class="plugin-sidebar-toggle sidebar-toggle" id="sidebar-toggle" aria-label="Close Menu">
+                    <span class="plugin-icon icon" style="--icon-url: url('${this.ICONS.menu}');" aria-hidden="true"></span>
+                </button>
             </div>
             <div class="plugin-sidebar-content sidebar-content">
                 <div class="plugin-history-list history-list" id="chat-history-list"></div>
@@ -111,7 +114,7 @@ export class ChatbotUI {
         </div>
 
         <div class="plugin-chat-main chat-main">
-            <button class="plugin-sidebar-toggle sidebar-toggle" id="sidebar-toggle" aria-label="Toggle Menu">
+            <button class="plugin-sidebar-toggle sidebar-show-btn" id="sidebar-show-btn" aria-label="Open Menu">
                 <span class="plugin-icon icon" style="--icon-url: url('${this.ICONS.menu}');" aria-hidden="true"></span>
             </button>
             <div class="plugin-chat-box chat-box" id="chat-box"></div>
@@ -156,15 +159,22 @@ export class ChatbotUI {
 
     this.newChatBtn = this.chatPanel.querySelector("#new-chat-btn");
     const sidebarToggleBtn = this.chatPanel.querySelector("#sidebar-toggle");
+    const sidebarShowBtn = this.chatPanel.querySelector("#sidebar-show-btn");
 
     // Wire up new buttons
     const expandBtn = this.chatPanel.querySelector("#chat-expand-btn");
 
+    const toggleHandler = (e) => {
+      e.stopPropagation();
+      this.toggleSidebar();
+    };
+
     if (sidebarToggleBtn) {
-      sidebarToggleBtn.onclick = (e) => {
-        e.stopPropagation();
-        this.toggleSidebar();
-      };
+      sidebarToggleBtn.onclick = toggleHandler;
+    }
+
+    if (sidebarShowBtn) {
+      sidebarShowBtn.onclick = toggleHandler;
     }
 
     const settingsBackBtn = this.chatPanel.querySelector("#settings-back-btn");

@@ -1241,8 +1241,8 @@ button {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  /* Smoother bezier curve */
-  transition: width 0.4s cubic-bezier(0.25, 1, 0.5, 1), min-width 0.4s cubic-bezier(0.25, 1, 0.5, 1), margin 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+  /* Smoother transition */
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), margin 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
   /* Prevent content squishing/flashing */
   white-space: nowrap;
@@ -1255,8 +1255,28 @@ button {
   margin: 0;
 }
 
-.sidebar-toggle {
+/* Sidebar header now contains toggle */
+.plugin-sidebar-header {
+  padding: 16px;
+  border-bottom: 1px solid rgba(17, 24, 39, 0.06);
+  background: #fff;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.plugin-sidebar-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+/* Sidebar Toggle Button Styles */
+.sidebar-toggle,
+.sidebar-show-btn {
   display: none;
+  /* Default hidden */
   background: white;
   border: 1px solid rgba(17, 24, 39, 0.1);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
@@ -1266,17 +1286,16 @@ button {
   color: #374151;
   align-items: center;
   justify-content: center;
-  /* Positioned in flow now to push content down */
-  align-self: flex-start;
-  margin: 12px 0 0 4px;
   z-index: 10;
 }
 
-.sidebar-toggle:hover {
+.sidebar-toggle:hover,
+.sidebar-show-btn:hover {
   background: #f3f4f6;
 }
 
-.sidebar-toggle .icon {
+.sidebar-toggle .icon,
+.sidebar-show-btn .icon {
   width: 20px;
   height: 20px;
   background-color: #374151;
@@ -1290,37 +1309,27 @@ button {
   mask-position: center;
 }
 
+/* Only show sidebar-toggle (close btn) inside header when expanded */
+/* Since it's inside the sidebar, it's visible if sidebar is visible */
 .plugin-chat-panel.is-expanded .sidebar-toggle {
   display: flex;
 }
 
-/* Sidebar inner content fade/slide */
-.plugin-sidebar-header,
-.plugin-sidebar-content {
-  opacity: 1;
-  transform: translateX(0);
-  transition: opacity 0.3s ease 0.1s, transform 0.3s ease 0.1s;
+/* Position show button in main area when sidebar is hidden but expanded */
+.sidebar-show-btn {
+  align-self: flex-start;
+  margin: 12px 0 0 12px;
 }
 
-.plugin-chat-sidebar.is-hidden .plugin-sidebar-header,
-.plugin-chat-sidebar.is-hidden .plugin-sidebar-content {
-  opacity: 0;
-  transform: translateX(-20px);
-  transition: opacity 0.2s ease, transform 0.2s ease;
+/* Logic: If sidebar is hidden AND expanded, show sidebar-show-btn */
+/* We can target the sidebar-show-btn inside .chat-main if .chat-sidebar has .is-hidden */
+/* Note: chat-sidebar and chat-main are siblings. */
+
+.plugin-chat-panel.is-expanded .plugin-chat-sidebar.is-hidden+.plugin-chat-main .sidebar-show-btn {
+  display: flex;
 }
 
-.plugin-sidebar-header {
-  padding: 16px;
-  border-bottom: 1px solid rgba(17, 24, 39, 0.06);
-  background: #fff;
-}
-
-.plugin-sidebar-header h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #1f2937;
-}
+/* If sidebar is NOT hidden (and expanded), the check is implied by default being display:none */
 
 .plugin-history-list {
   flex: 1;

@@ -513,7 +513,7 @@ import "./styles.css";
     }
   }
 
-  function handleNewChat() {
+  function handleNewChat(skipSave = false) {
     if (!ui.canTriggerNewChat()) return;
     ui.startNewChatCooldown();
 
@@ -557,9 +557,11 @@ import "./styles.css";
 
     // Save current session before starting a new one
     // Only save if there are user messages to avoid empty "New Chat" entries
-    const hasUserMessages = messages.some(m => m.user);
-    if (hasUserMessages && chatService.sessionId) {
-      saveChatHistory();
+    if (!skipSave) {
+      const hasUserMessages = messages.some(m => m.user);
+      if (hasUserMessages && chatService.sessionId) {
+        saveChatHistory();
+      }
     }
 
     // Clear context and messages
@@ -574,6 +576,20 @@ import "./styles.css";
     // Update history sidebar
     if (ui.onExpandHistory) {
       ui.onExpandHistory();
+    }
+  }
+
+  // ... (addMessage, etc.)
+
+  function deleteSession(sessionId) {
+    sessions = sessions.filter(s => s.id !== sessionId);
+    localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
+    localStorage.removeItem(CHAT_MESSAGES_PREFIX + sessionId);
+
+    if (chatService.sessionId === sessionId) {
+      handleNewChat(true); // Skip saving the session we just deleted
+    } else {
+      if (ui.isExpanded && ui.onExpandHistory) ui.onExpandHistory();
     }
   }
 
@@ -920,18 +936,7 @@ import "./styles.css";
     }
   }
 
-  function deleteSession(sessionId) {
 
-    sessions = sessions.filter(s => s.id !== sessionId);
-    localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
-    localStorage.removeItem(CHAT_MESSAGES_PREFIX + sessionId);
-
-    if (chatService.sessionId === sessionId) {
-      handleNewChat();
-    } else {
-      if (ui.isExpanded && ui.onExpandHistory) ui.onExpandHistory();
-    }
-  }
 
   function renameSession(sessionId, newTitle) {
     const session = sessions.find(s => s.id === sessionId);
