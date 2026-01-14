@@ -901,12 +901,20 @@ import "./styles.css";
         });
       });
 
-      renderMessages();
       chatService.restoreHistory(parsed);
-      ui.updateContextIndicator(chatService.getContextInfo());
 
-      if (ui.isExpanded && ui.onExpandHistory) ui.onExpandHistory();
-      scrollChatToBottom();
+      // Defer rendering to ensure all functions are initialized
+      // This prevents "Cannot access before initialization" errors in minified code
+      setTimeout(() => {
+        if (typeof renderMessages === 'function') {
+          renderMessages();
+        }
+        if (ui && typeof ui.updateContextIndicator === 'function') {
+          ui.updateContextIndicator(chatService.getContextInfo());
+        }
+        if (ui && ui.isExpanded && ui.onExpandHistory) ui.onExpandHistory();
+        scrollChatToBottom();
+      }, 0);
     } catch (e) {
       console.error("Failed to switch session", e);
     }

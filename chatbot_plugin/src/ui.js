@@ -71,9 +71,6 @@ export class ChatbotUI {
           </div>
         </div>
         <div class="plugin-chat-header-right chat-header-right">
-          <div class="plugin-chat-icon-btn chat-settings-btn" id="chat-settings-btn" aria-label="Settings" data-tooltip="Settings" role="button" tabindex="0">
-            <span class="plugin-icon icon" style="--icon-url: url('${this.ICONS.settings}');" aria-hidden="true"></span>
-          </div>
           <div class="plugin-chat-icon-btn chat-expand-btn" id="chat-expand-btn" aria-label="Expand" data-tooltip="Expand" role="button" tabindex="0">
              <span class="plugin-icon icon" style="--icon-url: url('${this.ICONS.expand}');" aria-hidden="true"></span>
           </div>
@@ -162,7 +159,6 @@ export class ChatbotUI {
 
     // Wire up new buttons
     const expandBtn = this.chatPanel.querySelector("#chat-expand-btn");
-    const settingsBtn = this.chatPanel.querySelector("#chat-settings-btn");
 
     if (sidebarToggleBtn) {
       sidebarToggleBtn.onclick = (e) => {
@@ -186,12 +182,6 @@ export class ChatbotUI {
       };
     }
 
-    if (settingsBtn) {
-      settingsBtn.onclick = (e) => {
-        e.stopPropagation();
-        this.toggleSettings();
-      };
-    }
 
     /** Handle Placeholder Gradient */
     const inputField = this.chatPanel.querySelector(".plugin-chat-input-field");
