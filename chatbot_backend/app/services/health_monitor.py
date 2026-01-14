@@ -114,8 +114,8 @@ class HealthMonitorService:
 
             response_time = round((time.time() - start_time) * 1000, 2)  # ms
 
-            # Check if response contains expected content
-            is_healthy = "OK" in test_response or len(test_response.strip()) > 0
+            # Check if response contains expected content or contains our error message
+            is_healthy = ("OK" in test_response or len(test_response.strip()) > 0) and "I encountered an error while processing" not in test_response
             
             return {
                 "status": "healthy" if is_healthy else "unhealthy",

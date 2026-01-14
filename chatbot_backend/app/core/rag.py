@@ -21,6 +21,7 @@ logging.basicConfig(level=logging.INFO)
 # RAG limits to prevent overloading LLM context
 MAX_QUERY_EXPANSIONS = 8   # Maximum queries (original + expansions)
 MAX_CONTEXT_TOKENS = 2500  # Token cap for Claude Sonnet
+MIN_SCORE = 0.45           # Minimum similarity threshold to filter low-confidence chunks
 
 
 def _estimate_tokens(text: str) -> int:
@@ -177,9 +178,9 @@ class RAG:
                 r"beyond my (knowledge|scope|capabilities)",
                 r"i'm here to help with questions about your knowledge base",
                 r"let me know what you'd like to learn",
+                r"i encountered an error while processing",
                 r"ai model is currently unavailable",
                 r"ai service is temporarily overloaded",
-                r"encountered an error while processing",
             ]
             normalized = raw_response.lower()
             for pattern in fallback_generic_patterns:
@@ -311,6 +312,13 @@ class RAG:
                 all_results.append(r)
         
         logger.info(f"[RAG RETRIEVE] Total unique results: {len(all_results)}")
+        
+        # Filter by minimum similarity score (after boosting, before sorting)
+        pre_filter_count = len(all_results)
+        all_results = [r for r in all_results if r.get("score", 0) >= MIN_SCORE]
+        filtered_by_score = pre_filter_count - len(all_results)
+        if filtered_by_score > 0:
+            logger.info(f"[RAG RETRIEVE] Filtered {filtered_by_score} chunks below MIN_SCORE={MIN_SCORE}")
         
         # Filter by collection_id BEFORE sort and top_k (Bug Fix #2)
         if collection_id is not None:
@@ -462,7 +470,7 @@ class RAG:
             logger.error(f"AI Provider Error ({self.ai_provider}): {e}")
             
             # Return consistent error message for all LLM failures (tagged as generic)
-            return "AI model is currently unavailable. Please try again in a few moments. [RESPONSE_TYPE:GENERIC]", None
+            return "I encountered an error while processing your question. Please try again. [RESPONSE_TYPE:GENERIC]", None
 
     def answer(self, query: str, top_k: int = 5, collection_id: Optional[str] = None) -> Union[str, Dict[str, any]]:
         """Main pipeline: retrieve → medium-detailed answer with source references using collection-specific prompt.
@@ -538,9 +546,11 @@ Answer:"""
             temperature=temperature_value,
         )
         
-        # DEBUG: Log raw response to identify truncation source
-        logger.info(f"[RAG DEBUG] Raw answer length: {len(raw_answer)} chars")
-        logger.info(f"[RAG DEBUG] Raw answer preview: {raw_answer[:500]}..." if len(raw_answer) > 500 else f"[RAG DEBUG] Raw answer: {raw_answer}")
+        # Log LLM response details
+        logger.info(f"[LLM RESPONSE] Provider: {self.ai_provider}, Model: {model_value}")
+        logger.info(f"[LLM RESPONSE] Tokens used: {tokens_used}")
+        logger.info(f"[LLM RESPONSE] Response length: {len(raw_answer)} chars")
+        logger.info(f"[LLM RESPONSE] Full response:\n{raw_answer}")
         
         # Parse AI response to extract classification
         parsed = self._parse_ai_response(raw_answer)
@@ -548,7 +558,7 @@ Answer:"""
         is_generic = parsed["is_generic"]
         
         # Force is_generic=True if AI call failed (no tokens used or error text detected)
-        if tokens_used is None or "AI model is currently unavailable" in answer:
+        if tokens_used is None or "I encountered an error while processing your question" in answer:
             is_generic = True
         
         logger.info(f"[RAG DEBUG] Parsed answer length: {len(answer)} chars")
@@ -557,7 +567,7 @@ Answer:"""
         # Format: [file_name](reference|source_type) for frontend parsing
         # reference = file_id for files, url for web_crawl
         # Remove any existing sources section (case-insensitive) - handles with or without preceding newline
-        answer = re.sub(r'[\s\n]*\**\s*[Ss]ources?:?\s*\**[\s\S]*$', '', answer).strip()
+        answer = re.sub(r'(?:^|\n)\s*\**\s*\bSources?\b:?\s*\**\s*(?:\n[\s\S]*)?$', '', answer, flags=re.IGNORECASE).strip()
         
         logger.info(f"[RAG DEBUG] After sources strip length: {len(answer)} chars")
         
@@ -677,20 +687,26 @@ Answer:"""
             temperature=temperature_value,
         )
         
+        # Log LLM response details
+        logger.info(f"[LLM RESPONSE] Provider: {self.ai_provider}, Model: {model_value}")
+        logger.info(f"[LLM RESPONSE] Tokens used: {tokens_used}")
+        logger.info(f"[LLM RESPONSE] Response length: {len(raw_answer)} chars")
+        logger.info(f"[LLM RESPONSE] Full response:\n{raw_answer}")
+        
         # Parse AI response to extract classification
         parsed = self._parse_ai_response(raw_answer)
         answer = parsed["answer"]
         is_generic = parsed["is_generic"]
         
         # Force is_generic=True if AI call failed (no tokens used or error text detected)
-        if tokens_used is None or "AI model is currently unavailable" in answer:
+        if tokens_used is None or "I encountered an error while processing your question" in answer:
             is_generic = True
         
         # ALWAYS add formatted sources - remove any AI-generated sources section first
         # Format: [file_name](reference|source_type) for frontend parsing
         # reference = file_id for files, url for web_crawl
         # Remove any existing sources section (case-insensitive) - handles with or without preceding newline
-        answer = re.sub(r'[\s\n]*\**\s*[Ss]ources?:?\s*\**[\s\S]*$', '', answer).strip()
+        answer = re.sub(r'(?:^|\n)\s*\**\s*\bSources?\b:?\s*\**\s*(?:\n[\s\S]*)?$', '', answer, flags=re.IGNORECASE).strip()
         
         # Build and append formatted sources ONLY if not a generic response
         if not is_generic:

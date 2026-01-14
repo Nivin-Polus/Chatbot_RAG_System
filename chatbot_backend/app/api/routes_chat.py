@@ -319,7 +319,9 @@ def _process_chat_request(
                 model_name = settings.CLAUDE_MODEL
         
         # Safety check: Remove any "Sources:" section from answer text (should be in sources field only)
-        answer_text = re.sub(r'[\s\n]*\**\s*[Ss]ources?:?\s*\**[\s\S]*$', '', answer_text).strip()
+        # Use word boundary \b to avoid matching "Sources" inside words like "resources"
+        # Require newline or start of string, optional markdown formatting, then "Sources:" as a header
+        answer_text = re.sub(r'(?:^|\n)\s*\**\s*\bSources?\b:?\s*\**\s*(?:\n[\s\S]*)?$', '', answer_text, flags=re.IGNORECASE).strip()
         
     except Exception as e:
         logger.error(f"[RAG ERROR] Failed to generate answer: {str(e)}")
@@ -457,6 +459,11 @@ def _process_chat_request(
     # Don't send sources for generic responses
     if is_generic:
         sources_payload = []
+    
+    # Debug: Log final response being sent to frontend
+    logger.info(f"[API RESPONSE] Final answer length: {len(answer_text)} chars")
+    logger.info(f"[API RESPONSE] Final answer content:\n{answer_text}")
+    logger.info(f"[API RESPONSE] is_generic: {is_generic}, sources count: {len(sources_payload)}")
     
     return ChatResponse(answer=answer_text, session_id=effective_session_id, is_generic=is_generic, sources=sources_payload)
 
