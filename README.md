@@ -102,7 +102,7 @@ This **collection-based** RAG chatbot system uses a single vector database intel
 - **Progressive Enhancement**: Start minimal, add features as needed
 - **Production-Ready**: Comprehensive error handling and logging
 - **Loading States** - Clear feedback during operations
-pythi
+
 ---
 
 ## 🎨 **Light Theme Design**

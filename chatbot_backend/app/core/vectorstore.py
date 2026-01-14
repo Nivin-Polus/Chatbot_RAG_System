@@ -363,34 +363,42 @@ class VectorStore:
                 except Exception as filter_error:
                     logger.warning(f"Failed to apply collection filter: {filter_error}")
 
-            results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector.tolist(),
-                limit=top_k * 2,  # Fetch extra to allow score filtering
-                query_filter=qdrant_filter
-            )
-            
-            # Enhanced logging for debugging retrieval issues
-            logger.info(f"[RAG SEARCH] Qdrant returned {len(results)} raw results")
-            
-            # Log top results with scores and text snippets
-            for i, r in enumerate(results[:5]):
-                text_snippet = r.payload.get("text", "")[:100].replace("\n", " ")
-                file_name = r.payload.get("file_name", "unknown")
-                source_type = r.payload.get("source_type", "file")
-                logger.info(f"[RAG SEARCH] Result {i+1}: score={r.score:.4f} | source={source_type} | file={file_name}")
-                logger.debug(f"[RAG SEARCH] Result {i+1} text: {text_snippet}...")
-            
-            # Apply score threshold filter
-            filtered_results = [r for r in results if r.score >= score_threshold]
-            if len(filtered_results) < len(results):
-                logger.info(f"[RAG SEARCH] Filtered {len(results) - len(filtered_results)} results below score threshold {score_threshold}")
-            
-            # Take top_k after filtering
-            final_results = filtered_results[:top_k]
-            
-            return [{"payload": r.payload, "score": r.score} for r in final_results]
-        else:
+            try:
+                results = self.client.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_vector.tolist(),
+                    limit=top_k * 2,  # Fetch extra to allow score filtering
+                    query_filter=qdrant_filter
+                )
+                
+                # Enhanced logging for debugging retrieval issues
+                logger.info(f"[RAG SEARCH] Qdrant returned {len(results)} raw results")
+                
+                # Log top results with scores and text snippets
+                for i, r in enumerate(results[:5]):
+                    text_snippet = r.payload.get("text", "")[:100].replace("\n", " ")
+                    file_name = r.payload.get("file_name", "unknown")
+                    source_type = r.payload.get("source_type", "file")
+                    logger.info(f"[RAG SEARCH] Result {i+1}: score={r.score:.4f} | source={source_type} | file={file_name}")
+                    logger.debug(f"[RAG SEARCH] Result {i+1} text: {text_snippet}...")
+                
+                # Apply score threshold filter
+                filtered_results = [r for r in results if r.score >= score_threshold]
+                if len(filtered_results) < len(results):
+                    logger.info(f"[RAG SEARCH] Filtered {len(results) - len(filtered_results)} results below score threshold {score_threshold}")
+                
+                # Take top_k after filtering
+                final_results = filtered_results[:top_k]
+                
+                return [{"payload": r.payload, "score": r.score} for r in final_results]
+            except Exception as search_error:
+                logger.error(f"Qdrant search failed: {search_error}. Falling back to in-memory search.")
+                # Disable client and fall through to fallback logic
+                self.client = None
+                if not hasattr(self, 'documents'):
+                    self._init_fallback_storage()
+        
+        if not self.client:
             # Use fallback: simple cosine similarity
             import numpy as np
             logger.debug(f"[SEARCH DEBUG] Total documents in memory: {len(self.documents)}")

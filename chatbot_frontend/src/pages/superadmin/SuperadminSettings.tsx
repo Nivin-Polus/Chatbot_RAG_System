@@ -46,7 +46,7 @@ type TokenUsage = {
   total_queries: number;
   scope: 'website' | 'global';
   daily_usage?: Array<{ date: string; queries: number; tokens: number }>;
-  model_breakdown?: Array<{ model_name: string; queries: number; tokens: number }>;
+  collection_breakdown?: Array<{ collection_id: string; collection_name: string; queries: number; tokens: number }>;
   per_website?: Array<{ website_id: string; website_name: string; total_queries: number; total_tokens_used: number }>;
 };
 
@@ -117,11 +117,9 @@ export default function SuperadminSettings() {
   const [isHealthLoading, setIsHealthLoading] = useState(false);
   const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
   const [isTokenUsageLoading, setIsTokenUsageLoading] = useState(false);
-  const [websites, setWebsites] = useState<Array<{ website_id: string; name: string }>>([]);
 
   // Filters
   const [filterDays, setFilterDays] = useState('30');
-  const [filterWebsiteId, setFilterWebsiteId] = useState<string>('all');
 
   const fetchHealth = async () => {
     if (!user?.access_token) {
@@ -174,10 +172,6 @@ export default function SuperadminSettings() {
         end_date: endDate.toISOString(),
       });
 
-      if (filterWebsiteId !== 'all') {
-        queryParams.append('website_id', filterWebsiteId);
-      }
-
       if (user.website_id) {
         // Per-website usage
         url = `${import.meta.env.VITE_API_BASE_URL}/websites/${user.website_id}/analytics?${queryParams.toString()}`;
@@ -229,25 +223,11 @@ export default function SuperadminSettings() {
     }
   };
 
-  const fetchWebsites = async () => {
-    if (!user?.access_token || user.role !== 'super_admin') return;
-    try {
-      const response = await apiGet(`${import.meta.env.VITE_API_BASE_URL}/websites/`, user.access_token);
-      if (response.ok) {
-        const data = await response.json();
-        setWebsites(data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch websites', error);
-    }
-  };
-
   useEffect(() => {
     fetchHealth();
     fetchTokenUsage();
-    fetchWebsites();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.access_token, filterDays, filterWebsiteId]);
+  }, [user?.access_token, filterDays]);
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -320,21 +300,6 @@ export default function SuperadminSettings() {
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {user?.role === 'super_admin' && (
-                  <Select value={filterWebsiteId} onValueChange={setFilterWebsiteId}>
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="All Websites" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Websites</SelectItem>
-                      {websites.map((w) => (
-                        <SelectItem key={w.website_id} value={w.website_id}>
-                          {w.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
                 <Select value={filterDays} onValueChange={setFilterDays}>
                   <SelectTrigger className="w-[140px]">
                     <SelectValue placeholder="Last 30 days" />
@@ -358,7 +323,7 @@ export default function SuperadminSettings() {
             <CardContent className="space-y-8">
               {tokenUsage ? (
                 <>
-                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                     <div className="rounded-xl border bg-muted/40 p-4">
                       <div className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                         Total Tokens
@@ -385,101 +350,62 @@ export default function SuperadminSettings() {
                           : '0'}
                       </div>
                     </div>
-                    <div className="rounded-xl border bg-muted/40 p-4">
-                      <div className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                        Active Models
-                      </div>
-                      <div className="mt-2 text-2xl font-bold">
-                        {tokenUsage.model_breakdown?.length ?? 0}
-                      </div>
-                    </div>
                   </div>
 
-                  <div className="grid gap-8 lg:grid-cols-3">
-                    <div className="lg:col-span-2 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Usage Over Time</h3>
-                      </div>
-                      <div className="h-[300px] w-full rounded-xl border bg-card p-4">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart data={tokenUsage.daily_usage}>
-                            <defs>
-                              <linearGradient id="colorTokens" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                                <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                              </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--muted-foreground))" opacity={0.1} />
-                            <XAxis
-                              dataKey="date"
-                              tickFormatter={(str) => format(new Date(str), 'MMM d')}
-                              fontSize={12}
-                              tickLine={false}
-                              axisLine={false}
-                            />
-                            <YAxis
-                              fontSize={12}
-                              tickLine={false}
-                              axisLine={false}
-                              tickFormatter={(value) => value >= 1000 ? `${(value / 1000).toFixed(1)}k` : value}
-                            />
-                            <ChartTooltip
-                              contentStyle={{
-                                backgroundColor: 'hsl(var(--card))',
-                                border: '1px solid hsl(var(--border))',
-                                borderRadius: '8px'
-                              }}
-                              labelFormatter={(label) => format(new Date(label), 'MMMM d, yyyy')}
-                            />
-                            <Area
-                              type="monotone"
-                              dataKey="tokens"
-                              stroke="hsl(var(--primary))"
-                              fillOpacity={1}
-                              fill="url(#colorTokens)"
-                              strokeWidth={2}
-                              name="Tokens"
-                            />
-                            <Area
-                              type="monotone"
-                              dataKey="queries"
-                              stroke="hsl(var(--secondary))"
-                              fillOpacity={0}
-                              strokeWidth={2}
-                              name="Queries"
-                            />
-                          </AreaChart>
-                        </ResponsiveContainer>
-                      </div>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Usage Over Time</h3>
                     </div>
-
-                    <div className="space-y-4">
-                      <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Model Distribution</h3>
-                      <div className="h-[300px] w-full rounded-xl border bg-card p-4">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={tokenUsage.model_breakdown} layout="vertical">
-                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="hsl(var(--muted-foreground))" opacity={0.1} />
-                            <XAxis type="number" hide />
-                            <YAxis
-                              dataKey="model_name"
-                              type="category"
-                              fontSize={11}
-                              width={100}
-                              tickLine={false}
-                              axisLine={false}
-                            />
-                            <ChartTooltip
-                              cursor={{ fill: 'transparent' }}
-                              contentStyle={{
-                                backgroundColor: 'hsl(var(--card))',
-                                border: '1px solid hsl(var(--border))',
-                                borderRadius: '8px'
-                              }}
-                            />
-                            <Bar dataKey="tokens" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} name="Tokens" />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
+                    <div className="h-[300px] w-full rounded-xl border bg-card p-4">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={tokenUsage.daily_usage}>
+                          <defs>
+                            <linearGradient id="colorTokens" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                              <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--muted-foreground))" opacity={0.1} />
+                          <XAxis
+                            dataKey="date"
+                            tickFormatter={(str) => format(new Date(str), 'MMM d')}
+                            fontSize={12}
+                            tickLine={false}
+                            axisLine={false}
+                          />
+                          <YAxis
+                            fontSize={12}
+                            tickLine={false}
+                            axisLine={false}
+                            tickFormatter={(value) => value >= 1000 ? `${(value / 1000).toFixed(1)}k` : value}
+                          />
+                          <ChartTooltip
+                            contentStyle={{
+                              backgroundColor: 'hsl(var(--card))',
+                              border: '1px solid hsl(var(--border))',
+                              borderRadius: '8px'
+                            }}
+                            labelFormatter={(label) => format(new Date(label), 'MMMM d, yyyy')}
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="tokens"
+                            stroke="hsl(var(--primary))"
+                            fillOpacity={1}
+                            fill="url(#colorTokens)"
+                            strokeWidth={2}
+                            name="Tokens"
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="queries"
+                            stroke="hsl(var(--secondary))"
+                            fillOpacity={0}
+                            strokeWidth={2}
+                            name="Queries"
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
                     </div>
                   </div>
 

@@ -374,12 +374,27 @@ async def global_token_usage(
             func.sum(QueryLog.tokens_used).label("tokens"),
         ).group_by(func.date(QueryLog.created_at)).order_by(func.date(QueryLog.created_at)).all()
 
-        # 3. Model-wise Breakdown
-        model_stats = query.with_entities(
-            QueryLog.model_name,
-            func.count(QueryLog.query_id).label("queries"),
-            func.sum(QueryLog.tokens_used).label("tokens"),
-        ).group_by(QueryLog.model_name).all()
+        # 3. Collection-wise Breakdown (via ChatSession join)
+        from app.models.chat_tracking import ChatSession
+        from app.models.collection import Collection
+        from sqlalchemy import case
+        
+        collection_stats = (
+            query
+            .join(ChatSession, QueryLog.session_id == ChatSession.session_id, isouter=True)
+            .join(Collection, ChatSession.collection_id == Collection.collection_id, isouter=True)
+            .with_entities(
+                func.coalesce(Collection.collection_id, 'no_collection').label("collection_id"),
+                func.coalesce(Collection.name, 'No Collection').label("collection_name"),
+                func.count(QueryLog.query_id).label("queries"),
+                func.sum(QueryLog.tokens_used).label("tokens"),
+            )
+            .group_by(
+                func.coalesce(Collection.collection_id, 'no_collection'),
+                func.coalesce(Collection.name, 'No Collection')
+            )
+            .all()
+        )
 
         # 4. Website-wise Breakdown
         website_stats = query.with_entities(
@@ -402,13 +417,14 @@ async def global_token_usage(
                 }
                 for row in daily_stats
             ],
-            "model_breakdown": [
+            "collection_breakdown": [
                 {
-                    "model_name": row.model_name or "Unknown",
+                    "collection_id": row.collection_id,
+                    "collection_name": row.collection_name or "No Collection",
                     "queries": row.queries or 0,
                     "tokens": int(row.tokens) if row.tokens else 0,
                 }
-                for row in model_stats
+                for row in collection_stats
             ],
             "per_website": [
                 {

@@ -2,6 +2,7 @@ from typing import List, Dict, Optional, Tuple, Union
 import requests
 import json
 import re
+import logging
 
 try:
     import boto3
@@ -12,6 +13,19 @@ from app.config import settings
 from app.models.system_prompt import SystemPrompt
 from app.models.collection import Collection
 from app.core.database import get_db
+
+# Initialize logger
+logger = logging.getLogger("rag")
+logging.basicConfig(level=logging.INFO)
+
+# RAG limits to prevent overloading LLM context
+MAX_QUERY_EXPANSIONS = 8   # Maximum queries (original + expansions)
+MAX_CONTEXT_TOKENS = 2500  # Token cap for Claude Sonnet
+
+
+def _estimate_tokens(text: str) -> int:
+    """Estimate token count (~4 chars per token for English)."""
+    return len(text) // 4 if text else 0
 
 # AI Classification instruction - appended to every prompt independently of user-configurable system prompts
 # This ensures users cannot disable the generic detection functionality
@@ -163,6 +177,9 @@ class RAG:
                 r"beyond my (knowledge|scope|capabilities)",
                 r"i'm here to help with questions about your knowledge base",
                 r"let me know what you'd like to learn",
+                r"ai model is currently unavailable",
+                r"ai service is temporarily overloaded",
+                r"encountered an error while processing",
             ]
             normalized = raw_response.lower()
             for pattern in fallback_generic_patterns:
@@ -203,9 +220,6 @@ class RAG:
         Includes query expansion for 'who is X' or title-based queries.
         Applies keyword-based score boosting for both names and job titles.
         """
-        import logging
-        logger = logging.getLogger("rag")
-        
         # Handle None collection_id properly
         collection_id_str = collection_id if collection_id is not None else None
         
@@ -221,21 +235,20 @@ class RAG:
             # Clean common filler words
             search_term = re.sub(r"^(?:find|search|get|show|for|a)\s+", "", query.lower().strip())
         
-        # Query expansion
+        # Query expansion (limited to MAX_QUERY_EXPANSIONS)
         expanded_queries = [query]  # Always include original query
         
         if search_term:
             logger.info(f"[RAG QUERY EXPANSION] Detected search term: '{search_term}'")
             
-            # Add expanded queries for better matching
-            # Includes directory patterns and role-specific variations
-            expanded_queries.extend([
+            # Limited expansion queries to prevent overload
+            expansion_candidates = [
                 search_term,
                 f"{search_term} staff directory contacts",
-                f"{search_term} role position title",
-                f"staff {search_term}",
-                f"{search_term} email phone address"
-            ])
+            ]
+            # Take at most (MAX_QUERY_EXPANSIONS - 1) expansions
+            expanded_queries.extend(expansion_candidates[:MAX_QUERY_EXPANSIONS - 1])
+            logger.info(f"[RAG QUERY EXPANSION] Total queries: {len(expanded_queries)} (max: {MAX_QUERY_EXPANSIONS})")
         
         # Collect results from all expanded queries
         all_results = []
@@ -299,25 +312,31 @@ class RAG:
         
         logger.info(f"[RAG RETRIEVE] Total unique results: {len(all_results)}")
         
-        # Sort by boosted scores
+        # Filter by collection_id BEFORE sort and top_k (Bug Fix #2)
+        if collection_id is not None:
+            filtered_results = []
+            filtered_count = 0
+            for r in all_results:
+                payload = r.get("payload", {})
+                payload_collection_id = payload.get("collection_id")
+                if payload_collection_id is None or str(payload_collection_id) != str(collection_id):
+                    filtered_count += 1
+                    continue
+                filtered_results.append(r)
+            all_results = filtered_results
+            if filtered_count > 0:
+                logger.info(f"[RAG RETRIEVE] Filtered {filtered_count} chunks due to collection_id mismatch")
+        
+        # GLOBAL sort by boosted scores
         all_results.sort(key=lambda x: x.get("score", 0), reverse=True)
+        # HARD top_k limit - no exceptions (Bug Fix #2)
         results = all_results[:top_k]
+        logger.info(f"[RAG RETRIEVE] Final result count after hard top_k={top_k}: {len(results)}")
         
         chunks_with_sources = []
-        filtered_count = 0
-        
         for r in results:
             payload = r.get("payload", {})
             score = r.get("score", 0)
-
-            if collection_id is not None:
-                payload_collection_id = payload.get("collection_id")
-                if payload_collection_id is None:
-                    filtered_count += 1
-                    continue
-                if str(payload_collection_id) != str(collection_id):
-                    filtered_count += 1
-                    continue
             
             chunks_with_sources.append({
                 "text": payload.get("text", ""),
@@ -329,9 +348,6 @@ class RAG:
                 "canonical_url": payload.get("canonical_url", ""),
                 "score": score
             })
-        
-        if filtered_count > 0:
-            logger.info(f"[RAG RETRIEVE] Filtered {filtered_count} chunks due to collection_id mismatch")
         
         return chunks_with_sources
 
@@ -361,7 +377,7 @@ class RAG:
             try:
                 db_prompt.increment_usage(self.db_session)
             except Exception as e:
-                logging.error(f"Error updating prompt usage: {e}")
+                logger.error(f"Error updating prompt usage: {e}")
 
         return system_prompt, model, max_tokens, temperature
 
@@ -442,8 +458,11 @@ class RAG:
                 raise ValueError(f"Unsupported AI_PROVIDER: {self.ai_provider}")
 
         except Exception as e:
-            logging.error(f"AI Provider Error ({self.ai_provider}): {e}")
-            return "I wasn't able to retrieve a confident answer, please refine your question.", None
+            error_str = str(e)
+            logger.error(f"AI Provider Error ({self.ai_provider}): {e}")
+            
+            # Return consistent error message for all LLM failures (tagged as generic)
+            return "AI model is currently unavailable. Please try again in a few moments. [RESPONSE_TYPE:GENERIC]", None
 
     def answer(self, query: str, top_k: int = 5, collection_id: Optional[str] = None) -> Union[str, Dict[str, any]]:
         """Main pipeline: retrieve → medium-detailed answer with source references using collection-specific prompt.
@@ -463,12 +482,22 @@ class RAG:
 
         system_prompt, model, max_tokens, temperature = self._resolve_prompt_settings(collection_id)
 
-        # Build context with source information
+        # Build context with source information and TOKEN CAP (Bug Fix #3)
         context_parts = []
         source_files = {}  # Dict to store source metadata (file_id, source_type, url)
+        total_tokens = 0
         
         for i, chunk in enumerate(chunks_with_sources):
-            context_parts.append(f"Source {i+1} (from {chunk['file_name']}):\n{chunk['text']}")
+            chunk_text = chunk['text']
+            chunk_tokens = _estimate_tokens(chunk_text)
+            
+            # Check token cap before adding
+            if total_tokens + chunk_tokens > MAX_CONTEXT_TOKENS:
+                logger.info(f"[RAG TOKEN CAP] Stopping at {i} chunks, {total_tokens} tokens (limit: {MAX_CONTEXT_TOKENS})")
+                break
+            
+            total_tokens += chunk_tokens
+            context_parts.append(f"Source {i+1} (from {chunk['file_name']}):\n{chunk_text}")
             # Store source metadata for frontend rendering
             if chunk['file_name'] not in source_files:
                 source_files[chunk['file_name']] = {
@@ -476,6 +505,8 @@ class RAG:
                     'source_type': chunk.get('source_type', 'file'),
                     'url': chunk.get('url', '') or chunk.get('canonical_url', '')
                 }
+        
+        logger.info(f"[RAG CONTEXT] Using {len(context_parts)} chunks, ~{total_tokens} tokens")
         
         context = "\n\n---\n\n".join(context_parts)
         
@@ -498,8 +529,6 @@ Answer:"""
         temperature_value = temperature if isinstance(temperature, (int, float)) else getattr(temperature, 'temperature', self.default_temperature)
         
         # Debug logging to trace max_tokens value
-        import logging
-        logger = logging.getLogger("rag")
         logger.info(f"[RAG AI CALL] Using max_tokens={max_tokens_value}, model={model_value}, temperature={temperature_value}")
         
         raw_answer, tokens_used = self.call_ai(
@@ -517,6 +546,10 @@ Answer:"""
         parsed = self._parse_ai_response(raw_answer)
         answer = parsed["answer"]
         is_generic = parsed["is_generic"]
+        
+        # Force is_generic=True if AI call failed (no tokens used or error text detected)
+        if tokens_used is None or "AI model is currently unavailable" in answer:
+            is_generic = True
         
         logger.info(f"[RAG DEBUG] Parsed answer length: {len(answer)} chars")
         
@@ -585,12 +618,22 @@ Answer:"""
                 
                 conversation_context += f"{role}: {content}\n"
 
-        # Build context with source information
+        # Build context with source information and TOKEN CAP (Bug Fix #3)
         context_parts = []
         source_files = {}  # Dict to store source metadata (file_id, source_type, url)
+        total_tokens = 0
         
         for i, chunk in enumerate(chunks_with_sources):
-            context_parts.append(f"Source {i+1} (from {chunk['file_name']}):\n{chunk['text']}")
+            chunk_text = chunk['text']
+            chunk_tokens = _estimate_tokens(chunk_text)
+            
+            # Check token cap before adding
+            if total_tokens + chunk_tokens > MAX_CONTEXT_TOKENS:
+                logger.info(f"[RAG TOKEN CAP] Stopping at {i} chunks, {total_tokens} tokens (limit: {MAX_CONTEXT_TOKENS})")
+                break
+            
+            total_tokens += chunk_tokens
+            context_parts.append(f"Source {i+1} (from {chunk['file_name']}):\n{chunk_text}")
             # Store source metadata for frontend rendering
             if chunk['file_name'] not in source_files:
                 source_files[chunk['file_name']] = {
@@ -598,6 +641,8 @@ Answer:"""
                     'source_type': chunk.get('source_type', 'file'),
                     'url': chunk.get('url', '') or chunk.get('canonical_url', '')
                 }
+        
+        logger.info(f"[RAG CONTEXT] Using {len(context_parts)} chunks, ~{total_tokens} tokens")
         
         context = "\n\n---\n\n".join(context_parts)
         
@@ -623,8 +668,6 @@ Answer:"""
         temperature_value = temperature if isinstance(temperature, (int, float)) else getattr(temperature, 'temperature', self.default_temperature)
         
         # Debug logging to trace max_tokens value
-        import logging
-        logger = logging.getLogger("rag")
         logger.info(f"[RAG AI CALL WITH CONTEXT] Using max_tokens={max_tokens_value}, model={model_value}, temperature={temperature_value}")
         
         raw_answer, tokens_used = self.call_ai(
@@ -638,6 +681,10 @@ Answer:"""
         parsed = self._parse_ai_response(raw_answer)
         answer = parsed["answer"]
         is_generic = parsed["is_generic"]
+        
+        # Force is_generic=True if AI call failed (no tokens used or error text detected)
+        if tokens_used is None or "AI model is currently unavailable" in answer:
+            is_generic = True
         
         # ALWAYS add formatted sources - remove any AI-generated sources section first
         # Format: [file_name](reference|source_type) for frontend parsing

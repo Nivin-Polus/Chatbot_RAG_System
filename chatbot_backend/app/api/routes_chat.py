@@ -299,14 +299,24 @@ def _process_chat_request(
         
         # Handle new dict return format from RAG (contains 'answer' and 'is_generic')
         tokens_used = None
+        model_name = None
         if isinstance(rag_result, dict):
             answer_text = rag_result.get("answer", "")
             is_generic_from_ai = rag_result.get("is_generic", False)
             tokens_used = rag_result.get("tokens_used")
+            model_name = rag_result.get("model_name")
         else:
             # Fallback for string return (shouldn't happen with updated RAG)
             answer_text = rag_result
             is_generic_from_ai = _is_generic_query(question) or _is_generic_response(answer_text)
+        
+        # If model_name not in rag_result, get from settings
+        if not model_name:
+            from app.config import settings
+            if settings.AI_PROVIDER == "bedrock":
+                model_name = settings.AWS_MODEL
+            else:
+                model_name = settings.CLAUDE_MODEL
         
         # Safety check: Remove any "Sources:" section from answer text (should be in sources field only)
         answer_text = re.sub(r'[\s\n]*\**\s*[Ss]ources?:?\s*\**[\s\S]*$', '', answer_text).strip()
@@ -379,7 +389,7 @@ def _process_chat_request(
                 processing_time_ms=processing_time,
                 tokens_used=tokens_used,
                 chunks_retrieved=len(chunks),
-                model_name=str(model_value) if model_value else None,
+                model_name=model_name,
                 status="success",
             )
 
