@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO)
 # RAG limits to prevent overloading LLM context
 MAX_QUERY_EXPANSIONS = 8   # Maximum queries (original + expansions)
 MAX_CONTEXT_TOKENS = 2500  # Token cap for Claude Sonnet
-MIN_SCORE = 0.45           # Minimum similarity threshold to filter low-confidence chunks
+MIN_SCORE = 0.35           # Minimum similarity threshold to filter low-confidence chunks
 
 # Conversation summarization settings
 MAX_VERBATIM_MESSAGES = 20   # Keep last 10 Q&A pairs (20 messages) verbatim
@@ -579,6 +579,94 @@ Respond with ONLY the clarifying question(s), nothing else."""
         
         return fallbacks.get(reason, "Could you please clarify your question so I can better assist you?")
 
+    def summarize_conversation(self, older_messages: List) -> str:
+        """
+        Summarize older conversation messages to preserve context without overwhelming the LLM.
+        
+        Called when conversation_history exceeds MAX_VERBATIM_MESSAGES.
+        Uses the LLM to generate a concise summary of key points.
+        
+        Args:
+            older_messages: List of conversation messages (dicts or Pydantic objects) to summarize
+            
+        Returns:
+            str: A concise summary of the conversation history
+        """
+        if not older_messages:
+            return ""
+        
+        # Build conversation text from older messages
+        conversation_text = ""
+        for msg in older_messages:
+            # Handle both Pydantic objects and dictionaries
+            if hasattr(msg, 'role') and hasattr(msg, 'content'):
+                role = "User" if msg.role == "user" else "Assistant"
+                content = msg.content
+            else:
+                role = "User" if msg.get("role") == "user" else "Assistant"
+                content = msg.get("content", "")
+            
+            conversation_text += f"{role}: {content}\n"
+        
+        # Estimate tokens to avoid too long summaries
+        estimated_tokens = _estimate_tokens(conversation_text)
+        logger.info(f"[SUMMARIZATION] Summarizing {len(older_messages)} older messages (~{estimated_tokens} tokens)")
+        
+        summary_prompt = f"""You are summarizing a conversation between a user and an AI assistant for context preservation.
+
+Conversation to summarize:
+{conversation_text}
+
+Create a CONCISE summary (max 200 words) that captures:
+1. Main topics discussed
+2. Key questions the user asked
+3. Important information or answers provided
+4. Any decisions or conclusions reached
+
+Write the summary in third person (e.g., "The user asked about...", "The assistant explained...").
+Focus on information that would be useful for continuing the conversation.
+
+Summary:"""
+
+        try:
+            summary_text, _ = self.call_ai(
+                summary_prompt,
+                max_tokens=300,  # Keep summary concise
+                temperature=0.3  # Lower temperature for more focused summary
+            )
+            
+            # Clean up the response
+            summary_text = summary_text.strip()
+            
+            # Remove any classification tags that might leak through
+            summary_text = re.sub(r'\[RESPONSE_TYPE:\w+\]', '', summary_text).strip()
+            
+            if summary_text:
+                logger.info(f"[SUMMARIZATION] Summary generated: {summary_text[:100]}...")
+                return summary_text
+            else:
+                logger.warning("[SUMMARIZATION] Empty summary generated, using fallback")
+                return self._get_fallback_summary(older_messages)
+                
+        except Exception as e:
+            logger.error(f"[SUMMARIZATION] AI summarization failed: {e}")
+            return self._get_fallback_summary(older_messages)
+    
+    def _get_fallback_summary(self, messages: List) -> str:
+        """Generate a simple fallback summary when AI summarization fails."""
+        user_messages = []
+        for msg in messages:
+            if hasattr(msg, 'role') and hasattr(msg, 'content'):
+                if msg.role == "user":
+                    user_messages.append(msg.content[:50])
+            elif msg.get("role") == "user":
+                user_messages.append(msg.get("content", "")[:50])
+        
+        if user_messages:
+            topics = ", ".join(user_messages[:3])
+            return f"Earlier in the conversation, the user asked about: {topics}..."
+        return "The conversation covered various topics earlier."
+
     def _resolve_prompt_settings(self, collection_id: Optional[str] = None):
         """Determine system prompt and model configuration for the given collection.
         
@@ -831,22 +919,47 @@ Answer:"""
 
         system_prompt, model, max_tokens, temperature = self._resolve_prompt_settings(collection_id)
 
-        # Build conversation context
+        # Build conversation context with summarization for long histories
         conversation_context = ""
         if conversation_history:
-            conversation_context = "\n\nPrevious Conversation:\n"
-            for msg in conversation_history[-6:]:  # Last 6 messages for context
-                # Handle both Pydantic objects and dictionaries
-                if hasattr(msg, 'role') and hasattr(msg, 'content'):
-                    # Pydantic object
-                    role = "Human" if msg.role == "user" else "Assistant"
-                    content = msg.content
-                else:
-                    # Dictionary
-                    role = "Human" if msg.get("role") == "user" else "Assistant"
-                    content = msg.get("content", "")
+            history_length = len(conversation_history)
+            
+            # Check if we need to summarize older messages
+            if history_length > SUMMARY_TRIGGER_THRESHOLD:
+                # Split: older messages (to summarize) + recent messages (verbatim)
+                older_messages = conversation_history[:-MAX_VERBATIM_MESSAGES]
+                recent_messages = conversation_history[-MAX_VERBATIM_MESSAGES:]
                 
-                conversation_context += f"{role}: {content}\n"
+                logger.info(f"[CONTEXT] History length {history_length} exceeds threshold {SUMMARY_TRIGGER_THRESHOLD}")
+                logger.info(f"[CONTEXT] Summarizing {len(older_messages)} older messages, keeping {len(recent_messages)} verbatim")
+                
+                # Generate summary of older messages
+                summary = self.summarize_conversation(older_messages)
+                
+                # Build context with summary + recent verbatim messages
+                conversation_context = "\n\n[Conversation Summary (earlier messages)]:\n"
+                conversation_context += f"{summary}\n"
+                conversation_context += "\n[Recent Conversation (last 10 Q&A pairs)]:\n"
+                
+                for msg in recent_messages:
+                    if hasattr(msg, 'role') and hasattr(msg, 'content'):
+                        role = "Human" if msg.role == "user" else "Assistant"
+                        content = msg.content
+                    else:
+                        role = "Human" if msg.get("role") == "user" else "Assistant"
+                        content = msg.get("content", "")
+                    conversation_context += f"{role}: {content}\n"
+            else:
+                # History is within limit, use all messages verbatim
+                conversation_context = "\n\nPrevious Conversation:\n"
+                for msg in conversation_history:
+                    if hasattr(msg, 'role') and hasattr(msg, 'content'):
+                        role = "Human" if msg.role == "user" else "Assistant"
+                        content = msg.content
+                    else:
+                        role = "Human" if msg.get("role") == "user" else "Assistant"
+                        content = msg.get("content", "")
+                    conversation_context += f"{role}: {content}\n"
 
         # Build context with source information and TOKEN CAP (Bug Fix #3)
         context_parts = []
