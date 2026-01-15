@@ -373,6 +373,8 @@ export default function PluginUserChat() {
                             }
                             const fileName = typeof item.file_name === 'string' ? item.file_name : undefined;
                             const fileId = typeof item.file_id === 'string' ? item.file_id : undefined;
+                            const sourceType = typeof item.source_type === 'string' ? item.source_type as 'file' | 'web_crawl' : undefined;
+                            const url = typeof item.url === 'string' ? item.url : undefined;
 
                             if (!fileName) {
                                 return null;
@@ -380,6 +382,8 @@ export default function PluginUserChat() {
                             return {
                                 file_name: fileName,
                                 file_id: fileId,
+                                source_type: sourceType,
+                                url: url,
                             } satisfies ChatSource;
                         })
                         .filter((value): value is ChatSource => value !== null)
