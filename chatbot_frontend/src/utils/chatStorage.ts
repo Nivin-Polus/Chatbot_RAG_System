@@ -217,6 +217,204 @@ export function clearAllSessions(userId: string | undefined, role: string): void
   }
 }
 
+// --- Plugin Session Migration ---
+
+// Plugin localStorage keys
+const PLUGIN_SESSIONS_INDEX_KEY = 'chatbot_sessions_index';
+const PLUGIN_MESSAGES_PREFIX = 'chatbot_messages_';
+
+interface PluginMessage {
+  user: boolean;
+  text: string;
+  formatted: boolean;
+  timestamp: string;
+  sources?: Array<{
+    file_name?: string;
+    file_id?: string;
+    chunk_indices?: number[];
+    source_type?: string;
+    url?: string;
+  }>;
+  isFollowup?: boolean;
+}
+
+interface PluginSession {
+  id: string;
+  title: string;
+  timestamp: number;
+}
+
+/**
+ * Migrate a specific plugin session to the frontend format
+ * Returns the session ID if migration was successful, null otherwise
+ */
+export function migratePluginSession(
+  pluginSessionId: string,
+  userId: string | undefined,
+  role: string,
+  collectionId: string
+): string | null {
+  try {
+    // Read plugin session messages
+    const pluginMessagesKey = `${PLUGIN_MESSAGES_PREFIX}${pluginSessionId}`;
+    const pluginMessagesStr = localStorage.getItem(pluginMessagesKey);
+    
+    if (!pluginMessagesStr) {
+      console.warn('Plugin session not found:', pluginSessionId);
+      return null;
+    }
+
+    const pluginMessages: PluginMessage[] = JSON.parse(pluginMessagesStr);
+    
+    if (!Array.isArray(pluginMessages) || pluginMessages.length === 0) {
+      console.warn('No messages in plugin session:', pluginSessionId);
+      return null;
+    }
+
+    // Convert plugin messages to frontend format
+    const frontendMessages: ChatMessage[] = pluginMessages.map((msg, index) => ({
+      id: msg.user ? `user_${Date.now()}_${index}` : `assistant_${Date.now()}_${index}`,
+      role: msg.user ? 'user' as const : 'assistant' as const,
+      content: msg.text || '',
+      timestamp: new Date(msg.timestamp || Date.now()),
+      sources: msg.sources?.map(s => ({
+        file_name: s.file_name || '',
+        file_id: s.file_id,
+        chunk_indices: s.chunk_indices,
+        source_type: s.source_type,
+        url: s.url,
+      })).filter(s => s.file_name),
+      isFollowup: msg.isFollowup,
+    }));
+
+    // Save to frontend storage format
+    saveSession(pluginSessionId, frontendMessages, collectionId, userId, role);
+    
+    return pluginSessionId;
+  } catch (error) {
+    console.error('Failed to migrate plugin session:', error);
+    return null;
+  }
+}
+
+/**
+ * Migrate all plugin sessions to the frontend format
+ * Returns array of migrated session IDs
+ */
+export function migrateAllPluginSessions(
+  userId: string | undefined,
+  role: string,
+  collectionId: string
+): string[] {
+  try {
+    const sessionsStr = localStorage.getItem(PLUGIN_SESSIONS_INDEX_KEY);
+    if (!sessionsStr) return [];
+
+    const pluginSessions: PluginSession[] = JSON.parse(sessionsStr);
+    if (!Array.isArray(pluginSessions)) return [];
+
+    const migratedIds: string[] = [];
+    
+    for (const session of pluginSessions) {
+      const migratedId = migratePluginSession(session.id, userId, role, collectionId);
+      if (migratedId) {
+        migratedIds.push(migratedId);
+      }
+    }
+
+    return migratedIds;
+  } catch (error) {
+    console.error('Failed to migrate plugin sessions:', error);
+    return [];
+  }
+}
+
+/**
+ * Check if a plugin session exists
+ */
+export function hasPluginSession(sessionId: string): boolean {
+  try {
+    const messagesKey = `${PLUGIN_MESSAGES_PREFIX}${sessionId}`;
+    return localStorage.getItem(messagesKey) !== null;
+  } catch {
+    return false;
+  }
+}
+
+// --- Backend Transfer Session Support ---
+
+interface TransferredMessage {
+  user: boolean;
+  text: string;
+  formatted?: boolean;
+  timestamp?: string;
+  sources?: Array<{
+    file_name?: string;
+    file_id?: string;
+    chunk_indices?: number[];
+    source_type?: string;
+    url?: string;
+  }>;
+  isFollowup?: boolean;
+}
+
+interface TransferSessionData {
+  session_id: string;
+  messages: TransferredMessage[];
+  collection_id: string;
+}
+
+/**
+ * Fetch and import a transferred session from the backend
+ * Returns the session ID if successful, null otherwise
+ */
+export async function importTransferredSession(
+  transferToken: string,
+  userId: string | undefined,
+  role: string,
+  apiBaseUrl: string
+): Promise<string | null> {
+  try {
+    const response = await fetch(`${apiBaseUrl}/plugins/transfer-session/${encodeURIComponent(transferToken)}`);
+    
+    if (!response.ok) {
+      console.warn('Failed to fetch transferred session:', response.status);
+      return null;
+    }
+
+    const data: TransferSessionData = await response.json();
+    
+    if (!data.session_id || !Array.isArray(data.messages) || data.messages.length === 0) {
+      console.warn('Invalid transferred session data');
+      return null;
+    }
+
+    // Convert transferred messages to frontend format
+    const frontendMessages: ChatMessage[] = data.messages.map((msg, index) => ({
+      id: msg.user ? `user_${Date.now()}_${index}` : `assistant_${Date.now()}_${index}`,
+      role: msg.user ? 'user' as const : 'assistant' as const,
+      content: msg.text || '',
+      timestamp: new Date(msg.timestamp || Date.now()),
+      sources: msg.sources?.map(s => ({
+        file_name: s.file_name || '',
+        file_id: s.file_id,
+        chunk_indices: s.chunk_indices,
+        source_type: s.source_type,
+        url: s.url,
+      })).filter(s => s.file_name),
+      isFollowup: msg.isFollowup,
+    }));
+
+    // Save to frontend storage
+    saveSession(data.session_id, frontendMessages, data.collection_id, userId, role);
+    
+    return data.session_id;
+  } catch (error) {
+    console.error('Failed to import transferred session:', error);
+    return null;
+  }
+}
+
 // --- Legacy Support (Keeping original functions for backward compat if needed, simplified) ---
 
 export function saveChatHistory(

@@ -28,6 +28,8 @@ export class ChatbotUI {
     };
 
     this.activeSidebarMode = 'history'; // 'history' | 'settings'
+    this.getCurrentSessionId = null; // Callback to get current session ID for chat history transfer
+    this.getSessionMessages = null; // Callback to get current session messages for transfer
   }
 
   init() {
@@ -270,11 +272,50 @@ export class ChatbotUI {
     // If already expanded and clicking expand again, redirect to full React frontend
     if (this.isExpanded && !forceMode) {
       try {
-        // Import AuthService dynamically to avoid circular dependency
+        // Import dependencies dynamically to avoid circular dependency
         const { AuthService } = await import('./auth.js');
+        const { CONFIG } = await import('./config.js');
         const loginUrl = await AuthService.getAutoLoginUrl();
         if (loginUrl) {
-          window.open(loginUrl, '_blank');
+          let finalUrl = loginUrl;
+          
+          // Try to transfer chat session to backend for seamless migration
+          const currentSessionId = this.getCurrentSessionId?.() || null;
+          const currentMessages = this.getSessionMessages?.() || [];
+          
+          if (currentSessionId && currentMessages.length > 0 && CONFIG?.websiteUrl) {
+            try {
+              const apiBase = (CONFIG.apiBase || '').replace(/\/+$/, '');
+              const transferResponse = await fetch(`${apiBase}/plugins/transfer-session`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  website_url: CONFIG.websiteUrl,
+                  session_id: currentSessionId,
+                  messages: currentMessages.filter(m => !m.isTypingIndicator && !m.isTyping).map(m => ({
+                    user: Boolean(m.user),
+                    text: m.text || '',
+                    formatted: Boolean(m.formatted),
+                    timestamp: m.timestamp || new Date().toISOString(),
+                    sources: m.sources || [],
+                    isFollowup: Boolean(m.isFollowup),
+                  })),
+                }),
+              });
+              
+              if (transferResponse.ok) {
+                const transferData = await transferResponse.json();
+                const separator = loginUrl.includes('?') ? '&' : '?';
+                finalUrl = `${loginUrl}${separator}transfer_token=${encodeURIComponent(transferData.transfer_token)}`;
+              } else {
+                console.warn('Could not transfer session, proceeding without chat history');
+              }
+            } catch (transferErr) {
+              console.warn('Session transfer failed:', transferErr);
+            }
+          }
+          
+          window.open(finalUrl, '_blank');
           return;
         } else {
           console.warn('Could not get auto-login URL, staying in plugin');

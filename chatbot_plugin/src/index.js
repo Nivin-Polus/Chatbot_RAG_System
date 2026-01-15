@@ -20,6 +20,9 @@ import "./styles.css";
     const sorted = [...sessions].sort((a, b) => b.timestamp - a.timestamp);
     ui.renderHistoryList(sorted, chatService.sessionId, switchSession, deleteSession, renameSession);
   };
+  // Provide callbacks for chat history transfer to frontend
+  ui.getCurrentSessionId = () => chatService.sessionId;
+  ui.getSessionMessages = () => messages; // Return current session messages
   ui.init();
 
   const chatService = new ChatService();

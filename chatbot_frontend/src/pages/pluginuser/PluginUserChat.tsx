@@ -2,11 +2,11 @@ import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react'
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { User, Send, Loader2, MessageSquare } from 'lucide-react';
+import { User, Send, Loader2, MessageSquare, ExternalLink, FileText, Download } from 'lucide-react';
 import { ChatMessage, ChatSource } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiPost } from '@/utils/api';
-import { saveSession, getSession } from '@/utils/chatStorage';
+import { saveSession, getSession, migratePluginSession, hasPluginSession, importTransferredSession } from '@/utils/chatStorage';
 import { useSearchParams } from 'react-router-dom';
 import { getAssetUrl } from '@/utils/assets';
 import { DashboardLayout } from '@/components/DashboardLayout';
@@ -62,9 +62,67 @@ export default function PluginUserChat() {
         isAutoScrollRef.current = isAutoScroll;
     }, [isAutoScroll]);
 
-    // Handle Session Loading
+    // Handle Session Loading (including plugin session migration)
     useEffect(() => {
         const urlSessionId = searchParams.get('session');
+        const importPluginSession = searchParams.get('import_plugin_session');
+        const transferToken = searchParams.get('transfer_token');
+
+        // Handle backend-based session transfer (cross-origin safe)
+        if (transferToken && selectedCollection) {
+            const doTransfer = async () => {
+                const importedId = await importTransferredSession(
+                    transferToken,
+                    user?.user_id,
+                    user?.role || 'plugin_user',
+                    import.meta.env.VITE_API_BASE_URL
+                );
+                
+                if (importedId) {
+                    // Load the imported session
+                    const storedSession = getSession(importedId);
+                    if (storedSession) {
+                        setMessages(storedSession.messages);
+                        setSessionId(importedId);
+                        // Replace URL to remove the transfer parameter and set the session
+                        setSearchParams({ session: importedId }, { replace: true });
+                        return;
+                    }
+                }
+                // If transfer failed, clear the parameter and start fresh
+                setSearchParams({}, { replace: true });
+            };
+            doTransfer();
+            return;
+        }
+
+        // Handle local storage based plugin session migration (same-origin only)
+        if (importPluginSession && selectedCollection) {
+            // Check if this plugin session exists and hasn't been migrated yet
+            if (hasPluginSession(importPluginSession)) {
+                const migratedId = migratePluginSession(
+                    importPluginSession,
+                    user?.user_id,
+                    user?.role || 'plugin_user',
+                    selectedCollection
+                );
+                
+                if (migratedId) {
+                    // Load the migrated session
+                    const storedSession = getSession(migratedId);
+                    if (storedSession) {
+                        setMessages(storedSession.messages);
+                        setSessionId(migratedId);
+                        // Replace URL to remove the import parameter and set the session
+                        setSearchParams({ session: migratedId }, { replace: true });
+                        return;
+                    }
+                }
+            }
+            // If migration failed or session doesn't exist, clear the parameter
+            setSearchParams({}, { replace: true });
+            return;
+        }
 
         if (urlSessionId) {
             if (sessionId !== urlSessionId) {
@@ -83,7 +141,7 @@ export default function PluginUserChat() {
                 setMessages([]);
             }
         }
-    }, [searchParams, user?.user_id]);
+    }, [searchParams, user?.user_id, selectedCollection, user?.role]);
 
     // Save chat history to localStorage once after assistant finishes streaming
     useEffect(() => {
@@ -491,11 +549,6 @@ export default function PluginUserChat() {
                     }
                 }
 
-                if (downloadName) {
-                    downloadName = downloadName.replace(/^"|"$/g, '').replace(/^'|'$/g, '').trim();
-                    displayText = downloadName || displayText;
-                }
-
                 if (!displayText) {
                     displayText = raw.trim();
                 }
@@ -566,6 +619,8 @@ export default function PluginUserChat() {
                             const fileId = matchedFileId ?? linkTarget;
                             const fileName = downloadName || displayText || label;
 
+                            const commonClasses = "inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border/60 rounded-md bg-card hover:bg-muted transition-all hover:shadow-sm text-foreground no-underline mx-1";
+
                             if (detectedSourceType === 'web_crawl') {
                                 elements.push(
                                     <a
@@ -573,9 +628,10 @@ export default function PluginUserChat() {
                                         href={linkTarget.startsWith('http') ? linkTarget : `https://${linkTarget}`}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer`}
+                                        className={commonClasses}
                                     >
-                                        {displayText.trim() || 'View source'} ↗
+                                        <ExternalLink className="w-3 h-3 text-muted-foreground" />
+                                        {displayText.trim() || 'View source'}
                                     </a>
                                 );
                             } else {
@@ -583,9 +639,10 @@ export default function PluginUserChat() {
                                     <button
                                         key={nextKey()}
                                         type="button"
-                                        className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer`}
+                                        className={commonClasses}
                                         onClick={() => handleDownloadSource(fileId, fileName)}
                                     >
+                                        <FileText className="w-3 h-3 text-muted-foreground" />
                                         {displayText.trim() || 'Download source'}
                                     </button>
                                 );
@@ -625,6 +682,8 @@ export default function PluginUserChat() {
                     const normalizedName = sourceName.trim().toLowerCase();
                     const metadata = sourceMetadataLookup.get(normalizedName);
 
+                    const commonButtonClass = "inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium border border-border/40 rounded-md bg-background hover:bg-muted/50 transition-all hover:shadow-sm hover:-translate-y-0.5 text-foreground cursor-pointer no-underline max-w-full";
+
                     if (metadata && (metadata.source_type === 'web_crawl' || metadata.url)) {
                         const url = metadata.url || '';
                         sourcesNodes.push(
@@ -633,9 +692,10 @@ export default function PluginUserChat() {
                                 href={url.startsWith('http') ? url : `https://${url}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
+                                className={commonButtonClass}
                             >
-                                {sourceName} ↗
+                                <span className="truncate">{sourceName}</span>
+                                <ExternalLink className="w-3.5 h-3.5 opacity-70 shrink-0" />
                             </a>
                         );
                     } else if (metadata && metadata.file_id) {
@@ -643,10 +703,11 @@ export default function PluginUserChat() {
                             <button
                                 key={nextKey()}
                                 type="button"
-                                className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
+                                className={commonButtonClass}
                                 onClick={() => handleDownloadSource(metadata.file_id!, sourceName)}
                             >
-                                {sourceName}
+                                <span className="truncate">{sourceName}</span>
+                                <Download className="w-3.5 h-3.5 opacity-70 shrink-0" />
                             </button>
                         );
                     } else if (linkMatch) {
@@ -675,9 +736,10 @@ export default function PluginUserChat() {
                                     href={linkTarget.startsWith('http') ? linkTarget : `https://${linkTarget}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
+                                    className={commonButtonClass}
                                 >
-                                    {fileName} ↗
+                                    <span className="truncate">{fileName}</span>
+                                    <ExternalLink className="w-3.5 h-3.5 opacity-70 shrink-0" />
                                 </a>
                             );
                         } else {
@@ -685,10 +747,11 @@ export default function PluginUserChat() {
                                 <button
                                     key={nextKey()}
                                     type="button"
-                                    className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
+                                    className={commonButtonClass}
                                     onClick={() => handleDownloadSource(resolvedFileId, fileName)}
                                 >
-                                    {fileName}
+                                    <span className="truncate">{fileName}</span>
+                                    <Download className="w-3.5 h-3.5 opacity-70 shrink-0" />
                                 </button>
                             );
                         }
@@ -700,15 +763,16 @@ export default function PluginUserChat() {
                                 <button
                                     key={nextKey()}
                                     type="button"
-                                    className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
+                                    className={commonButtonClass}
                                     onClick={() => handleDownloadSource(reference, downloadName ?? displayText)}
                                 >
-                                    {displayText}
+                                    <span className="truncate">{displayText}</span>
+                                    <Download className="w-3.5 h-3.5 opacity-70 shrink-0" />
                                 </button>
                             );
                         } else {
                             sourcesNodes.push(
-                                <span key={nextKey()} className="block whitespace-pre-wrap text-sm">
+                                <span key={nextKey()} className="block whitespace-pre-wrap text-sm text-muted-foreground px-1">
                                     {label}
                                 </span>
                             );
@@ -730,11 +794,11 @@ export default function PluginUserChat() {
 
             if (sourcesNodes.length > 0) {
                 nodes.push(
-                    <div key={`${messageId}-sources-container`} className="mt-4 pt-3 border-t border-border/40 bg-muted/50 rounded-lg p-3 space-y-2 dark:bg-gray-800/50">
-                        <span className="block text-xs font-bold uppercase text-muted-foreground/80 mb-1">
+                    <div key={`${messageId}-sources-container`} className="mt-4 pt-3 border-t border-border/40 bg-muted/30 rounded-lg p-3 space-y-2">
+                        <span className="block text-xs font-bold uppercase text-muted-foreground/80 mb-2">
                             Sources:
                         </span>
-                        <div className="flex flex-col gap-1">
+                        <div className="flex flex-wrap gap-2 items-start">
                             {sourcesNodes}
                         </div>
                     </div>
@@ -742,7 +806,7 @@ export default function PluginUserChat() {
             }
 
             return nodes;
-        }, [handleDownloadSource]);
+        }, [handleDownloadSource, user?.access_token]);
 
     const handleMessageScroll = useCallback(() => {
         const container = messagesContainerRef.current;
@@ -763,15 +827,15 @@ export default function PluginUserChat() {
 
     return (
         <DashboardLayout>
-            <div className="flex flex-col space-y-6 min-h-[calc(100vh-140px)]">
-                <div className="flex items-center justify-between">
+            <div className="flex flex-col space-y-4 pt-6 h-[calc(100vh-6rem)]">
+                <div className="flex items-center justify-between shrink-0">
                     <div>
                         <h1 className="text-3xl font-bold text-foreground dark:text-white">Leto Chat</h1>
                     </div>
                 </div>
 
-                <Card className="flex flex-col min-h-[calc(100vh-220px)] bg-card dark:bg-gray-900">
-                    <CardHeader className="flex-shrink-0">
+                <Card className="flex flex-col flex-1 bg-card dark:bg-gray-900 overflow-hidden">
+                    <CardHeader className="flex-shrink-0 py-3">
                         <div className="flex items-center justify-end">
                             {hasMessages && (
                                 <Button variant="outline" onClick={clearChat} size="sm">
@@ -780,7 +844,7 @@ export default function PluginUserChat() {
                             )}
                         </div>
                     </CardHeader>
-                    <CardContent className="relative flex-1 flex flex-col min-h-0 overflow-hidden p-0 max-h-[calc(85vh-10rem)]">
+                    <CardContent className="relative flex-1 flex flex-col min-h-0 overflow-hidden p-0">
                         {!selectedCollection ? (
                             <div className="flex-1 flex items-center justify-center text-muted-foreground dark:text-gray-300">
                                 No knowledge base configured. Please contact support.

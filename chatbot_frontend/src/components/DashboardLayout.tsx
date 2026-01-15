@@ -33,7 +33,10 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   };
 
   const homePath = getHomePath();
-  const showBackButton = location.pathname !== homePath && location.pathname !== '/superadmin' && location.pathname !== '/useradmin/knowledge-base';
+  const showBackButton = location.pathname !== homePath &&
+    location.pathname !== '/superadmin' &&
+    location.pathname !== '/useradmin/knowledge-base' &&
+    !location.pathname.includes('/pluginuser/chat');
 
   return (
     <SidebarProvider>

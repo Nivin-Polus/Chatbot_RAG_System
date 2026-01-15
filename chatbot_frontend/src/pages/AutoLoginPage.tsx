@@ -23,6 +23,8 @@ export default function AutoLoginPage() {
 
     useEffect(() => {
         const token = searchParams.get('token');
+        const pluginSession = searchParams.get('plugin_session');
+        const transferToken = searchParams.get('transfer_token');
 
         if (!token) {
             setError('No login token provided.');
@@ -62,7 +64,16 @@ export default function AutoLoginPage() {
 
                 // Use window.location.href instead of navigate() to force a full page reload
                 // This ensures AuthContext re-reads the sessionStorage on mount
-                window.location.href = '/chatbot/pluginuser/chat';
+                // Include transfer_token or plugin_session parameter if present to migrate chat history
+                let redirectUrl = '/chatbot/pluginuser/chat';
+                if (transferToken) {
+                    // Backend-based session transfer (preferred, cross-origin safe)
+                    redirectUrl += `?transfer_token=${encodeURIComponent(transferToken)}`;
+                } else if (pluginSession) {
+                    // Local storage based transfer (same-origin only)
+                    redirectUrl += `?import_plugin_session=${encodeURIComponent(pluginSession)}`;
+                }
+                window.location.href = redirectUrl;
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'Auto-login failed.');
                 setIsLoading(false);
