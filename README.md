@@ -64,6 +64,7 @@ This **collection-based** RAG chatbot system uses a single vector database intel
 - **Claude AI Integration**: Haiku model for natural language responses
 - **Context-Aware Conversations**: Maintains chat history within tenant boundaries
 - **Efficient Metadata Filtering**: website_id, file_id, and user permissions
+- **Source Confidence Filtering**: Automatically filters out low-relevance sources (configurable threshold) - See [SOURCE_CONFIDENCE_GUIDE.md](SOURCE_CONFIDENCE_GUIDE.md)
 
 ### 💬 **Chat Interface**
 - Real-time typing animations (30ms character intervals)
