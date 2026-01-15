@@ -1,16 +1,16 @@
 {
-    "apiBase": "https://keyword-search.mit.edu/rag",
-    "apiBase1": "https://keyword-search.mit.edu/",
-    "logoUrl": "https://keyword-search.mit.edu/dist/assets/logo.svg",
+    "apiBase": "https://dev-chatbot.polussolutions.com/rag",
+    "apiBase1": "https://dev-chatbot.polussolutions.com/",
+    "logoUrl": "https://dev-chatbot.polussolutions.com/dist/assets/logo.svg",
     "logoAlt": "Company Logo",
-    "placeholderLogoUrl": "https://keyword-search.mit.edu/dist/assets/logo1.svg",
-    "iconsBaseUrl": "https://keyword-search.mit.edu/dist/assets/icons",
-    "primaryColor": "#a92034",
-    "secondaryColor": "#db5a6c",
+    "placeholderLogoUrl": "https://dev-chatbot.polussolutions.com/dist/assets/logo1.svg",
+    "iconsBaseUrl": "https://dev-chatbot.polussolutions.com/dist/assets/icons",
+    "primaryColor": "#4562BB",
+    "secondaryColor": "#02F17C",
     "primaryGradientDegree": "135deg",
     "headerTextColor": "#ffffff",
-    "headerTitle": "Leto Assistant",
+    "headerTitle": "Leto HR Assistant",
     "welcomeMessage": "Ask me about the uploaded documents!",
-    "inputPlaceholder": "I'm your Leto Assistant..",
-    "placeholderHighlightText": "Leto Assistant"
+    "inputPlaceholder": "I'm your HR Assistant..",
+    "placeholderHighlightText": "HR Assistant.."
 }
