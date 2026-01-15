@@ -84,6 +84,13 @@ export default function SuperadminFiles() {
     const selectedFiles = event.target.files;
     if (!selectedFiles || selectedFiles.length === 0 || !selectedCollection) return;
 
+    // Limit to maximum 10 files
+    if (selectedFiles.length > 10) {
+      toast.error(`You can only upload a maximum of 10 files at once. You selected ${selectedFiles.length} files.`);
+      event.target.value = ''; // Reset the file input
+      return;
+    }
+
     const filesArray = Array.from(selectedFiles);
     const allowedTypes = [
       'application/pdf',
@@ -271,7 +278,7 @@ export default function SuperadminFiles() {
                   Upload File
                 </CardTitle>
                 <CardDescription>
-                  Upload files to the selected knowledge base (PDF, TXT, CSV, DOCX, PPTX, XLS/XLSX - Max 10MB)
+                  Upload up to 10 files to the selected knowledge base (PDF, TXT, CSV, DOCX, PPTX, XLS/XLSX - Max 10MB each)
                 </CardDescription>
               </CardHeader>
               <CardContent>

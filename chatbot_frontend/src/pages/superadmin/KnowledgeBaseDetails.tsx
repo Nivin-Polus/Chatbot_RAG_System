@@ -220,6 +220,13 @@ export default function KnowledgeBaseDetails() {
     const selectedFiles = event.target.files;
     if (!selectedFiles || selectedFiles.length === 0 || !id) return;
 
+    // Limit to maximum 10 files
+    if (selectedFiles.length > 10) {
+      toast.error(`You can only upload a maximum of 10 files at once. You selected ${selectedFiles.length} files.`);
+      event.target.value = ''; // Reset the file input
+      return;
+    }
+
     setIsUploading(true);
     const filesArray = Array.from(selectedFiles);
     const initialProgress: Record<string, 'pending' | 'success' | 'error'> = {};
@@ -882,9 +889,9 @@ export default function KnowledgeBaseDetails() {
                     </DialogTrigger>
                     <DialogContent>
                       <DialogHeader>
-                        <DialogTitle>Upload File</DialogTitle>
+                        <DialogTitle>Upload Files</DialogTitle>
                         <DialogDescription>
-                          Upload files to this knowledge base (PDF, DOC, DOCX, PPTX, XLSX, TXT, CSV - Max 10MB each)
+                          Upload up to 10 files to this knowledge base (PDF, DOC, DOCX, PPTX, XLSX, TXT, CSV - Max 10MB each) 
                         </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4">

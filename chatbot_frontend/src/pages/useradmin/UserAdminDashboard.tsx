@@ -429,6 +429,13 @@ export default function UserAdminDashboard() {
       return;
     }
 
+    // Limit to maximum 10 files
+    if (selectedFiles.length > 10) {
+      toast.error(`You can only upload a maximum of 10 files at once. You selected ${selectedFiles.length} files.`);
+      event.target.value = ''; // Reset the file input
+      return;
+    }
+
     setIsUploading(true);
     const filesArray = Array.from(selectedFiles);
     const progress: Record<string, UploadStatus> = {};
@@ -1097,9 +1104,9 @@ export default function UserAdminDashboard() {
               <Dialog open={isFileDialogOpen} onOpenChange={setIsFileDialogOpen}>
                 <DialogContent className="max-w-lg">
                   <DialogHeader>
-                    <DialogTitle>Upload File</DialogTitle>
+                    <DialogTitle>Upload Files</DialogTitle>
                     <DialogDescription>
-                      Upload documents to this knowledge base (PDF, DOC, DOCX, PPTX, XLSX, TXT, CSV – max 10MB each).
+                      Upload up to 10 documents to this knowledge base (PDF, DOC, DOCX, PPTX, XLSX, TXT, CSV – max 10MB each).
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4">
