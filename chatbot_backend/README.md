@@ -11,6 +11,7 @@ A **RAG-based chatbot backend** built with FastAPI that processes documents, sto
 - 🤖 **RAG Pipeline** - Retrieval-Augmented Generation with Claude AI
 - 💬 **Context Management** - Maintains conversation context within sessions
 - 🧠 **Session Tracking** - Unique session IDs for conversation continuity
+- 🤔 **Intelligent Follow-Up Questions** - AI-generated clarifying questions for ambiguous queries
 - ⚡ **Redis Caching** - Optional caching for frequently asked questions
 - 🛡️ **Security** - Prompt guardrails and input validation
 - 🔧 **Configurable** - Environment-based configuration
@@ -207,6 +208,126 @@ curl -X POST "http://localhost:8000/chat/ask" \
 {
   "answer": "Contextual answer based on documents and conversation history",
   "session_id": "session_123456"
+}
+```
+
+---
+
+## 🤔 Intelligent Follow-Up Question System
+
+### Overview
+The chatbot includes an intelligent follow-up detection system that identifies when a user's query is ambiguous, lacks context, or has low relevance to the knowledge base. Instead of providing a low-confidence answer, the system asks clarifying questions to improve response quality.
+
+### Detection Criteria
+
+The follow-up system is triggered when any of these conditions are met:
+
+1. **No Relevant Chunks**: Vector search returns zero matching documents
+2. **Low Relevance Score**: Top chunk confidence below threshold (default: 0.35)
+3. **Ambiguous Phrasing**: Questions with vague phrases like "tell me more", "explain this", "what about"
+4. **Vague Pronouns**: Questions using "it", "this", "that" without clear referents
+5. **Missing Critical Context**: Domain-specific rules detect missing required information
+
+### Configuration
+
+```env
+# In .env file
+SOURCE_MIN_SCORE=0.50  # Minimum score to show sources
+# Follow-up threshold: 0.35 (hardcoded in rag.py)
+```
+
+**Threshold Guidelines:**
+- 0.25-0.30: Very strict (more follow-ups)
+- 0.35: Balanced (recommended)
+- 0.40-0.50: Lenient (fewer follow-ups)
+
+### Response Format
+
+When follow-up is triggered:
+
+```json
+{
+  "answer": null,
+  "session_id": "session_123456",
+  "is_followup": true,
+  "followup_questions": "Could you specify which department's policy?",
+  "followup_reason": "low_relevance_score",
+  "sources": [],
+  "chunk_count": 3
+}
+```
+
+**Reason Codes:**
+- `no_relevant_chunks`: No documents found
+- `low_relevance_score`: Confidence too low
+- `ambiguous_phrasing`: Vague question
+- `vague_pronoun`: Unclear pronoun reference
+- `missing_context`: Domain context missing
+
+### Examples
+
+**Example 1: Low Confidence**
+```
+User: "What's the policy?"
+Top chunk score: 0.28 (below 0.35)
+Response: "I'm not fully confident about which policy you're referring to. 
+Are you asking about the leave policy, expense policy, or remote work policy?"
+```
+
+**Example 2: Vague Pronoun**
+```
+User: "How does it work?"
+Detection: Pronoun without referent
+Response: "What specific feature or process are you asking about?"
+```
+
+**Example 3: Missing Context**
+```
+User: "How do I install the software?"
+Detection: "install" without platform
+Response: "Which platform are you installing on? (Windows, Mac, Linux, or mobile?)"
+```
+
+### System Flow
+
+```
+User Question
+    ↓
+Vector Search
+    ↓
+Follow-Up Detection
+    ↓
+    ├─→ [Trigger Condition Met] → AI-Generated Follow-Up
+    └─→ [Confident] → Generate Answer
+```
+
+### Customization
+
+Add domain-specific rules in `app/core/rag.py`:
+
+```python
+domain_rules = [
+    {
+        "trigger_keywords": ["install", "upgrade"],
+        "required_context": ["version", "windows", "mac"],
+        "description": "installation query without platform"
+    }
+]
+```
+
+### Analytics
+
+Follow-up events are logged:
+
+```python
+{
+  "activity_type": "chat_followup_triggered",
+  "user": "username",
+  "details": {
+    "question": "User's question",
+    "reason": "low_relevance_score",
+    "chunk_count": 3
+  }
 }
 ```
 

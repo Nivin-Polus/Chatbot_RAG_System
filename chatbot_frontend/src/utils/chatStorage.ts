@@ -1,5 +1,12 @@
 import { ChatMessage } from '@/types/auth';
 
+export interface ChatSession {
+  id: string;
+  title: string;
+  timestamp: number;
+  collectionId: string;
+}
+
 interface StoredChatHistory {
   messages: Array<{
     id: string;
@@ -11,35 +18,60 @@ interface StoredChatHistory {
       file_id?: string;
       chunk_indices?: number[];
     }>;
+    isFollowup?: boolean;
   }>;
-  sessionId: string | null;
+  sessionId: string;
   collectionId: string;
   lastUpdated: string; // ISO string
 }
 
+const SESSION_INDEX_KEY = 'chat_sessions_index';
+const MESSAGE_PREFIX = 'chat_messages_';
+
 /**
- * Get the storage key for chat history
+ * Get the session index key for a user/role
  */
-function getStorageKey(userId: string | undefined, collectionId: string, role: string): string {
+function getIndexKey(userId: string | undefined, role: string): string {
   const userPart = userId || 'anonymous';
   const rolePart = role || 'user';
-  return `chat_history_${rolePart}_${userPart}_${collectionId}`;
+  return `${SESSION_INDEX_KEY}_${rolePart}_${userPart}`;
 }
 
 /**
- * Save chat history to localStorage
+ * Get the storage key for a specific session's messages
  */
-export function saveChatHistory(
+function getMessageKey(sessionId: string): string {
+  return `${MESSAGE_PREFIX}${sessionId}`;
+}
+
+/**
+ * Get all sessions for a user
+ */
+export function getSessions(userId: string | undefined, role: string): ChatSession[] {
+  try {
+    const key = getIndexKey(userId, role);
+    const stored = localStorage.getItem(key);
+    if (!stored) return [];
+    return JSON.parse(stored);
+  } catch (error) {
+    console.error('Failed to load sessions:', error);
+    return [];
+  }
+}
+
+/**
+ * Save a session (updates index and message storage)
+ */
+export function saveSession(
+  sessionId: string,
   messages: ChatMessage[],
-  sessionId: string | null,
   collectionId: string,
   userId: string | undefined,
   role: string
 ): void {
-  if (!collectionId) return;
-
   try {
-    const storageKey = getStorageKey(userId, collectionId, role);
+    // 1. Save Messages
+    const messageKey = getMessageKey(sessionId);
     const history: StoredChatHistory = {
       messages: messages.map((msg) => ({
         id: msg.id,
@@ -47,94 +79,190 @@ export function saveChatHistory(
         content: msg.content,
         timestamp: msg.timestamp.toISOString(),
         sources: msg.sources,
+        isFollowup: msg.isFollowup,
       })),
       sessionId,
       collectionId,
       lastUpdated: new Date().toISOString(),
     };
+    localStorage.setItem(messageKey, JSON.stringify(history));
 
-    localStorage.setItem(storageKey, JSON.stringify(history));
+    // 2. Update Index
+    const indexKey = getIndexKey(userId, role);
+    const sessions = getSessions(userId, role);
+    const existingIndex = sessions.findIndex((s) => s.id === sessionId);
+
+    // Generate title from first user message
+    const firstUserMsg = messages.find((m) => m.role === 'user');
+    let title = 'New Chat';
+    if (firstUserMsg) {
+      title = firstUserMsg.content.slice(0, 30) + (firstUserMsg.content.length > 30 ? '...' : '');
+    }
+
+    const sessionInfo: ChatSession = {
+      id: sessionId,
+      title,
+      timestamp: Date.now(),
+      collectionId,
+    };
+
+    if (existingIndex >= 0) {
+      sessions[existingIndex] = sessionInfo;
+    } else {
+      sessions.push(sessionInfo);
+    }
+
+    // Sort by timestamp desc
+    sessions.sort((a, b) => b.timestamp - a.timestamp);
+
+    localStorage.setItem(indexKey, JSON.stringify(sessions));
+
+    // Dispatch event for UI updates
+    window.dispatchEvent(new Event('chat-history-updated'));
+
   } catch (error) {
-    console.error('Failed to save chat history to localStorage:', error);
+    console.error('Failed to save session:', error);
   }
 }
 
 /**
- * Load chat history from localStorage
+ * Get a specific session
  */
-export function loadChatHistory(
-  collectionId: string,
-  userId: string | undefined,
-  role: string
-): { messages: ChatMessage[]; sessionId: string | null } | null {
-  if (!collectionId) return null;
-
+export function getSession(
+  sessionId: string
+): { messages: ChatMessage[]; collectionId: string } | null {
   try {
-    const storageKey = getStorageKey(userId, collectionId, role);
-    const stored = localStorage.getItem(storageKey);
-
+    const key = getMessageKey(sessionId);
+    const stored = localStorage.getItem(key);
     if (!stored) return null;
 
     const history: StoredChatHistory = JSON.parse(stored);
 
-    // Only load if it's for the same collection
-    if (history.collectionId !== collectionId) return null;
-
-    // Convert stored messages back to ChatMessage format
-    const messages: ChatMessage[] = history.messages.map((msg) => ({
-      id: msg.id,
-      role: msg.role,
-      content: msg.content,
-      timestamp: new Date(msg.timestamp),
-      sources: msg.sources,
-    }));
-
     return {
-      messages,
-      sessionId: history.sessionId,
+      messages: history.messages.map((msg) => ({
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        timestamp: new Date(msg.timestamp),
+        sources: msg.sources,
+        isFollowup: msg.isFollowup,
+      })),
+      collectionId: history.collectionId
     };
   } catch (error) {
-    console.error('Failed to load chat history from localStorage:', error);
+    console.error('Failed to load session:', error);
     return null;
   }
 }
 
 /**
- * Clear chat history from localStorage
+ * Delete a session
  */
+export function deleteSession(
+  sessionId: string,
+  userId: string | undefined,
+  role: string
+): void {
+  try {
+    // 1. Remove messages
+    localStorage.removeItem(getMessageKey(sessionId));
+
+    // 2. Remove from index
+    const indexKey = getIndexKey(userId, role);
+    let sessions = getSessions(userId, role);
+    sessions = sessions.filter((s) => s.id !== sessionId);
+    localStorage.setItem(indexKey, JSON.stringify(sessions));
+
+    window.dispatchEvent(new Event('chat-history-updated'));
+  } catch (error) {
+    console.error('Failed to delete session:', error);
+  }
+}
+
+/**
+ * Rename a session
+ */
+export function renameSession(
+  sessionId: string,
+  newTitle: string,
+  userId: string | undefined,
+  role: string
+): void {
+  try {
+    const indexKey = getIndexKey(userId, role);
+    const sessions = getSessions(userId, role);
+    const sessionIndex = sessions.findIndex((s) => s.id === sessionId);
+
+    if (sessionIndex >= 0) {
+      sessions[sessionIndex].title = newTitle;
+      localStorage.setItem(indexKey, JSON.stringify(sessions));
+      window.dispatchEvent(new Event('chat-history-updated'));
+    }
+  } catch (error) {
+    console.error('Failed to rename session:', error);
+  }
+}
+
+/**
+ * Clear all sessions for a user
+ */
+export function clearAllSessions(userId: string | undefined, role: string): void {
+  try {
+    const sessions = getSessions(userId, role);
+    sessions.forEach(s => localStorage.removeItem(getMessageKey(s.id)));
+    localStorage.removeItem(getIndexKey(userId, role));
+    window.dispatchEvent(new Event('chat-history-updated'));
+  } catch (error) {
+    console.error('Failed to clear sessions:', error);
+  }
+}
+
+// --- Legacy Support (Keeping original functions for backward compat if needed, simplified) ---
+
+export function saveChatHistory(
+  messages: ChatMessage[],
+  sessionId: string | null,
+  collectionId: string,
+  userId: string | undefined,
+  role: string
+): void {
+  if (sessionId) {
+    saveSession(sessionId, messages, collectionId, userId, role);
+  }
+}
+
+export function loadChatHistory(
+  collectionId: string,
+  userId: string | undefined,
+  role: string
+): { messages: ChatMessage[]; sessionId: string | null } | null {
+  // Try to find the most recent session for this collection
+  const sessions = getSessions(userId, role);
+  const relevantSession = sessions.find(s => s.collectionId === collectionId); // Already sorted desc
+
+  if (relevantSession) {
+    const details = getSession(relevantSession.id);
+    if (details) {
+      return {
+        messages: details.messages,
+        sessionId: relevantSession.id
+      };
+    }
+  }
+  return null;
+}
+
 export function clearChatHistory(
   collectionId: string,
   userId: string | undefined,
   role: string
 ): void {
-  if (!collectionId) return;
-
-  try {
-    const storageKey = getStorageKey(userId, collectionId, role);
-    localStorage.removeItem(storageKey);
-  } catch (error) {
-    console.error('Failed to clear chat history from localStorage:', error);
-  }
+  // This originally cleared the "current" history.
+  // In new model, maybe we create a new session or do nothing?
+  // We'll leave it empty to encourage explicit session management.
 }
 
-/**
- * Clear all chat histories for a user (useful on logout)
- */
 export function clearAllChatHistories(userId: string | undefined, role: string): void {
-  try {
-    const prefix = `chat_history_${role || 'user'}_${userId || 'anonymous'}_`;
-    const keysToRemove: string[] = [];
-
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith(prefix)) {
-        keysToRemove.push(key);
-      }
-    }
-
-    keysToRemove.forEach((key) => localStorage.removeItem(key));
-  } catch (error) {
-    console.error('Failed to clear all chat histories from localStorage:', error);
-  }
+  clearAllSessions(userId, role);
 }
 

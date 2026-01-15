@@ -29,6 +29,7 @@ import UserAdminSettings from "./pages/useradmin/UserAdminSettings";
 import UserAdminUsers from "./pages/useradmin/UserAdminUsers";
 import UserAdminPlugins from "./pages/useradmin/UserAdminPlugins";
 import UserAdminCrawler from "./pages/useradmin/UserAdminCrawler";
+import PluginUserChat from "./pages/pluginuser/PluginUserChat";
 
 const queryClient = new QueryClient();
 
@@ -98,6 +99,19 @@ const App = () => (
                     <Routes>
                       <Route index element={<Navigate to="chat" replace />} />
                       <Route path="chat" element={<UserChat />} />
+                    </Routes>
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Plugin User Routes */}
+              <Route
+                path="/pluginuser/*"
+                element={
+                  <ProtectedRoute allowedRoles={["plugin_user"]}>
+                    <Routes>
+                      <Route index element={<Navigate to="chat" replace />} />
+                      <Route path="chat" element={<PluginUserChat />} />
                     </Routes>
                   </ProtectedRoute>
                 }

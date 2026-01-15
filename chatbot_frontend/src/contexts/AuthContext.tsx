@@ -96,7 +96,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       setUser(authUser);
       sessionStorage.setItem('auth_user', JSON.stringify(authUser));
-      
+
       // Navigate based on role
       switch (authUser.role) {
         case 'super_admin':
@@ -110,10 +110,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         case 'user_admin':
           navigate('/useradmin');
           break;
+        case 'plugin_user':
+          navigate('/pluginuser/chat');
+          break;
         default:
           navigate('/app/chat');
       }
-      
+
       toast.success('Login successful');
     } catch (error) {
       if (error instanceof Error) {

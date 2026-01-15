@@ -65,6 +65,7 @@ This **collection-based** RAG chatbot system uses a single vector database intel
 - **Context-Aware Conversations**: Maintains chat history within tenant boundaries
 - **Efficient Metadata Filtering**: website_id, file_id, and user permissions
 - **Source Confidence Filtering**: Automatically filters out low-relevance sources (configurable threshold) - See [SOURCE_CONFIDENCE_GUIDE.md](SOURCE_CONFIDENCE_GUIDE.md)
+- **Intelligent Follow-Up Questions**: AI-generated clarifying questions when context is insufficient or query is ambiguous (see [Follow-Up Question System](#-intelligent-follow-up-question-system))
 
 ### 💬 **Chat Interface**
 - Real-time typing animations (30ms character intervals)
@@ -266,6 +267,231 @@ Chatbot_RAG_System_UI_1/
 │   └── public/              # Static assets
 └── README.md                # This file
 ```
+
+---
+
+## 🎯 **Intelligent Follow-Up Question System**
+
+### 📋 **Overview**
+
+The chatbot includes an intelligent follow-up question system that detects when a user's query is ambiguous, lacks context, or has low relevance to the knowledge base. Instead of providing a low-confidence answer, the system proactively asks clarifying questions to improve response quality.
+
+### 🔍 **Detection Criteria**
+
+The follow-up system is triggered when any of the following conditions are met:
+
+#### 1. **No Relevant Chunks Found**
+- Vector search returns zero results
+- User's question doesn't match any content in the knowledge base
+
+#### 2. **Low Relevance Score**
+- Top matching chunk has confidence score below threshold (default: **0.35**)
+- Even if chunks are found, confidence is too low for reliable answer
+- Configurable via `SOURCE_MIN_SCORE` in `.env`
+
+#### 3. **Ambiguous Phrasing**
+- Questions containing vague phrases:
+  - "tell me more"
+  - "explain this"
+  - "what about"
+  - "can you elaborate"
+  - "more details"
+  - "how does it work"
+  
+**Example:** "Tell me more" → "What specific topic would you like to learn more about?"
+
+#### 4. **Vague Pronouns**
+- Questions using pronouns without clear referents:
+  - "What is it?"
+  - "Explain this"
+  - "How does that work?"
+  - "Tell me about it"
+
+**Example:** "What does it mean?" → "What specific term or concept are you asking about?"
+
+#### 5. **Missing Critical Context**
+- Domain-specific rules detect missing information:
+  - Agriculture: mentions "fertilizer" but no crop type
+  - Product support: mentions "install" but no platform/version
+  - Legal: mentions "law" but no jurisdiction
+
+**Example:** "How do I apply fertilizer?" → "Which crop are you asking about? (e.g., rice, wheat, corn, vegetables)"
+
+### ⚙️ **Configuration**
+
+```env
+# In chatbot_backend/.env
+
+# Minimum confidence score for showing sources to users
+SOURCE_MIN_SCORE=0.50
+
+# Follow-up detection threshold (lower = more strict)
+# Values below this trigger clarifying questions
+# Default: 0.35
+```
+
+**Threshold Guidelines:**
+- **0.25-0.30**: Very strict - asks more clarifying questions
+- **0.35**: Balanced (recommended)
+- **0.40-0.50**: Lenient - asks fewer clarifying questions
+
+### 📊 **Response Format**
+
+When follow-up is triggered, the API returns:
+
+```json
+{
+  "answer": null,
+  "session_id": "session_123456",
+  "is_followup": true,
+  "followup_questions": "Could you please specify which department's policy you're asking about?",
+  "followup_reason": "low_relevance_score",
+  "sources": [],
+  "chunk_count": 3
+}
+```
+
+**Response Fields:**
+- `is_followup`: Boolean flag indicating follow-up response
+- `followup_questions`: AI-generated clarifying question(s)
+- `followup_reason`: Reason code (see below)
+- `answer`: null (no answer generated)
+- `chunk_count`: Number of chunks retrieved (for debugging)
+
+**Reason Codes:**
+- `no_relevant_chunks`: No matching documents found
+- `low_relevance_score`: Confidence below threshold
+- `ambiguous_phrasing`: Vague or unclear question
+- `vague_pronoun`: Pronouns without clear referent
+- `missing_context`: Domain-specific context missing
+- `empty_question`: No question provided
+
+### 🎨 **Follow-Up Generation**
+
+The system uses AI to generate contextual, specific clarifying questions:
+
+#### **Generation Rules:**
+1. Keep questions short (one sentence)
+2. Offer specific options when possible
+3. Use friendly, helpful tone
+4. Don't apologize excessively
+5. Don't attempt to answer the original question
+
+#### **Example Generations:**
+
+**Scenario 1: No Relevant Chunks**
+- User: "Tell me about quantum computing"
+- KB: Only contains HR policies
+- Follow-up: "I couldn't find information about that topic. Our knowledge base covers HR policies, leave management, and employee benefits. Which of these would you like to know about?"
+
+**Scenario 2: Low Confidence**
+- User: "What's the process?"
+- Top chunk score: 0.28
+- Follow-up: "I'm not fully confident about what process you're referring to. Are you asking about the hiring process, leave approval process, or expense reimbursement process?"
+
+**Scenario 3: Missing Context**
+- User: "How do I install the software?"
+- Trigger: "install" without platform
+- Follow-up: "Which platform are you installing on? (Windows, Mac, Linux, or mobile?)"
+
+### 🔄 **System Flow**
+
+```
+User Question
+    ↓
+Vector Search (retrieve chunks)
+    ↓
+Follow-Up Detection
+    ↓
+    ├─→ [No Chunks] → Generate Follow-Up
+    ├─→ [Low Score < 0.35] → Generate Follow-Up
+    ├─→ [Ambiguous Phrase] → Generate Follow-Up
+    ├─→ [Vague Pronoun] → Generate Follow-Up
+    ├─→ [Missing Context] → Generate Follow-Up
+    └─→ [Confident] → Generate Answer
+```
+
+### 🎯 **Benefits**
+
+1. **Improved Answer Quality**: Only answers when confident
+2. **Better User Experience**: Guides users to ask better questions
+3. **Reduced Hallucinations**: Prevents low-confidence responses
+4. **Knowledge Gap Detection**: Identifies missing content in knowledge base
+5. **Context Preservation**: Follow-up questions maintain conversation flow
+
+### 📈 **Analytics & Monitoring**
+
+Follow-up events are logged for monitoring:
+
+```python
+{
+  "activity_type": "chat_followup_triggered",
+  "user": "username",
+  "details": {
+    "question": "User's question",
+    "reason": "low_relevance_score",
+    "chunk_count": 3,
+    "session_id": "session_123456"
+  }
+}
+```
+
+**Tracking Metrics:**
+- Follow-up trigger rate by reason
+- User response patterns after follow-ups
+- Knowledge base coverage gaps
+- Confidence score distributions
+
+### 🔧 **Customization**
+
+#### **Domain-Specific Rules**
+
+Add custom rules in `chatbot_backend/app/core/rag.py`:
+
+```python
+domain_rules = [
+    {
+        "trigger_keywords": ["fertilizer", "pesticide"],
+        "required_context": ["crop", "rice", "wheat"],
+        "description": "agricultural query without crop type"
+    },
+    {
+        "trigger_keywords": ["install", "upgrade"],
+        "required_context": ["version", "windows", "mac"],
+        "description": "installation query without platform"
+    }
+]
+```
+
+#### **Ambiguous Phrases**
+
+Customize detection phrases in `rag.py`:
+
+```python
+ambiguous_phrases = [
+    "tell me more",
+    "explain this",
+    "what about",
+    # Add your custom phrases
+]
+```
+
+### 📝 **Best Practices**
+
+1. **Set Appropriate Thresholds**: Balance between asking too many vs. too few follow-ups
+2. **Monitor Analytics**: Track follow-up rates to identify knowledge gaps
+3. **Update Domain Rules**: Add industry-specific context requirements
+4. **Test Edge Cases**: Verify behavior with ambiguous queries
+5. **User Feedback**: Collect feedback on follow-up question quality
+
+### 🚨 **Troubleshooting**
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Too many follow-ups | Threshold too high | Lower `SOURCE_MIN_SCORE` in `.env` |
+| Never asks follow-ups | Threshold too low | Increase threshold to 0.40-0.50 |
+| Generic follow-ups | AI generation failed | Check API keys and logs |
+| Wrong detection | Domain rules too strict | Adjust `domain_rules` in `rag.py` |
 
 ---
 

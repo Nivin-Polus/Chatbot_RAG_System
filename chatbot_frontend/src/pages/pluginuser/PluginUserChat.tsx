@@ -1,0 +1,1026 @@
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import { DashboardLayout } from '@/components/DashboardLayout';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
+import { User, Send, Loader2, MessageSquare, Bot } from 'lucide-react';
+import { Collection, ChatMessage, ChatSource } from '@/types/auth';
+import { toast } from 'sonner';
+import { apiGet, apiPost } from '@/utils/api';
+import { saveSession, getSession, getSessions } from '@/utils/chatStorage';
+import { useSearchParams } from 'react-router-dom';
+
+export default function PluginUserChat() {
+    const { user } = useAuth();
+    const [collections, setCollections] = useState<Collection[]>([]);
+    const [selectedCollection, setSelectedCollection] = useState<string>('');
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [inputMessage, setInputMessage] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [isStreaming, setIsStreaming] = useState(false);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const messagesContainerRef = useRef<HTMLDivElement>(null);
+    const typingTimeoutRef = useRef<number | null>(null);
+    const [sessionId, setSessionId] = useState<string>('');
+    const stopStreamingRef = useRef<(() => void) | null>(null);
+    const [isAutoScroll, setIsAutoScroll] = useState(true);
+    const isAutoScrollRef = useRef(true);
+    const hasMessages = messages.length > 0;
+    const saveTimeoutRef = useRef<number | null>(null);
+    const [searchParams, setSearchParams] = useSearchParams();
+
+    const disableAutoScroll = useCallback(() => {
+        if (!isAutoScrollRef.current) {
+            return;
+        }
+        isAutoScrollRef.current = false;
+        setIsAutoScroll(false);
+    }, []);
+
+    const enableAutoScroll = useCallback(() => {
+        if (isAutoScrollRef.current) {
+            return;
+        }
+        isAutoScrollRef.current = true;
+        setIsAutoScroll(true);
+    }, []);
+
+    const handleManualScrollIntent = useCallback(() => {
+        disableAutoScroll();
+    }, [disableAutoScroll]);
+
+    const handleWheel = useCallback(() => {
+        disableAutoScroll();
+    }, [disableAutoScroll]);
+
+    const handleTouchMove = useCallback(() => {
+        disableAutoScroll();
+    }, [disableAutoScroll]);
+
+    useEffect(() => {
+        isAutoScrollRef.current = isAutoScroll;
+    }, [isAutoScroll]);
+
+    // Handle Session Loading
+    useEffect(() => {
+        const urlSessionId = searchParams.get('session');
+
+        if (urlSessionId) {
+            // Load specific session
+            if (sessionId !== urlSessionId) {
+                const storedFn = getSession(urlSessionId);
+                if (storedFn) {
+                    setMessages(storedFn.messages);
+                    setSessionId(urlSessionId);
+                    // Only update collection if it matches the session's collection
+                    if (storedFn.collectionId && storedFn.collectionId !== selectedCollection) {
+                        // We won't force change selectedCollection here to avoid loops, 
+                        // but ideally the session dictates the collection.
+                        // For now, we assume user selects collection or we just load messages.
+                        // If we really want to switch collection:
+                        const collectionExists = collections.some(c => c.collection_id === storedFn.collectionId);
+                        if (collectionExists) {
+                            setSelectedCollection(storedFn.collectionId);
+                        }
+                    }
+                } else {
+                    // Session not found, clear param to start new
+                    setSearchParams({});
+                }
+            }
+        } else {
+            // No session in URL -> New Chat or Load Last?
+            // For now, let's Start New Chat logic if sessionId is empty
+            // OR if we just navigated to /app/chat (cleared params)
+            if (!sessionId || sessionId !== 'new_session_placeholder') {
+                // Create a new session ID
+                const newId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+                setSessionId(newId);
+                setMessages([]);
+            }
+        }
+    }, [searchParams, user?.user_id]); // Removed sessionId dependency to avoid loop
+
+    // Save chat history to localStorage once after assistant finishes streaming
+    useEffect(() => {
+        if (!isStreaming && selectedCollection && user?.user_id && messages.length > 0 && sessionId) {
+            if (saveTimeoutRef.current) {
+                clearTimeout(saveTimeoutRef.current);
+            }
+            saveTimeoutRef.current = window.setTimeout(() => {
+                saveSession(sessionId, messages, selectedCollection, user.user_id, user.role || 'user');
+
+                // If URL doesn't have session, update it
+                if (!searchParams.get('session')) {
+                    setSearchParams({ session: sessionId }, { replace: true });
+                }
+            }, 1000);
+        }
+        return () => {
+            if (saveTimeoutRef.current) {
+                clearTimeout(saveTimeoutRef.current);
+            }
+        };
+    }, [isStreaming, messages, sessionId, selectedCollection, user?.user_id, user?.role, searchParams, setSearchParams]);
+
+    const fetchCollections = useCallback(async () => {
+        try {
+            const response = await apiGet(
+                `${import.meta.env.VITE_API_BASE_URL}/collections/`,
+                user?.access_token
+            );
+
+            if (response.ok) {
+                const data: Collection[] = await response.json();
+                setCollections(data);
+
+                setSelectedCollection((current) => {
+                    if (current && data.some((collection) => collection.collection_id === current)) {
+                        return current;
+                    }
+                    return data.length > 0 ? data[0].collection_id : '';
+                });
+            }
+        } catch (error) {
+            console.error('Failed to fetch collections:', error);
+        }
+    }, [user?.access_token]);
+
+    useEffect(() => {
+        if (user?.access_token) {
+            fetchCollections();
+        }
+    }, [user?.access_token, fetchCollections]);
+
+    const scrollToBottom = useCallback((smooth = true) => {
+        if (messagesEndRef.current && isAutoScrollRef.current) {
+            messagesEndRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+        }
+    }, []);
+
+    useEffect(() => {
+        if (isAutoScrollRef.current) {
+            scrollToBottom();
+        }
+    }, [messages, scrollToBottom]);
+
+    useEffect(() => {
+        if (isAutoScroll) {
+            scrollToBottom();
+        }
+    }, [isAutoScroll, scrollToBottom]);
+
+    useEffect(() => {
+        return () => {
+            if (typingTimeoutRef.current) {
+                window.clearTimeout(typingTimeoutRef.current);
+            }
+            stopStreamingRef.current = null;
+        };
+    }, []);
+
+    const streamAssistantResponse = useCallback(
+        (rawContent: string, sources?: ChatSource[], isFollowup?: boolean) => {
+            const content = rawContent && rawContent.trim().length > 0
+                ? rawContent
+                : 'I was unable to generate a response.';
+            const messageId = `assistant_${Date.now()}`;
+            const timestamp = new Date();
+
+            if (typingTimeoutRef.current) {
+                window.clearTimeout(typingTimeoutRef.current);
+                typingTimeoutRef.current = null;
+            }
+
+            setMessages((prev) => [
+                ...prev,
+                {
+                    id: messageId,
+                    role: 'assistant',
+                    content: '',
+                    timestamp,
+                    sources,
+                    isFollowup,  // NEW: Track follow-up status
+                },
+            ]);
+
+            return new Promise<void>((resolve) => {
+                setIsStreaming(true);
+
+                const completeStream = () => {
+                    if (typingTimeoutRef.current) {
+                        window.clearTimeout(typingTimeoutRef.current);
+                        typingTimeoutRef.current = null;
+                    }
+                    setMessages((prev) =>
+                        prev.map((msg) =>
+                            msg.id === messageId ? { ...msg, content, sources, isFollowup } : msg
+                        )
+                    );
+                    if (isStreaming) {
+                        scrollToBottom(false);
+                    } else {
+                        scrollToBottom();
+                    }
+                    stopStreamingRef.current = null;
+                    setIsStreaming(false);
+                    resolve();
+                };
+
+                if (content.length === 0) {
+                    completeStream();
+                    return;
+                }
+
+                let index = 0;
+
+                stopStreamingRef.current = () => {
+                    completeStream();
+                };
+
+                const typeNext = () => {
+                    if (!document.hasFocus()) {
+                        completeStream();
+                        return;
+                    }
+
+                    index += 1;
+                    setMessages((prev) =>
+                        prev.map((msg) =>
+                            msg.id === messageId
+                                ? { ...msg, content: content.slice(0, index), sources, isFollowup }
+                                : msg
+                        )
+                    );
+                    scrollToBottom();
+
+                    if (index < content.length) {
+                        typingTimeoutRef.current = window.setTimeout(typeNext, 5);
+                    } else {
+                        completeStream();
+                    }
+                };
+
+                typeNext();
+            });
+        },
+        [scrollToBottom]
+    );
+
+    const sendMessage = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!inputMessage.trim() || !selectedCollection || isLoading || isStreaming) return;
+
+        const messageContent = inputMessage.trim();
+
+        const userMessage: ChatMessage = {
+            id: `user_${Date.now()}`,
+            role: 'user',
+            content: messageContent,
+            timestamp: new Date(),
+        };
+
+        const updatedMessages = [...messages, userMessage];
+        setMessages(updatedMessages);
+        setInputMessage('');
+        setIsLoading(true);
+        enableAutoScroll();
+
+        try {
+            // Prepare conversation history (last ~20 messages)
+            const conversationHistory = updatedMessages.slice(-20).map((msg) => ({
+                role: msg.role,
+                content: msg.content,
+                timestamp: msg.timestamp.toISOString(),
+            }));
+
+            const response = await apiPost(
+                `${import.meta.env.VITE_API_BASE_URL}/chat/ask`,
+                {
+                    question: messageContent,
+                    session_id: sessionId,
+                    conversation_history: conversationHistory,
+                    maintain_context: conversationHistory.length > 0,
+                    collection_id: selectedCollection,
+                },
+                user?.access_token
+            );
+
+            if (!response.ok) {
+                setIsLoading(false);
+                setIsStreaming(false);
+                stopStreamingRef.current = null;
+
+                if (response.status === 401 || response.status === 403) {
+                    toast.error('Incorrect credentials');
+                    const errorMessage: ChatMessage = {
+                        id: `assistant_error_${Date.now()}`,
+                        role: 'assistant',
+                        content: 'Incorrect credentials. Please verify your access details and try again.',
+                        timestamp: new Date(),
+                    };
+                    setMessages((prev) => [...prev, errorMessage]);
+                    return;
+                }
+
+                throw new Error('Failed to send message');
+            }
+
+            const data = await response.json();
+
+            // NEW: Handle follow-up responses
+            if (data.is_followup) {
+                const followupContent = data.followup_questions || 'Could you please clarify your question?';
+                await streamAssistantResponse(followupContent, undefined, true); // Pass isFollowup flag
+                setIsLoading(false);
+                return;
+            }
+
+            let assistantContent =
+                data.answer || data.response || data.content || 'I was unable to generate a response.';
+
+            // Helper to detect generic responses locally if API flag is missing
+            const isGenericResponse = (text: string) => {
+                if (!text) return false;
+                const normalized = text.trim();
+                const genericPattern = /I apologize|I'm limited to providing information|not have any information|outside of my scope|I'm afraid I don't have enough information|I don't have access to information|I don't have any information about|I'm here to help with questions about your knowledge base documents|the provided context does not contain|does not contain any information|do not have enough details|without any relevant information|there are no sources that discuss|i do not have enough details to provide|my role is to assist based on the provided information|I do not have enough context|I have no relevant information|I don't have enough context|I do not have any relevant information|provide a meaningful response/i;
+                return genericPattern.test(normalized);
+            };
+
+            // Check if response is marked as generic (no relevant info found) - if so, don't show sources
+            const isGeneric = Boolean(data.is_generic) || isGenericResponse(assistantContent);
+
+            // ALWAYS strip embedded sources section from answer text to prevent duplicates/baked-in sources
+            assistantContent = assistantContent
+                .replace(/\r?\n+[\s>*-]*\*{0,2}\s*Sources?\s*:?\s*\*{0,2}\s*[\s\S]*$/i, '')
+                .replace(/\r?\n+Sources?\s*:[\s\S]*$/i, '')
+                .trim();
+
+            const sources: ChatSource[] | undefined = isGeneric
+                ? undefined
+                : Array.isArray(data.sources)
+                    ? data.sources
+                        .map((item: any) => {
+                            if (!item || typeof item !== 'object') {
+                                return null;
+                            }
+                            const fileName = typeof item.file_name === 'string' ? item.file_name : undefined;
+                            const fileId = typeof item.file_id === 'string' ? item.file_id : undefined;
+
+                            if (!fileName) {
+                                return null;
+                            }
+                            return {
+                                file_name: fileName,
+                                file_id: fileId,
+                            } satisfies ChatSource;
+                        })
+                        .filter((value): value is ChatSource => value !== null)
+                        .slice(0, 4) // Limit to 4 most relevant sources
+                    : undefined;
+
+            // Re-append the cleaned and limited sources to the text so the renderer can pick them up
+            if (!isGeneric && sources && sources.length > 0) {
+                assistantContent += '\n\n**Sources:**';
+                sources.forEach((source) => {
+                    // Format as markdown link [- filename](id/url) which the renderer understands
+                    const ref = source.url || source.file_id || 'source';
+                    assistantContent += `\n- [${source.file_name}](${ref})`;
+                });
+            }
+
+            await streamAssistantResponse(assistantContent, sources);
+            setIsLoading(false);
+        } catch (error) {
+            console.error('Chat error:', error);
+            toast.error('Failed to send message. Please try again.');
+            const errorMessage: ChatMessage = {
+                id: `assistant_error_${Date.now()}`,
+                role: 'assistant',
+                content: 'Sorry, I encountered an error. Please try again.',
+                timestamp: new Date(),
+            };
+            setMessages((prev) => [...prev, errorMessage]);
+            setIsLoading(false);
+            setIsStreaming(false);
+            stopStreamingRef.current = null;
+        } finally {
+            if (typingTimeoutRef.current === null) {
+                setIsLoading(false);
+            }
+        }
+    };
+
+    const clearChat = () => {
+        if (stopStreamingRef.current) {
+            stopStreamingRef.current();
+        }
+
+        // Navigate to new session (clears query param, triggers useEffect)
+        setSearchParams({});
+        enableAutoScroll();
+    };
+
+    const handleStopStreaming = useCallback(() => {
+        stopStreamingRef.current?.();
+    }, []);
+
+    const handleDownloadSource = useCallback(
+        async (fileIdOrRef: string, fileName?: string) => {
+            if (!user?.access_token) {
+                toast.error('Unable to download source.');
+                return;
+            }
+
+            try {
+                // Use the exact same approach as the working files section
+                console.log('Downloading source:', { fileIdOrRef, fileName, url: `${import.meta.env.VITE_API_BASE_URL}/files/download/${fileIdOrRef}` });
+                const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/files/download/${fileIdOrRef}`, {
+                    headers: {
+                        Authorization: `Bearer ${user.access_token}`,
+                    },
+                });
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = fileName || 'download';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    toast.success('Source downloaded successfully');
+                } else {
+                    const errorText = await response.text();
+                    console.error('Download failed:', { status: response.status, statusText: response.statusText, errorText });
+                    if (response.status === 404) {
+                        toast.error('Source file not found');
+                    } else if (response.status === 403) {
+                        toast.error('You do not have permission to download this file');
+                    } else {
+                        toast.error(`Download failed: ${response.status} ${response.statusText}`);
+                    }
+                }
+            } catch (error) {
+                console.error('Download error:', error);
+                toast.error('Failed to download source file');
+            }
+        },
+        [user?.access_token]
+    );
+
+    const renderMessageContent = useCallback(
+        (content: string, messageId: string, messageSources?: ChatSource[]) => {
+            const nodes: ReactNode[] = [];
+            const lines = content.split('\n');
+            let inSourcesSection = false;
+            let keyCounter = 0;
+
+            const nextKey = () => `${messageId}-node-${keyCounter++}`;
+
+            const sourceIdLookup = new Map<string, string>();
+            const sourceMetadataLookup = new Map<string, { url?: string; source_type?: string; file_id?: string }>();
+            if (Array.isArray(messageSources)) {
+                for (const source of messageSources) {
+                    if (!source || !source.file_name) continue;
+                    const normalized = source.file_name.trim().toLowerCase();
+                    if (!normalized) continue;
+                    if (!sourceIdLookup.has(normalized) && source.file_id) {
+                        sourceIdLookup.set(normalized, source.file_id);
+                    }
+                    // Store full metadata for the source
+                    if (!sourceMetadataLookup.has(normalized)) {
+                        sourceMetadataLookup.set(normalized, {
+                            url: source.url,
+                            source_type: source.source_type,
+                            file_id: source.file_id,
+                        });
+                    }
+                }
+            }
+
+            const looksLikeFileName = (value: string | null | undefined) =>
+                value ? /\.(pdf|docx?|xlsx?|pptx?|txt|csv|json|md)$/i.test(value) : false;
+
+            const extractSourceInfo = (raw: string) => {
+                let displayText = raw.trim();
+                let downloadName: string | null = null;
+                let sourceRef: string | null = null;
+                let sourceType: 'file' | 'web_crawl' = 'file';
+
+                const linkMatch = raw.match(/\[([^\]]+)\]\(([^)]+)\)/);
+                if (linkMatch) {
+                    displayText = linkMatch[1].trim() || displayText;
+                    let linkTarget = linkMatch[2].trim();
+
+                    // Parse source_type from format: reference|source_type
+                    if (linkTarget.includes('|')) {
+                        const parts = linkTarget.split('|');
+                        linkTarget = parts[0];
+                        if (parts[1] === 'web_crawl') {
+                            sourceType = 'web_crawl';
+                        }
+                    }
+                    sourceRef = linkTarget;
+                }
+
+                const fromMatch = raw.match(/\(from\s+(.+?)\)$/i);
+                if (fromMatch) {
+                    const reference = fromMatch[1].trim();
+                    if (looksLikeFileName(reference)) {
+                        downloadName = reference;
+                    } else if (!sourceRef) {
+                        sourceRef = reference;
+                    }
+                }
+
+                if (!downloadName) {
+                    const withoutPrefix = raw.replace(/^source\s*\d+[:\-]?\s*/i, '').trim();
+                    if (withoutPrefix && withoutPrefix !== raw.trim() && looksLikeFileName(withoutPrefix)) {
+                        downloadName = withoutPrefix;
+                    }
+                }
+
+                if (!downloadName && !sourceRef) {
+                    const quoted = raw.replace(/^"|"$/g, '').replace(/^'|'$/g, '').trim();
+                    if (looksLikeFileName(quoted)) {
+                        downloadName = quoted;
+                    }
+                }
+
+                if (downloadName) {
+                    downloadName = downloadName.replace(/^"|"$/g, '').replace(/^'|'$/g, '').trim();
+                    displayText = downloadName || displayText;
+                }
+
+                if (!displayText) {
+                    displayText = raw.trim();
+                }
+
+                const normalizedDisplay = displayText.trim().toLowerCase();
+                const matchedFileId = normalizedDisplay ? sourceIdLookup.get(normalizedDisplay) : undefined;
+
+                // Detect web_crawl from URL pattern if not already set
+                if (sourceRef && sourceRef.startsWith('http') && sourceType === 'file') {
+                    sourceType = 'web_crawl';
+                }
+
+                return {
+                    displayText,
+                    downloadName,
+                    sourceRef,
+                    matchedFileId,
+                    sourceType,
+                };
+            };
+
+            const createInlineElements = (line: string, block: boolean = true): ReactNode[] => {
+                const elements: ReactNode[] = [];
+                // Match links OR bold text
+                const tokenRegex = /(\[.*?\]\(.*?\))|(\*\*.*?\*\*)/g;
+                let lastIndex = 0;
+                let match: RegExpExecArray | null;
+
+                const pushText = (text: string) => {
+                    if (block && !text.trim()) {
+                        return;
+                    }
+                    elements.push(
+                        <span key={nextKey()} className={`${block ? 'block ' : ''}whitespace-pre-wrap`}>
+                            {text || (block ? ' ' : '\u00a0')}
+                        </span>
+                    );
+                };
+
+                while ((match = tokenRegex.exec(line)) !== null) {
+                    if (match.index > lastIndex) {
+                        pushText(line.slice(lastIndex, match.index));
+                    }
+
+                    const fullMatch = match[0];
+
+                    if (fullMatch.startsWith('**')) {
+                        // Handle Bold
+                        const content = fullMatch.slice(2, -2);
+                        elements.push(
+                            <strong key={nextKey()} className="font-bold">
+                                {content}
+                            </strong>
+                        );
+                    } else {
+                        // Handle Link
+                        const linkMatch = fullMatch.match(/\[([^\]]+)\]\(([^)]+)\)/);
+                        if (linkMatch) {
+                            const [, label, rawLinkTarget] = linkMatch;
+                            const { displayText, downloadName, matchedFileId, sourceType } = extractSourceInfo(`[${label}](${rawLinkTarget})`);
+
+                            // Parse source_type from linkTarget if present
+                            let linkTarget = rawLinkTarget;
+                            let detectedSourceType = sourceType;
+                            if (rawLinkTarget.includes('|')) {
+                                const parts = rawLinkTarget.split('|');
+                                linkTarget = parts[0];
+                                if (parts[1] === 'web_crawl') {
+                                    detectedSourceType = 'web_crawl';
+                                }
+                            }
+
+                            const fileId = matchedFileId ?? linkTarget;
+                            const fileName = downloadName || displayText || label;
+
+                            if (detectedSourceType === 'web_crawl') {
+                                // Web crawl source - open URL in new tab
+                                elements.push(
+                                    <a
+                                        key={nextKey()}
+                                        href={linkTarget.startsWith('http') ? linkTarget : `https://${linkTarget}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer`}
+                                    >
+                                        {displayText.trim() || 'View source'} ↗
+                                    </a>
+                                );
+                            } else {
+                                // File source - trigger download
+                                elements.push(
+                                    <button
+                                        key={nextKey()}
+                                        type="button"
+                                        className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer`}
+                                        onClick={() => handleDownloadSource(fileId, fileName)}
+                                    >
+                                        {displayText.trim() || 'Download source'}
+                                    </button>
+                                );
+                            }
+                        }
+                    }
+
+                    lastIndex = match.index + fullMatch.length;
+                }
+
+                const remaining = line.slice(lastIndex);
+                pushText(remaining);
+
+                return elements;
+            };
+
+            const isTableSeparatorCell = (cell: string) => /^:?-{3,}:?$/.test(cell.trim());
+
+            const isTableLine = (line: string): boolean => {
+                const trimmed = line.trim();
+                if (!trimmed) return false;
+                if (/^sources?:\s*$/i.test(trimmed)) return false;
+                if (/^\-\s+/.test(trimmed)) return false;
+                const pipeCount = (trimmed.match(/\|/g) || []).length;
+                if (pipeCount < 2) return false;
+                return true;
+            };
+
+            const splitRow = (line: string) =>
+                line
+                    .trim()
+                    .replace(/^\||\|$/g, '')
+                    .split('|')
+                    .map((cell) => cell.trim());
+
+            const renderTable = (tableLines: string[]): ReactNode | null => {
+                const sanitized = tableLines
+                    .map((line) => line.trim())
+                    .filter((line) => line.length > 0);
+
+                if (sanitized.length === 0) {
+                    return null;
+                }
+
+                const rows = sanitized.map(splitRow).filter((row) => row.length > 0);
+
+                if (rows.length === 0) {
+                    return null;
+                }
+
+                const headerCells = rows[0];
+                let bodyRows = rows.slice(1);
+
+                if (bodyRows.length > 0 && bodyRows[0].every(isTableSeparatorCell)) {
+                    bodyRows = bodyRows.slice(1);
+                }
+
+                if (headerCells.length === 0) {
+                    return null;
+                }
+
+                const columnCount = headerCells.length;
+
+                return (
+                    <div key={nextKey()} className="overflow-x-auto rounded-md border border-border bg-background">
+                        <table className="w-full min-w-max border-collapse text-xs sm:text-sm">
+                            <thead className="bg-muted/60">
+                                <tr>
+                                    {headerCells.map((cell) => (
+                                        <th key={nextKey()} className="px-3 py-2 text-left font-semibold text-foreground">
+                                            {createInlineElements(cell, false)}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {bodyRows.length === 0 ? (
+                                    <tr key={nextKey()} className="bg-background">
+                                        {Array.from({ length: columnCount }).map(() => (
+                                            <td key={nextKey()} className="px-3 py-2" />
+                                        ))}
+                                    </tr>
+                                ) : (
+                                    bodyRows.map((row) => {
+                                        const cells = [...row];
+                                        while (cells.length < columnCount) {
+                                            cells.push('');
+                                        }
+                                        return (
+                                            <tr key={nextKey()} className="odd:bg-background even:bg-muted/20">
+                                                {cells.map((cell) => (
+                                                    <td key={nextKey()} className="px-3 py-2 align-top text-foreground">
+                                                        {createInlineElements(cell, false)}
+                                                    </td>
+                                                ))}
+                                            </tr>
+                                        );
+                                    })
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                );
+            };
+
+            const sourcesNodes: ReactNode[] = [];
+
+            for (let i = 0; i < lines.length; i += 1) {
+                const rawLine = lines[i];
+                const trimmed = rawLine.trim();
+                const isSourcesHeading = /^\**\s*sources?\s*:?\s*\**$/i.test(trimmed);
+
+                if (isSourcesHeading) {
+                    inSourcesSection = true;
+                    continue;
+                }
+
+                if (inSourcesSection && /^-\s*(.+)$/.test(trimmed)) {
+                    const label = trimmed.replace(/^-\s*/, '');
+                    const linkMatch = label.match(/\[([^\]]+)\]\(([^)]+)\)/);
+
+                    // Extract source name for metadata lookup
+                    let sourceName = label;
+                    if (linkMatch) {
+                        sourceName = linkMatch[1];
+                    }
+                    const normalizedName = sourceName.trim().toLowerCase();
+                    const metadata = sourceMetadataLookup.get(normalizedName);
+
+                    // Check if we have metadata from API response
+                    if (metadata && (metadata.source_type === 'web_crawl' || metadata.url)) {
+                        // Web crawl source - open URL in new tab
+                        const url = metadata.url || '';
+                        sourcesNodes.push(
+                            <a
+                                key={nextKey()}
+                                href={url.startsWith('http') ? url : `https://${url}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                            >
+                                {label.trim()} ↗
+                            </a>
+                        );
+                    } else {
+                        // Regular file source
+                        const { matchedFileId, downloadName } = extractSourceInfo(label);
+                        const fileId = matchedFileId;
+                        sourcesNodes.push(
+                            <button
+                                key={nextKey()}
+                                type="button"
+                                className="block text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-left"
+                                onClick={() => {
+                                    if (fileId) {
+                                        handleDownloadSource(fileId, downloadName || undefined);
+                                    } else if (linkMatch) {
+                                        // Fallback to link target if no file ID found
+                                        handleDownloadSource(linkMatch[2], downloadName || undefined);
+                                    }
+                                }}
+                            >
+                                {label.trim()}
+                            </button>
+                        );
+                    }
+                    continue;
+                }
+
+                if (isTableLine(rawLine)) {
+                    // Accumulate table lines
+                    const tableLines = [rawLine];
+                    let j = i + 1;
+                    while (j < lines.length && (isTableLine(lines[j]) || lines[j].trim() === '')) {
+                        if (lines[j].trim() !== '') {
+                            tableLines.push(lines[j]);
+                        }
+                        j++;
+                    }
+                    const tableNode = renderTable(tableLines);
+                    if (tableNode) {
+                        nodes.push(tableNode);
+                    }
+                    i = j - 1;
+                    continue;
+                }
+
+                // Just text
+                if (trimmed) {
+                    nodes.push(...createInlineElements(trimmed));
+                } else {
+                    // preserve empty lines as spacing
+                    nodes.push(<div key={nextKey()} className="h-4" />);
+                }
+            }
+
+            return (
+                <div className="space-y-1">
+                    {nodes}
+                    {sourcesNodes.length > 0 && (
+                        <div className="mt-4 border-t pt-2">
+                            <strong className="block text-xs uppercase text-muted-foreground mb-1">Sources:</strong>
+                            <div className="space-y-1 pl-2 border-l-2 border-primary/20">
+                                {sourcesNodes}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        },
+        [handleDownloadSource]
+    );
+
+    return (
+        <DashboardLayout>
+            <div className="flex h-[calc(100vh-theme(spacing.16))] flex-col">
+                <div className="flex items-center justify-between border-b px-6 py-4">
+                    <h2 className="text-xl font-semibold">Leto Chat</h2>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={clearChat}
+                            disabled={isLoading || isStreaming}
+                            className="h-8 text-xs sm:h-9 sm:text-sm"
+                        >
+                            Clear Chat
+                        </Button>
+                    </div>
+                </div>
+
+                <div className="flex-1 p-4 md:p-6 overflow-hidden">
+                    <Card className="flex h-full flex-col border-0 shadow-none bg-transparent">
+                        <CardContent className="flex flex-1 flex-col overflow-hidden p-0 relative">
+                            {/* Messages Container - Modified for Bottom Alignment */}
+                            <div
+                                ref={messagesContainerRef}
+                                className="flex-1 overflow-y-auto px-4 py-4 space-y-6 flex flex-col"
+                                onTouchMove={handleTouchMove}
+                                onWheel={handleWheel}
+                            >
+                                {/* Spacer to push messages to bottom if there are few */}
+                                {!hasMessages ? (
+                                    <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-muted-foreground mt-auto">
+                                        <div className="mb-4 rounded-full bg-primary/10 p-4">
+                                            <Bot className="h-8 w-8 text-primary" />
+                                        </div>
+                                        <h3 className="text-lg font-medium text-foreground">
+                                            Welcome to Leto Chat
+                                        </h3>
+                                        <p className="max-w-xs mx-auto mt-1 mb-4">
+                                            I can help answer questions about your documents.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="mt-auto space-y-6">
+                                        {messages.map((message) => (
+                                            <div
+                                                key={message.id}
+                                                className={`flex gap-4 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                                            >
+                                                {message.role === 'assistant' && (
+                                                    <div className="mt-1 flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-full border bg-muted">
+                                                        <Bot className="h-4 w-4" />
+                                                    </div>
+                                                )}
+                                                <div
+                                                    className={`relative max-w-[85%] rounded-2xl px-5 py-3.5 text-sm sm:max-w-[75%] ${message.role === 'user'
+                                                        ? 'bg-primary text-primary-foreground'
+                                                        : 'bg-muted/50'
+                                                        }`}
+                                                >
+                                                    <div className="flex items-center gap-2 mb-1 opacity-70 text-xs">
+                                                        <span className="font-medium capitalize">
+                                                            {message.role === 'assistant' ? 'Leto Assistant' : 'You'}
+                                                        </span>
+                                                        <span>
+                                                            {message.timestamp.toLocaleTimeString([], {
+                                                                hour: '2-digit',
+                                                                minute: '2-digit',
+                                                            })}
+                                                        </span>
+                                                    </div>
+                                                    <div className="prose prose-sm dark:prose-invert max-w-none break-words">
+                                                        {renderMessageContent(message.content, message.id, message.sources)}
+                                                    </div>
+                                                </div>
+                                                {message.role === 'user' && (
+                                                    <div className="mt-1 flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-full bg-primary text-primary-foreground shadow">
+                                                        <User className="h-4 w-4" />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                        {isLoading && (
+                                            <div className="flex gap-4">
+                                                <div className="mt-1 flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-full border bg-muted">
+                                                    <Bot className="h-4 w-4" />
+                                                </div>
+                                                <div className="flex items-center gap-2 rounded-2xl bg-muted/50 px-5 py-3.5">
+                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                    <span className="text-sm text-muted-foreground">Thinking...</span>
+                                                </div>
+                                            </div>
+                                        )}
+                                        <div ref={messagesEndRef} className="h-1" />
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Input Area */}
+                            <div className="px-4 pb-4 pt-2">
+                                <form onSubmit={sendMessage} className="relative mx-auto max-w-4xl">
+                                    {/* Floating Action Buttons or Stop generation could go here */}
+                                    {isStreaming && (
+                                        <div className="absolute -top-10 left-1/2 -translate-x-1/2">
+                                            <Button
+                                                type="button"
+                                                variant="secondary"
+                                                size="sm"
+                                                onClick={() => stopStreamingRef.current?.()}
+                                                className="shadow-md"
+                                            >
+                                                <span className="mr-2">■</span> Stop generating
+                                            </Button>
+                                        </div>
+                                    )}
+
+                                    <div className="relative flex items-end gap-2 rounded-xl border bg-background p-2 shadow-sm focus-within:ring-1 focus-within:ring-ring">
+                                        <textarea
+                                            value={inputMessage}
+                                            onChange={(e) => setInputMessage(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && !e.shiftKey) {
+                                                    e.preventDefault();
+                                                    sendMessage(e);
+                                                }
+                                            }}
+                                            placeholder="Type your message..."
+                                            className="flex-1 resize-none bg-transparent px-3 py-3 text-sm focus:outline-none max-h-[200px] overflow-y-auto"
+                                            rows={1}
+                                            disabled={isLoading || isStreaming}
+                                            style={{ minHeight: '44px' }}
+                                        />
+                                        <Button
+                                            type="submit"
+                                            disabled={!inputMessage.trim() || isLoading || isStreaming}
+                                            className="mb-1 h-9 w-9 shrink-0 rounded-lg p-0"
+                                        >
+                                            <Send className="h-4 w-4" />
+                                            <span className="sr-only">Send</span>
+                                        </Button>
+                                    </div>
+                                    <div className="mt-2 text-center text-xs text-muted-foreground">
+                                        Leto can make mistakes. Consider checking important information.
+                                    </div>
+                                </form>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+            </div>
+        </DashboardLayout>
+    );
+}

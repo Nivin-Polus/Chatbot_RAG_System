@@ -1,4 +1,5 @@
-import { NavLink, useLocation } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Sidebar,
@@ -11,6 +12,7 @@ import {
   SidebarMenuItem,
   SidebarFooter,
   useSidebar,
+  SidebarMenuAction,
 } from '@/components/ui/sidebar';
 import {
   Database,
@@ -22,10 +24,17 @@ import {
   LogOut,
   Activity,
   Link2,
-  Globe
+  Globe,
+  Trash2,
+  Plus,
+  Pencil,
+  Check,
+  X
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { getAssetUrl } from '@/utils/assets';
+import { getSessions, deleteSession, renameSession, ChatSession } from '@/utils/chatStorage';
 
 // Navigation definitions
 const superadminNav = [
@@ -57,6 +66,10 @@ const userNav = [
   { title: 'Chat', url: '/app/chat', icon: MessageSquare },
 ];
 
+const pluginUserNav = [
+  { title: 'Chat', url: '/pluginuser/chat', icon: MessageSquare },
+];
+
 const sidebarHeading = (role?: string) => {
   switch (role) {
     case 'super_admin':
@@ -66,6 +79,8 @@ const sidebarHeading = (role?: string) => {
     case 'useradmin':
     case 'user_admin':
       return 'Leto Admin';
+    case 'plugin_user':
+      return 'Leto User';
     default:
       return 'Leto User';
   }
@@ -75,6 +90,13 @@ export function AppSidebar() {
   const { user, logout } = useAuth();
   const { open } = useSidebar();
   const location = useLocation();
+  const navigate = useNavigate();
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+
+  // Renaming state
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const editInputRef = useRef<HTMLInputElement>(null);
 
   // Get navigation items based on user role
   const getNavItems = () => {
@@ -87,8 +109,91 @@ export function AppSidebar() {
       case 'useradmin':
       case 'user_admin':
         return userAdminNav();
+      case 'plugin_user':
+        return pluginUserNav;
       default:
         return userNav;
+    }
+  };
+
+  const loadHistory = useCallback(() => {
+    if (user) {
+      const list = getSessions(user.user_id, user.role || 'user');
+      setSessions(list);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    loadHistory();
+    window.addEventListener('chat-history-updated', loadHistory);
+    return () => window.removeEventListener('chat-history-updated', loadHistory);
+  }, [loadHistory]);
+
+  // Focus input when editing starts
+  useEffect(() => {
+    if (editingSessionId && editInputRef.current) {
+      editInputRef.current.focus();
+    }
+  }, [editingSessionId]);
+
+  const handleDeleteSession = async (e: React.MouseEvent, sessionId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (user) {
+      deleteSession(sessionId, user.user_id, user.role || 'user');
+      if (location.search.includes(sessionId)) {
+        const baseUrl = getChatBaseUrl();
+        navigate(baseUrl);
+      }
+    }
+  };
+
+  const handleStartEdit = (e: React.MouseEvent, session: ChatSession) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setEditingSessionId(session.id);
+    setEditTitle(session.title);
+  };
+
+  const handleSaveEdit = (e: React.MouseEvent | React.KeyboardEvent, sessionId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (user && editTitle.trim()) {
+      renameSession(sessionId, editTitle.trim(), user.user_id, user.role || 'user');
+      setEditingSessionId(null);
+      setEditTitle('');
+    }
+  };
+
+  const handleCancelEdit = (e: React.MouseEvent | React.KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setEditingSessionId(null);
+    setEditTitle('');
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent, sessionId: string) => {
+    if (e.key === 'Enter') {
+      handleSaveEdit(e, sessionId);
+    } else if (e.key === 'Escape') {
+      handleCancelEdit(e);
+    }
+  };
+
+  const getChatBaseUrl = () => {
+    switch (user?.role) {
+      case 'super_admin':
+      case 'superadmin':
+        return '/superadmin/chat';
+      case 'useradmin':
+      case 'user_admin':
+        return '/useradmin/chat';
+      case 'admin':
+        return `/admin/${user?.collection_id}/chat`;
+      case 'plugin_user':
+        return '/pluginuser/chat';
+      default:
+        return '/app/chat';
     }
   };
 
@@ -130,6 +235,16 @@ export function AppSidebar() {
               </div>
             )}
           </div>
+          {open && (
+            <Button
+              variant="outline"
+              className="w-full justify-start gap-2 mt-2"
+              onClick={() => navigate(getChatBaseUrl())}
+            >
+              <Plus className="h-4 w-4" />
+              New Chat
+            </Button>
+          )}
         </div>
 
         <SidebarGroup>
@@ -159,17 +274,85 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {/* History Section */}
+        {sessions.length > 0 && (
+          <SidebarGroup>
+            {open && <SidebarGroupLabel>History</SidebarGroupLabel>}
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {sessions.map((session) => {
+                  const chatBase = getChatBaseUrl();
+                  const sessionUrl = `${chatBase}?session=${session.id}`;
+                  const isActiveSession = location.pathname === chatBase && location.search === `?session=${session.id}`;
+                  const isEditing = editingSessionId === session.id;
+
+                  return (
+                    <SidebarMenuItem key={session.id} className="group relative">
+                      {isEditing ? (
+                        <div className="flex items-center px-2 py-1 gap-2 w-full">
+                          <Input
+                            ref={editInputRef}
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            onKeyDown={(e) => handleKeyDown(e, session.id)}
+                            className="h-8 text-sm"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-green-500 hover:text-green-600 hover:bg-transparent" onClick={(e) => handleSaveEdit(e, session.id)}>
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-transparent" onClick={handleCancelEdit}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <>
+                          <SidebarMenuButton asChild isActive={isActiveSession}>
+                            <NavLink to={sessionUrl} className="flex items-center justify-between pr-16">
+                              <span className="truncate">{session.title}</span>
+                            </NavLink>
+                          </SidebarMenuButton>
+                          <div className="flex items-center absolute right-1 top-1/2 -translate-y-1/2 gap-1 px-1">
+                            <SidebarMenuAction
+                              className="static h-6 w-6 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+                              onClick={(e) => handleStartEdit(e, session)}
+                              title="Rename"
+                            >
+                              <Pencil className="h-3 w-3" />
+                              <span className="sr-only">Rename</span>
+                            </SidebarMenuAction>
+                            <SidebarMenuAction
+                              className="static h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-sidebar-accent"
+                              onClick={(e) => handleDeleteSession(e, session.id)}
+                              title="Delete"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                              <span className="sr-only">Delete</span>
+                            </SidebarMenuAction>
+                          </div>
+                        </>
+                      )}
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border p-4">
-        <Button
-          variant="ghost"
-          className="w-full justify-start"
-          onClick={logout}
-        >
-          <LogOut className="h-4 w-4" />
-          {open && <span>Logout</span>}
-        </Button>
+        {user?.role !== 'plugin_user' && (
+          <Button
+            variant="ghost"
+            className="w-full justify-start"
+            onClick={logout}
+          >
+            <LogOut className="h-4 w-4" />
+            {open && <span>Logout</span>}
+          </Button>
+        )}
       </SidebarFooter>
     </Sidebar>
   );

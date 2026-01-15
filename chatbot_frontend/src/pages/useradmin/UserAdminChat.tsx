@@ -14,7 +14,8 @@ import { MessageSquare, Send, Loader2, User } from 'lucide-react';
 import { ChatMessage, ChatSource, Collection } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost } from '@/utils/api';
-import { saveChatHistory, loadChatHistory, clearChatHistory } from '@/utils/chatStorage';
+import { saveSession, getSession, getSessions } from '@/utils/chatStorage';
+import { useSearchParams } from 'react-router-dom';
 
 export default function UserAdminChat() {
   const { user } = useAuth();
@@ -35,6 +36,7 @@ export default function UserAdminChat() {
   const saveTimeoutRef = useRef<number | null>(null);
   const [accessibleFileIds, setAccessibleFileIds] = useState<string[]>([]);
   const [accessibleFileNames, setAccessibleFileNames] = useState<string[]>([]);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const selectedCollectionDetails = useMemo(
     () => collections.find((collection) => collection.collection_id === selectedCollection) ?? null,
@@ -95,31 +97,38 @@ export default function UserAdminChat() {
     });
   }, []);
 
-  // Initialize sessionId if not set
+  // Handle Session Loading
   useEffect(() => {
-    if (!sessionId) {
-      const newSessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-      setSessionId(newSessionId);
-    }
-  }, [sessionId]);
+    const urlSessionId = searchParams.get('session');
 
-  // Load chat history from localStorage when collection changes
-  useEffect(() => {
-    if (selectedCollection && user?.user_id) {
-      const localStored = loadChatHistory(selectedCollection, user.user_id, user.role || 'useradmin');
-      if (localStored && localStored.messages.length > 0) {
-        setMessages(localStored.messages);
-        if (localStored.sessionId) {
-          setSessionId(localStored.sessionId);
+    if (urlSessionId) {
+      // Load specific session
+      if (sessionId !== urlSessionId) {
+        const storedFn = getSession(urlSessionId);
+        if (storedFn) {
+          setMessages(storedFn.messages);
+          setSessionId(urlSessionId);
+          // Only update collection if it matches the session's collection
+          if (storedFn.collectionId && storedFn.collectionId !== selectedCollection) {
+            const collectionExists = collections.some(c => c.collection_id === storedFn.collectionId);
+            if (collectionExists) {
+              setSelectedCollection(storedFn.collectionId);
+            }
+          }
+        } else {
+          // Session not found, clear param to start new
+          setSearchParams({});
         }
-      } else {
+      }
+    } else {
+      // No session in URL -> Start New Chat logic
+      if (!sessionId || sessionId !== 'new_session_placeholder') {
+        const newId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+        setSessionId(newId);
         setMessages([]);
       }
-    } else if (!selectedCollection) {
-      // Clear messages when no collection is selected
-      setMessages([]);
     }
-  }, [selectedCollection, user?.user_id, user?.role]);
+  }, [searchParams, user?.user_id]);
 
   // Save chat history to localStorage once after assistant finishes streaming
   useEffect(() => {
@@ -128,7 +137,12 @@ export default function UserAdminChat() {
         clearTimeout(saveTimeoutRef.current);
       }
       saveTimeoutRef.current = window.setTimeout(() => {
-        saveChatHistory(messages, sessionId, selectedCollection, user.user_id, user.role || 'useradmin');
+        saveSession(sessionId, messages, selectedCollection, user.user_id, user.role || 'useradmin');
+
+        // If URL doesn't have session, update it
+        if (!searchParams.get('session')) {
+          setSearchParams({ session: sessionId }, { replace: true });
+        }
       }, 1000);
     }
     return () => {
@@ -136,7 +150,7 @@ export default function UserAdminChat() {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [isStreaming, messages, sessionId, selectedCollection, user?.user_id, user?.role]);
+  }, [isStreaming, messages, sessionId, selectedCollection, user?.user_id, user?.role, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (isAutoScrollRef.current) {
@@ -538,14 +552,8 @@ export default function UserAdminChat() {
       stopStreamingRef.current();
     }
 
-    // Clear from localStorage
-    if (selectedCollection && user?.user_id) {
-      clearChatHistory(selectedCollection, user.user_id, user.role || 'useradmin');
-    }
-
     setMessages([]);
-    const newSessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-    setSessionId(newSessionId);
+    setSearchParams({});
     enableAutoScroll();
   };
 
