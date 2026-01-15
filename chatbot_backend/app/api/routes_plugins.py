@@ -623,9 +623,9 @@ async def generate_login_url(
     )
 
     # Construct the login URL
-    # Use the frontend URL from settings or default
-    frontend_base_url = getattr(settings, 'FRONTEND_URL', 'https://dev-chatbot.polussolutions.com')
-    login_url = f"{frontend_base_url}/chatbot/auto-login?token={auto_login_token}"
+    # Use the frontend URL from settings
+    frontend_base_url = settings.FRONTEND_URL.rstrip('/')
+    login_url = f"{frontend_base_url}/auto-login?token={auto_login_token}"
 
     logger.info("Generated auto-login URL for plugin: %s, collection: %s", plugin.id, collection.collection_id)
 

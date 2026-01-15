@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(30, validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES")
     PLUGIN_TOKEN_EXPIRE_DAYS: int = Field(30, validation_alias="PLUGIN_TOKEN_EXPIRE_DAYS")
     
+    # Frontend URL for auto-login redirects
+    FRONTEND_URL: str = Field("https://dev-chatbot.polussolutions.com/chatbot", validation_alias="FRONTEND_URL")
+    
     # App mode
     APP_MODE: str = Field("api", validation_alias="APP_MODE")  # "api" or "ui"
     
