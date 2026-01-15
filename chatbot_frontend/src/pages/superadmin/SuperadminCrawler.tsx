@@ -129,6 +129,11 @@ export default function SuperadminCrawler() {
   const [jobIdToDelete, setJobIdToDelete] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Cancel confirmation state
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [jobIdToCancel, setJobIdToCancel] = useState<string | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
+
   // URL details dialog state
   const [urlDetailsOpen, setUrlDetailsOpen] = useState(false);
   const [urlDetailsLoading, setUrlDetailsLoading] = useState(false);
@@ -261,23 +266,36 @@ export default function SuperadminCrawler() {
     }
   };
 
-  // Cancel a running job
-  const handleCancelJob = async (jobId: string) => {
+  // Show cancel confirmation dialog
+  const handleCancelJob = (jobId: string) => {
+    setJobIdToCancel(jobId);
+    setCancelDialogOpen(true);
+  };
+
+  // Perform the actual cancellation
+  const confirmCancelJob = async (deleteData: boolean) => {
+    if (!jobIdToCancel) return;
+
+    setIsCancelling(true);
     try {
       const response = await apiPost(
-        `${import.meta.env.VITE_API_BASE_URL}/crawler/jobs/${jobId}/cancel`,
-        {},
+        `${import.meta.env.VITE_API_BASE_URL}/crawler/jobs/${jobIdToCancel}/cancel`,
+        { delete_crawled_data: deleteData },
         user?.access_token
       );
 
       if (response.ok) {
-        toast.success('Crawl cancelled');
+        toast.success(deleteData ? 'Crawl cancelled and data deleted' : 'Crawl cancelled, data kept');
         fetchJobs();
       } else {
         toast.error('Failed to cancel crawl');
       }
     } catch (error) {
       toast.error('Failed to cancel crawl');
+    } finally {
+      setIsCancelling(false);
+      setCancelDialogOpen(false);
+      setJobIdToCancel(null);
     }
   };
 
@@ -1049,6 +1067,58 @@ export default function SuperadminCrawler() {
                     'Delete'
                   )}
                 </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          {/* Cancel Confirmation Dialog */}
+          <AlertDialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Cancel Crawl Job</AlertDialogTitle>
+                <AlertDialogDescription>
+                  The crawl is currently in progress. What would you like to do with the data that has already been crawled?
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+                <AlertDialogCancel disabled={isCancelling}>
+                  Don't Cancel
+                </AlertDialogCancel>
+                <Button
+                  variant="outline"
+                  onClick={() => confirmCancelJob(false)}
+                  disabled={isCancelling}
+                  className="sm:mr-auto"
+                >
+                  {isCancelling ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Cancelling...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="h-4 w-4 mr-2" />
+                      Keep Data
+                    </>
+                  )}
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => confirmCancelJob(true)}
+                  disabled={isCancelling}
+                >
+                  {isCancelling ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Cancelling...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Delete Data
+                    </>
+                  )}
+                </Button>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>

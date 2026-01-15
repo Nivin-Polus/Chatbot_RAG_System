@@ -202,12 +202,13 @@ class CrawlerService:
         logger.debug(f"Started crawl job {job_id}")
         return True
     
-    def cancel_job(self, job_id: str) -> bool:
+    def cancel_job(self, job_id: str, delete_data: bool = False) -> bool:
         """
         Cancel a running crawl job.
         
         Args:
             job_id: Job ID to cancel
+            delete_data: If True, delete all crawled data from the vector store
             
         Returns:
             True if cancelled successfully
@@ -220,6 +221,25 @@ class CrawlerService:
         if job and job.status == "running":
             job.status = "cancelled"
             job.completed_at = datetime.utcnow()
+            
+            # Delete crawled data if requested
+            if delete_data and job.collection_id:
+                try:
+                    vector_store = VectorStore()
+                    # Delete all chunks from this crawl job
+                    deleted_count = vector_store.delete_by_filter({
+                        "crawl_job_id": job_id,
+                        "collection_id": job.collection_id
+                    })
+                    logger.info(f"Deleted {deleted_count} chunks from cancelled job {job_id}")
+                    
+                    # Reset chunk counters since data was deleted
+                    job.chunks_created = 0
+                    job.chunks_added = 0
+                except Exception as e:
+                    logger.error(f"Failed to delete chunks for job {job_id}: {e}")
+                    # Continue with cancellation even if deletion fails
+            
             self.db.commit()
             return True
         

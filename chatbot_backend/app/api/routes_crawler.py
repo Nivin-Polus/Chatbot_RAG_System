@@ -127,6 +127,15 @@ class ScheduleCrawlRequest(BaseModel):
     )
 
 
+class CancelCrawlRequest(BaseModel):
+    """Request to cancel a crawl job."""
+    
+    delete_crawled_data: bool = Field(
+        default=False,
+        description="Whether to delete already crawled data from the vector store"
+    )
+
+
 class CrawlJobListResponse(BaseModel):
     """Response for listing crawl jobs."""
     
@@ -399,34 +408,38 @@ async def get_crawl_job_urls(
 @router.post("/jobs/{job_id}/cancel")
 async def cancel_crawl_job(
     job_id: str,
+    request: CancelCrawlRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Cancel a running crawl job.
-    
-    Stops the crawl but preserves any content already extracted.
+
+    Args:
+        job_id: The job ID to cancel
+        request: Cancel request with option to delete crawled data
     """
     job = db.query(CrawlerJob).filter(CrawlerJob.job_id == job_id).first()
-    
+
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
+
     # Check access
     if current_user.role not in ['super_admin', 'superadmin']:
         if job.user_id != current_user.user_id:
             raise HTTPException(status_code=403, detail="Access denied")
-    
+
     if job.status != "running":
         raise HTTPException(status_code=400, detail="Job is not running")
-    
+
     # Cancel
     crawler_service = CrawlerService(db)
-    success = crawler_service.cancel_job(job_id)
-    
+    success = crawler_service.cancel_job(job_id, delete_data=request.delete_crawled_data)
+
     if success:
-        logger.info(f"User {current_user.username} cancelled job {job_id}")
-        
+        action = "cancelled and data deleted" if request.delete_crawled_data else "cancelled"
+        logger.info(f"User {current_user.username} {action} job {job_id}")
+
         # Log activity
         activity_tracker.log_activity(
             activity_type="crawl_cancelled",
@@ -435,10 +448,11 @@ async def cancel_crawl_job(
                 "job_id": job_id,
                 "target_url": job.target_url,
                 "collection_id": job.collection_id,
+                "deleted_data": request.delete_crawled_data,
             },
         )
-        
-        return {"status": "cancelled", "job_id": job_id}
+
+        return {"status": "cancelled", "job_id": job_id, "data_deleted": request.delete_crawled_data}
     else:
         raise HTTPException(status_code=500, detail="Failed to cancel job")
 

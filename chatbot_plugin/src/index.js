@@ -897,6 +897,55 @@ import "./styles.css";
   function switchSession(sessionId) {
     if (currentSessionId === sessionId && messages.length > 0) return;
 
+    // Abort any ongoing fetch request
+    if (abortController) {
+      abortController.abort();
+      abortController = null;
+    }
+
+    // Stop any typing animation and finalize the streaming message
+    if (typeof currentTypingFinish === 'function') {
+      clearInterval(typingInterval);
+      typingInterval = null;
+      // Don't call currentTypingFinish() as it may try to update UI
+      currentTypingFinish = null;
+    } else {
+      clearInterval(typingInterval);
+      typingInterval = null;
+    }
+
+    // Finalize any messages that are still in typing state (preserve their current text)
+    messages.forEach(msg => {
+      if (msg.isTyping) {
+        msg.isTyping = false;
+      }
+    });
+
+    // Remove typing indicators (the "thinking..." bubbles)
+    const typingIndicators = messages.filter(msg => msg.isTypingIndicator);
+    typingIndicators.forEach(indicator => {
+      const index = messages.indexOf(indicator);
+      if (index !== -1) {
+        messages.splice(index, 1);
+      }
+    });
+
+    // Reset state flags
+    inFlight = false;
+    currentRequestId = null;
+
+    // Re-enable UI elements
+    if (input) {
+      input.disabled = false;
+    }
+    showSendButton();
+
+    // Save the current session before switching (if there are user messages)
+    const hasUserMessages = messages.some(m => m.user);
+    if (hasUserMessages && chatService.sessionId) {
+      saveChatHistory();
+    }
+
     const storedMsgs = localStorage.getItem(CHAT_MESSAGES_PREFIX + sessionId);
     if (!storedMsgs) return;
 
@@ -1017,9 +1066,38 @@ import "./styles.css";
     return `<div class="plugin-msg ${classes.join(" ")}">${content}</div>`;
   }
 
+  // Strip incomplete markdown patterns from streaming text
+  function stripIncompleteMarkdown(text) {
+    if (!text) return text;
+    let result = text;
+    // Remove trailing incomplete bold/italic patterns: **, *, ***, ****
+    // Match trailing asterisks that aren't properly closed
+    result = result.replace(/\*{1,4}[^*]*$/, (match) => {
+      // Check if the asterisks at the start have a matching close
+      const asteriskMatch = match.match(/^(\*{1,4})/);
+      if (asteriskMatch) {
+        const pattern = asteriskMatch[1];
+        // Check if there's a closing pattern - if not, remove the opening
+        const closePattern = new RegExp(`\\${pattern.split('').join('\\')}`, 'g');
+        const matches = match.match(closePattern);
+        if (!matches || matches.length < 2) {
+          // Incomplete - strip the opening asterisks
+          return match.replace(/^\*{1,4}/, '');
+        }
+      }
+      return match;
+    });
+    // Also handle trailing bullet points that are incomplete
+    result = result.replace(/\n\s*[-•]\s*\*{1,2}\s*$/, '');
+    result = result.replace(/\*{1,2}\s*$/, '');
+    return result;
+  }
+
   function renderAssistantContent(message) {
     if (message.formatted) {
-      const html = renderAssistantText(message.text, message.sources || []);
+      // Strip incomplete markdown patterns during typing animation
+      const textToRender = message.isTyping ? stripIncompleteMarkdown(message.text) : message.text;
+      const html = renderAssistantText(textToRender, message.sources || []);
       return `<div class="plugin-msg-content msg-content text-sm"><div class="plugin-prose prose prose-sm max-w-none">${html}</div></div>`;
     }
     return `<div class="plugin-msg-content msg-content">${escapeHtml(message.text)}</div>`;
