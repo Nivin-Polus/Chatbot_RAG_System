@@ -178,6 +178,23 @@ export class ChatService {
       }
 
       const data = await response.json();
+      
+      // NEW: Handle follow-up response
+      if (data.is_followup) {
+        // Add follow-up to conversation history (marked as such)
+        this.addToHistory('assistant', data.followup_questions);
+        
+        return {
+          text: data.followup_questions,
+          is_followup: true,
+          followup_reason: data.followup_reason,
+          sources: [],
+          generic: false,
+          session_id: data.session_id
+        };
+      }
+      
+      // Normal response handling
       const formattedResponse = this.formatResponse(data.answer);
       const isGeneric = Boolean(data.generic || data.is_generic);
 
@@ -204,7 +221,9 @@ export class ChatService {
       return {
         text: formattedResponse,
         sources: normalizeSources(data.sources || []),
-        generic: isGeneric
+        generic: isGeneric,
+        is_followup: false,
+        session_id: data.session_id
       };
     } catch (err) {
       if (err?.name === 'AbortError') {

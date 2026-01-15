@@ -50,10 +50,14 @@ class ChatRequest(BaseModel):
     collection_id: Optional[str] = None
 
 class ChatResponse(BaseModel):
-    answer: str
+    answer: Optional[str] = None  # Made optional for follow-up responses
     session_id: Optional[str] = None
     is_generic: bool = False
+    is_followup: bool = False  # NEW: Indicates this is a follow-up question
+    followup_questions: Optional[str] = None  # NEW: The follow-up question text
+    followup_reason: Optional[str] = None  # NEW: Reason for follow-up
     sources: Optional[List[Dict]] = None
+    chunk_count: int = 0  # NEW: Number of chunks retrieved
 
 
 class PublicChatRequest(ChatRequest):
@@ -271,13 +275,46 @@ def _process_chat_request(
             payload["url"] = record["url"]
         sources_payload.append(payload)
 
-    if not chunks:
-        logger.warning(f"[CHAT DEBUG] No chunks found for query: {question}")
+    # Step 2: Check if follow-up is needed (BEFORE answer generation)
+    needs_followup, followup_reason = rag_instance.needs_followup(
+        question=question,
+        chunks=chunks
+    )
+    
+    # Step 3: If follow-up needed, generate and return early
+    if needs_followup:
+        followup_text = rag_instance.generate_followup_questions(
+            question=question,
+            chunks=chunks,
+            reason=followup_reason
+        )
+        
+        # Log the follow-up event
+        try:
+            activity_tracker.log_activity(
+                activity_type="chat_followup_triggered",
+                user=identity_username,
+                details={
+                    "question": question[:100],
+                    "reason": followup_reason,
+                    "chunk_count": len(chunks),
+                    "session_id": effective_session_id
+                }
+            )
+        except Exception as e:
+            logger.error(f"Failed to log follow-up activity: {str(e)}")
+        
+        logger.info(f"[FOLLOWUP RESPONSE] Returning follow-up for reason: {followup_reason}")
+        
+        # Return follow-up response (SKIP answer generation)
         return ChatResponse(
-            answer="I wasn't able to retrieve a confident answer, please refine your question.",
+            answer=None,
             session_id=effective_session_id,
-            is_generic=True,
+            is_followup=True,
+            followup_questions=followup_text,
+            followup_reason=followup_reason,
             sources=[],
+            chunk_count=len(chunks)
         )
 
     try:
@@ -465,7 +502,7 @@ def _process_chat_request(
     logger.info(f"[API RESPONSE] Final answer content:\n{answer_text}")
     logger.info(f"[API RESPONSE] is_generic: {is_generic}, sources count: {len(sources_payload)}")
     
-    return ChatResponse(answer=answer_text, session_id=effective_session_id, is_generic=is_generic, sources=sources_payload)
+    return ChatResponse(answer=answer_text, session_id=effective_session_id, is_generic=is_generic, sources=sources_payload, chunk_count=len(chunks))
 
 
 # Chat endpoint

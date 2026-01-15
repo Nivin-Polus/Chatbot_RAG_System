@@ -50,15 +50,17 @@ class VectorStore:
                 return
 
             try:
-                # Try to check if collection exists using collection_exists method
+                # Check if collection exists by getting collections list
                 logger.debug(f"Checking if collection {self.collection_name} exists... Instance: {id(self)}")
-                if self.client.collection_exists(self.collection_name):
+                collections = self.client.get_collections()
+                collection_names = [col.name for col in collections.collections]
+                if self.collection_name in collection_names:
                     # logger.info(f"Qdrant collection '{self.collection_name}' already exists.")
                     self._collection_verified = True
                     return
             except Exception as e:
-                # If collection_exists method doesn't work, try alternative approach
-                logger.warning(f"[DEBUG] collection_exists check failed: {e}")
+                # If get_collections method doesn't work, try alternative approach
+                logger.warning(f"[DEBUG] get_collections check failed: {e}")
                 pass
             
             try:

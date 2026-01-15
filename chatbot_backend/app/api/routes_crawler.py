@@ -138,6 +138,19 @@ class CrawlJobListResponse(BaseModel):
 # API Endpoints
 # ================================
 
+@router.get("/status")
+async def get_crawler_status(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get global crawler status.
+    
+    Returns whether a crawl is currently running and if a new one can start.
+    """
+    status = CrawlerService.get_crawl_status()
+    return status
+
+
 @router.post("/start", response_model=CrawlJobResponse)
 async def start_crawl(
     request: StartCrawlRequest,

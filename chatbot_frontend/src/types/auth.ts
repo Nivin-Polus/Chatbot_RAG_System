@@ -119,5 +119,6 @@ export interface ChatMessage {
   content: string;
   timestamp: Date;
   isGeneric?: boolean;
+  isFollowup?: boolean;  // NEW: Indicates this is a follow-up question
   sources?: ChatSource[];
 }

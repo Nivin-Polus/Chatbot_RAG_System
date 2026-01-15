@@ -422,7 +422,13 @@ import "./styles.css";
         return;
       }
 
-      await typeAssistantMessage(reply.text, reply.sources, requestId, Boolean(reply?.is_generic || reply?.generic)).then(() => {
+      await typeAssistantMessage(
+        reply.text,
+        reply.sources,
+        requestId,
+        Boolean(reply?.is_generic || reply?.generic),
+        Boolean(reply?.is_followup)  // NEW: Pass follow-up flag
+      ).then(() => {
         // Final check before updating context indicator
         if (currentRequestId === requestId) {
           ui.updateContextIndicator(chatService.getContextInfo());
@@ -619,6 +625,7 @@ import "./styles.css";
       isError: Boolean(message.isError),
       isTyping: Boolean(message.isTyping),
       isTypingIndicator: Boolean(message.isTypingIndicator),
+      isFollowup: Boolean(message.isFollowup),  // NEW: Track follow-up status
       sources: normalizeSources(message.sources)
     };
     messages.push(storedMessage);
@@ -661,7 +668,7 @@ import "./styles.css";
     return genericPattern.test(normalized);
   }
 
-  function typeAssistantMessage(fullText, sources = [], requestId = null, isGenericFlag = false) {
+  function typeAssistantMessage(fullText, sources = [], requestId = null, isGenericFlag = false, isFollowup = false) {
     return new Promise((resolve) => {
       // Check if this request is still valid
       if (requestId !== null && currentRequestId !== requestId) {
@@ -679,15 +686,16 @@ import "./styles.css";
         .replace(/\r?\n+Sources?\s*:[\s\S]*$/i, '')
         .trim();
 
-      // Determine if message is generic - if so, don't show sources in UI but preserve them
+      // Follow-up messages don't show sources and use different styling
+      // Generic messages also don't show sources
       const isGeneric = Boolean(isGenericFlag) || isGenericResponse(fullText);
       // Always preserve sources array with all fields, even for generic messages
       const preservedSources = Array.isArray(sources) ? sources : [];
-      // Only use sources for display if message is not generic
-      const displaySources = isGeneric ? [] : preservedSources;
+      // Only use sources for display if message is not generic AND not a follow-up
+      const displaySources = (isGeneric || isFollowup) ? [] : preservedSources;
 
-      // Only append sources section if sources are provided and message is not generic
-      if (!isGeneric && Array.isArray(displaySources) && displaySources.length > 0) {
+      // Only append sources section if sources are provided and message is not generic/followup
+      if (!isGeneric && !isFollowup && Array.isArray(displaySources) && displaySources.length > 0) {
         // Append fresh sources section
         enhancedText += "\n\nSources:\n";
         // Limit displayed sources to the first N to avoid overwhelming the UI
@@ -705,7 +713,15 @@ import "./styles.css";
       }
 
       // Store preserved sources with all fields, even if not displayed
-      const typingMessage = addMessage({ user: false, text: "", formatted: true, isTyping: true, sources: preservedSources });
+      // Mark as follow-up if applicable for styling purposes
+      const typingMessage = addMessage({
+        user: false,
+        text: "",
+        formatted: true,
+        isTyping: true,
+        sources: preservedSources,
+        isFollowup: isFollowup  // NEW: Track follow-up status for styling
+      });
       if (userMessageCount <= 1) {
         scrollChatToBottom();
       } else {
@@ -996,6 +1012,7 @@ import "./styles.css";
     const classes = ["msg", "bot"];
     if (message.isError) classes.push("error");
     if (message.isTyping) classes.push("typing-text");
+    if (message.isFollowup) classes.push("followup-message");  // NEW: Add followup styling class
     const content = renderAssistantContent(message);
     return `<div class="plugin-msg ${classes.join(" ")}">${content}</div>`;
   }

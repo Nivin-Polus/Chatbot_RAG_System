@@ -41,10 +41,37 @@ class CrawlerService:
     _active_jobs: Dict[str, CrawlerEngine] = {}
     _job_threads: Dict[str, threading.Thread] = {}
     
+    # Global crawl limit - only 1 crawl allowed at a time
+    MAX_CONCURRENT_CRAWLS = 1
+    _queue_lock = threading.Lock()
+    
     def __init__(self, db: Session):
         """Initialize with database session."""
         self.db = db
         self.vector_store = VectorStore()
+    
+    @classmethod
+    def get_active_crawl_count(cls) -> int:
+        """Get the number of currently running crawls."""
+        return len(cls._active_jobs)
+    
+    @classmethod
+    def is_crawl_available(cls) -> bool:
+        """Check if a new crawl can start immediately."""
+        return cls.get_active_crawl_count() < cls.MAX_CONCURRENT_CRAWLS
+    
+    @classmethod
+    def get_crawl_status(cls) -> dict:
+        """Get global crawl status including active jobs."""
+        with cls._queue_lock:
+            active_job_ids = list(cls._active_jobs.keys())
+            return {
+                "is_crawl_running": len(active_job_ids) > 0,
+                "active_crawl_count": len(active_job_ids),
+                "active_job_ids": active_job_ids,
+                "max_concurrent": cls.MAX_CONCURRENT_CRAWLS,
+                "can_start_new": len(active_job_ids) < cls.MAX_CONCURRENT_CRAWLS
+            }
     
     def create_job(
         self,

@@ -146,7 +146,7 @@ export default function SuperadminChat() {
 
   // --- Updated Typing Animation ---
   const streamAssistantResponse = useCallback(
-    (rawContent: string, sources?: ChatSource[]) => {
+    (rawContent: string, sources?: ChatSource[], isFollowup?: boolean) => {
       const content = rawContent && rawContent.trim().length > 0
         ? rawContent
         : 'I was unable to generate a response.';
@@ -166,6 +166,7 @@ export default function SuperadminChat() {
           content: '',
           timestamp,
           sources,
+          isFollowup,
         },
       ]);
 
@@ -179,7 +180,7 @@ export default function SuperadminChat() {
           }
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.id === messageId ? { ...msg, content, sources } : msg
+              msg.id === messageId ? { ...msg, content, sources, isFollowup } : msg
             )
           );
           if (isStreaming) {
@@ -212,7 +213,7 @@ export default function SuperadminChat() {
           index += 1;
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.id === messageId ? { ...msg, content: content.slice(0, index), sources } : msg
+              msg.id === messageId ? { ...msg, content: content.slice(0, index), sources, isFollowup } : msg
             )
           );
           scrollToBottom();
@@ -389,6 +390,14 @@ export default function SuperadminChat() {
       }
 
       const dataResponse = data ?? {};
+
+      // NEW: Handle follow-up responses
+      if (dataResponse.is_followup) {
+        const followupContent = dataResponse.followup_questions || 'Could you please clarify your question?';
+        await streamAssistantResponse(followupContent, undefined, true);
+        setIsLoading(false);
+        return;
+      }
 
       let assistantContent =
         dataResponse.response || dataResponse.answer || dataResponse.content || 'I was unable to generate a response.';
@@ -650,7 +659,8 @@ export default function SuperadminChat() {
 
       const createInlineElements = (line: string, block: boolean = true): ReactNode[] => {
         const elements: ReactNode[] = [];
-        const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+        // Match links OR bold text
+        const tokenRegex = /(\[.*?\]\(.*?\))|(\*\*.*?\*\*)/g;
         let lastIndex = 0;
         let match: RegExpExecArray | null;
 
@@ -666,56 +676,72 @@ export default function SuperadminChat() {
           );
         };
 
-        while ((match = linkRegex.exec(line)) !== null) {
+        while ((match = tokenRegex.exec(line)) !== null) {
           if (match.index > lastIndex) {
             pushText(line.slice(lastIndex, match.index));
           }
 
-          const [, label, rawLinkTarget] = match;
-          const { displayText, downloadName, matchedFileId, sourceType } = extractSourceInfo(`[${label}](${rawLinkTarget})`);
+          const fullMatch = match[0];
 
-          // Parse source_type from linkTarget if present
-          let linkTarget = rawLinkTarget;
-          let detectedSourceType = sourceType;
-          if (rawLinkTarget.includes('|')) {
-            const parts = rawLinkTarget.split('|');
-            linkTarget = parts[0];
-            if (parts[1] === 'web_crawl') {
-              detectedSourceType = 'web_crawl';
+          if (fullMatch.startsWith('**')) {
+            // Handle Bold
+            const content = fullMatch.slice(2, -2);
+            elements.push(
+              <strong key={nextKey()} className="font-bold">
+                {content}
+              </strong>
+            );
+          } else {
+            // Handle Link
+            const linkMatch = fullMatch.match(/\[([^\]]+)\]\(([^)]+)\)/);
+            if (linkMatch) {
+              const [, label, rawLinkTarget] = linkMatch;
+              const { displayText, downloadName, matchedFileId, sourceType } = extractSourceInfo(`[${label}](${rawLinkTarget})`);
+
+              // Parse source_type from linkTarget if present
+              let linkTarget = rawLinkTarget;
+              let detectedSourceType = sourceType;
+              if (rawLinkTarget.includes('|')) {
+                const parts = rawLinkTarget.split('|');
+                linkTarget = parts[0];
+                if (parts[1] === 'web_crawl') {
+                  detectedSourceType = 'web_crawl';
+                }
+              }
+
+              const fileId = matchedFileId ?? linkTarget;
+              const fileName = downloadName || displayText || label;
+
+              if (detectedSourceType === 'web_crawl') {
+                // Web crawl source - open URL in new tab
+                elements.push(
+                  <a
+                    key={nextKey()}
+                    href={linkTarget.startsWith('http') ? linkTarget : `https://${linkTarget}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer`}
+                  >
+                    {displayText.trim() || 'View source'} ↗
+                  </a>
+                );
+              } else {
+                // File source - trigger download
+                elements.push(
+                  <button
+                    key={nextKey()}
+                    type="button"
+                    className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer`}
+                    onClick={() => handleDownloadSource(fileId, fileName)}
+                  >
+                    {displayText.trim() || 'Download source'}
+                  </button>
+                );
+              }
             }
           }
 
-          const fileId = matchedFileId ?? linkTarget;
-          const fileName = downloadName || displayText || label;
-
-          if (detectedSourceType === 'web_crawl') {
-            // Web crawl source - open URL in new tab
-            elements.push(
-              <a
-                key={nextKey()}
-                href={linkTarget.startsWith('http') ? linkTarget : `https://${linkTarget}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer`}
-              >
-                {displayText.trim() || 'View source'} ↗
-              </a>
-            );
-          } else {
-            // File source - trigger download
-            elements.push(
-              <button
-                key={nextKey()}
-                type="button"
-                className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer`}
-                onClick={() => handleDownloadSource(fileId, fileName)}
-              >
-                {displayText.trim() || 'Download source'}
-              </button>
-            );
-          }
-
-          lastIndex = match.index + match[0].length;
+          lastIndex = match.index + fullMatch.length;
         }
 
         const remaining = line.slice(lastIndex);
@@ -1097,6 +1123,7 @@ export default function SuperadminChat() {
                   ) : (
                     messages.map((message) => {
                       const isUser = message.role === 'user';
+                      const isFollowup = !isUser && message.isFollowup;
                       return (
                         <div
                           key={message.id}

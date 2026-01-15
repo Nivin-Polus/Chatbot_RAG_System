@@ -359,6 +359,222 @@ class RAG:
         
         return chunks_with_sources
 
+    # ------------------------------------------------------------------
+    # Follow-up Question Detection and Generation
+    # ------------------------------------------------------------------
+    
+    def needs_followup(self, question: str, chunks: list, threshold: float = 0.35) -> Tuple[bool, str]:
+        """
+        Determine if a follow-up question should be asked instead of answering.
+        
+        Detection criteria:
+        - No relevant chunks found (len(chunks) == 0)
+        - Low relevance score (top chunk score < threshold)
+        - Ambiguous phrasing (e.g., "tell me more", "explain this")
+        - Vague pronouns without context (e.g., "it", "this", "that")
+        - Missing domain-specific context
+        
+        Returns:
+            tuple: (needs_followup: bool, reason: str)
+            Reasons: "no_relevant_chunks", "low_relevance_score", "ambiguous_phrasing", 
+                     "vague_pronoun", "missing_context", "confident"
+        """
+        if not question:
+            return True, "empty_question"
+        
+        normalized = question.strip().lower()
+        
+        # 1. Check for no relevant chunks
+        if not chunks or len(chunks) == 0:
+            logger.info(f"[FOLLOWUP] Triggered: no_relevant_chunks for query: {question[:50]}")
+            return True, "no_relevant_chunks"
+        
+        # 2. Check for low relevance score
+        top_score = chunks[0].get("score", 0) if chunks else 0
+        if top_score < threshold:
+            logger.info(f"[FOLLOWUP] Triggered: low_relevance_score ({top_score:.4f} < {threshold}) for query: {question[:50]}")
+            return True, "low_relevance_score"
+        
+        # 3. Check for ambiguous phrasing
+        ambiguous_phrases = [
+            "tell me more",
+            "explain this",
+            "what about",
+            "can you elaborate",
+            "more details",
+            "more information",
+            "explain that",
+            "tell me about it",
+            "what does it mean",
+            "how does it work",
+            "why is that",
+            "what is it",
+            "what are they",
+            "what about this",
+            "what about that",
+        ]
+        for phrase in ambiguous_phrases:
+            if phrase in normalized:
+                logger.info(f"[FOLLOWUP] Triggered: ambiguous_phrasing ('{phrase}') for query: {question[:50]}")
+                return True, "ambiguous_phrasing"
+        
+        # 4. Check for vague pronouns without sufficient context
+        # Short queries with only pronouns are likely ambiguous
+        vague_patterns = [
+            r"^(?:what|how|why|when|where)\s+(?:is|are|was|were|does|do|did)\s+(?:it|this|that|these|those)\??$",
+            r"^(?:explain|describe|tell me about)\s+(?:it|this|that|these|those)\??$",
+            r"^(?:it|this|that)\s+(?:is|was|does|did|has|have)\s+\w+\??$",
+        ]
+        for pattern in vague_patterns:
+            if re.match(pattern, normalized):
+                logger.info(f"[FOLLOWUP] Triggered: vague_pronoun for query: {question[:50]}")
+                return True, "vague_pronoun"
+        
+        # 5. Check for missing critical domain context
+        if self._missing_critical_context(question):
+            logger.info(f"[FOLLOWUP] Triggered: missing_context for query: {question[:50]}")
+            return True, "missing_context"
+        
+        # All checks passed - confident to answer
+        return False, "confident"
+
+    def _missing_critical_context(self, question: str) -> bool:
+        """
+        Check for domain-specific missing information.
+        
+        This method can be customized based on the knowledge base domain.
+        Examples:
+        - Agriculture: mentions "fertilizer" but no crop type
+        - Product support: mentions "install" but no version
+        - Legal: mentions "law" but no jurisdiction
+        
+        Returns:
+            bool: True if critical context is missing
+        """
+        normalized = question.lower()
+        
+        # Example domain rules (customize based on your knowledge base)
+        domain_rules = [
+            # Agriculture domain
+            {
+                "trigger_keywords": ["fertilizer", "pesticide", "irrigation", "planting"],
+                "required_context": ["crop", "plant", "rice", "wheat", "corn", "vegetable", "fruit"],
+                "description": "agricultural query without crop type"
+            },
+            # Product support domain
+            {
+                "trigger_keywords": ["install", "upgrade", "update", "download"],
+                "required_context": ["version", "v1", "v2", "windows", "mac", "linux", "android", "ios"],
+                "description": "installation query without platform/version"
+            },
+        ]
+        
+        for rule in domain_rules:
+            # Check if any trigger keyword is present
+            has_trigger = any(kw in normalized for kw in rule["trigger_keywords"])
+            if has_trigger:
+                # Check if any required context is present
+                has_context = any(ctx in normalized for ctx in rule["required_context"])
+                if not has_context:
+                    logger.debug(f"[FOLLOWUP] Missing context: {rule['description']}")
+                    return True
+        
+        return False
+
+    def generate_followup_questions(self, question: str, chunks: list, reason: str) -> str:
+        """
+        Generate 1-2 specific clarifying questions using the AI model.
+        
+        Rules for generation:
+        - Keep questions short and specific
+        - Provide multiple-choice options when possible
+        - Do NOT attempt to answer the original question
+        - Be friendly and helpful in tone
+        
+        If AI call fails, fall back to generic questions based on reason.
+        
+        Returns:
+            str: The generated follow-up question(s)
+        """
+        # Build context from available chunks (if any)
+        chunk_context = ""
+        if chunks and len(chunks) > 0:
+            # Use top 3 chunks for context about available topics
+            top_chunks = chunks[:3]
+            topics = set()
+            for chunk in top_chunks:
+                text = chunk.get("text", "")[:200]
+                file_name = chunk.get("file_name", "")
+                if file_name:
+                    topics.add(file_name.replace(".pdf", "").replace(".docx", "").replace("_", " "))
+            if topics:
+                chunk_context = f"Available topics in the knowledge base include: {', '.join(list(topics)[:5])}"
+        
+        # Reason-specific prompt hints
+        reason_hints = {
+            "no_relevant_chunks": "The user's question doesn't match any content in our knowledge base.",
+            "low_relevance_score": "The user's question has low relevance to available content.",
+            "ambiguous_phrasing": "The user's question is vague and needs clarification.",
+            "vague_pronoun": "The user used pronouns (it, this, that) without clear context.",
+            "missing_context": "The user's question is missing important context (e.g., specific category, version, or type).",
+        }
+        
+        hint = reason_hints.get(reason, "The user's question needs clarification.")
+        
+        prompt = f"""You are a helpful assistant. A user asked a question that needs clarification before you can provide a good answer.
+
+User's question: "{question}"
+
+Situation: {hint}
+{chunk_context}
+
+Your task: Generate 1-2 SHORT, SPECIFIC clarifying questions to ask the user. 
+
+Rules:
+1. Keep each question to ONE sentence
+2. Offer specific options when possible (e.g., "Are you asking about X or Y?")
+3. Be friendly and helpful
+4. Do NOT try to answer the original question
+5. Do NOT apologize excessively
+
+Respond with ONLY the clarifying question(s), nothing else."""
+
+        try:
+            followup_text, _ = self.call_ai(
+                prompt,
+                max_tokens=200,  # Keep responses concise
+                temperature=0.7
+            )
+            
+            # Clean up the response
+            followup_text = followup_text.strip()
+            
+            # Remove any classification tags that might leak through
+            followup_text = re.sub(r'\[RESPONSE_TYPE:\w+\]', '', followup_text).strip()
+            
+            if followup_text:
+                logger.info(f"[FOLLOWUP] Generated AI follow-up: {followup_text[:100]}")
+                return followup_text
+            else:
+                return self._get_generic_followup(reason)
+                
+        except Exception as e:
+            logger.error(f"[FOLLOWUP] AI generation failed: {e}")
+            return self._get_generic_followup(reason)
+
+    def _get_generic_followup(self, reason: str) -> str:
+        """Fallback follow-up questions when AI generation fails."""
+        fallbacks = {
+            "no_relevant_chunks": "I couldn't find information related to your question. Could you please provide more details about what you're looking for?",
+            "low_relevance_score": "I'm not fully confident about what you're asking. Could you rephrase your question or provide more context?",
+            "ambiguous_phrasing": "Your question is a bit broad. Could you be more specific about what aspect you'd like to know?",
+            "vague_pronoun": "I'm not sure what you're referring to. Could you please specify what 'it' or 'this' refers to?",
+            "missing_context": "I need a bit more information to help you. Could you provide additional details like the specific type, category, or version you're asking about?",
+            "empty_question": "I didn't receive a question. What would you like to know?",
+        }
+        
+        return fallbacks.get(reason, "Could you please clarify your question so I can better assist you?")
+
     def _resolve_prompt_settings(self, collection_id: Optional[str] = None):
         """Determine system prompt and model configuration for the given collection.
         
