@@ -30,6 +30,7 @@ import UserAdminUsers from "./pages/useradmin/UserAdminUsers";
 import UserAdminPlugins from "./pages/useradmin/UserAdminPlugins";
 import UserAdminCrawler from "./pages/useradmin/UserAdminCrawler";
 import PluginUserChat from "./pages/pluginuser/PluginUserChat";
+import AutoLoginPage from "./pages/AutoLoginPage";
 
 const queryClient = new QueryClient();
 
@@ -44,6 +45,7 @@ const App = () => (
             <Routes>
               {/* Public Routes */}
               <Route path="/login" element={<Login />} />
+              <Route path="/auto-login" element={<AutoLoginPage />} />
               <Route path="/access-denied" element={<AccessDenied />} />
 
               {/* Superadmin Routes */}

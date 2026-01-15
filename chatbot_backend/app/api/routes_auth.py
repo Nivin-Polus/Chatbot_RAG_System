@@ -419,3 +419,88 @@ async def create_public_token(request: PublicTokenRequest, db: Session = Depends
         session_id=session_id,
         expires_in=int(access_token_expires.total_seconds()),
     )
+
+
+class AutoLoginRequest(BaseModel):
+    token: str
+
+
+class AutoLoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    role: str
+    username: str
+    user_id: str
+    website_id: Optional[str] = None
+    collection_id: str
+
+
+@router.post("/validate-auto-login", response_model=AutoLoginResponse)
+async def validate_auto_login(
+    request: AutoLoginRequest,
+    db: Session = Depends(get_db),
+):
+    """Validate an auto-login token and issue a regular access token.
+    
+    This endpoint is used by the frontend to exchange a short-lived
+    auto-login token for a regular session access token.
+    """
+    from app.core.auth import verify_auto_login_token
+    
+    if not request.token:
+        raise HTTPException(status_code=400, detail="Auto-login token is required")
+
+    try:
+        token_payload = verify_auto_login_token(request.token)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    # Verify user exists and is active
+    user = db.query(User).filter(
+        User.user_id == token_payload["user_id"],
+        User.username == token_payload["username"],
+        User.is_active == True,
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+
+    if user.role != "plugin_user":
+        raise HTTPException(status_code=401, detail="Invalid user type for auto-login")
+
+    # Verify user has access to the collection
+    membership = db.query(CollectionUser).filter(
+        CollectionUser.user_id == user.user_id,
+        CollectionUser.collection_id == token_payload["collection_id"],
+    ).first()
+
+    if not membership:
+        raise HTTPException(status_code=401, detail="User does not have access to the collection")
+
+    # Update last login
+    from datetime import datetime
+    user.last_login = datetime.utcnow()
+    db.commit()
+
+    # Issue a regular access token
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={
+            "sub": user.username,
+            "role": user.role,
+            "user_id": user.user_id,
+            "website_id": user.website_id,
+            "collection_id": token_payload["collection_id"],
+        },
+        expires_delta=access_token_expires,
+    )
+
+    return AutoLoginResponse(
+        access_token=access_token,
+        role=user.role,
+        username=user.username,
+        user_id=user.user_id,
+        website_id=user.website_id,
+        collection_id=token_payload["collection_id"],
+    )
+

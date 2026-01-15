@@ -266,7 +266,24 @@ export class ChatbotUI {
     }
   }
 
-  toggleExpand(forceMode) {
+  async toggleExpand(forceMode) {
+    // If already expanded and clicking expand again, redirect to full React frontend
+    if (this.isExpanded && !forceMode) {
+      try {
+        // Import AuthService dynamically to avoid circular dependency
+        const { AuthService } = await import('./auth.js');
+        const loginUrl = await AuthService.getAutoLoginUrl();
+        if (loginUrl) {
+          window.open(loginUrl, '_blank');
+          return;
+        } else {
+          console.warn('Could not get auto-login URL, staying in plugin');
+        }
+      } catch (err) {
+        console.error('Failed to get auto-login URL:', err);
+      }
+    }
+
     // If specific mode requested, just switch to it if already expanded
     if (forceMode && this.isExpanded) {
       this.setSidebarMode(forceMode);

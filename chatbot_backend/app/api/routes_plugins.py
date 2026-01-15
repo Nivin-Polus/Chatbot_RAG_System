@@ -532,3 +532,105 @@ async def delete_plugin(
     db.commit()
 
     logger.info("Plugin integration deleted: %s", plugin.id)
+
+
+class GenerateLoginUrlRequest(BaseModel):
+    website_url: str
+
+
+class GenerateLoginUrlResponse(BaseModel):
+    login_url: str
+    expires_in: int  # Seconds until token expires
+
+
+@router.post("/generate-login-url", response_model=GenerateLoginUrlResponse)
+async def generate_login_url(
+    payload: GenerateLoginUrlRequest,
+    db: Session = Depends(get_db),
+):
+    """Generate an auto-login URL for a plugin user based on website URL.
+    
+    This endpoint looks up the plugin integration for the given URL,
+    finds or creates the associated plugin user, and generates a
+    short-lived auto-login token that can be used to log in automatically.
+    """
+    from app.core.auth import create_auto_login_token
+    from app.config import settings
+    
+    normalized = _normalize_url(payload.website_url)
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid URL")
+
+    # Find plugin by exact match first
+    plugin = (
+        db.query(PluginIntegration)
+        .join(Collection, PluginIntegration.collection_id == Collection.collection_id)
+        .filter(PluginIntegration.normalized_url == normalized)
+        .first()
+    )
+    
+    # If exact match fails, try prefix matching
+    if not plugin:
+        parsed_request = urlparse(f"https://{normalized}" if "://" not in normalized else normalized)
+        request_domain = parsed_request.netloc.lower()
+        request_path = parsed_request.path.rstrip('/')
+        
+        plugins = (
+            db.query(PluginIntegration)
+            .join(Collection, PluginIntegration.collection_id == Collection.collection_id)
+            .all()
+        )
+        
+        for p in plugins:
+            parsed_plugin = urlparse(f"https://{p.normalized_url}" if "://" not in p.normalized_url else p.normalized_url)
+            plugin_domain = parsed_plugin.netloc.lower()
+            plugin_path = parsed_plugin.path.rstrip('/')
+            
+            if request_domain == plugin_domain:
+                if not plugin_path or request_path.startswith(plugin_path):
+                    plugin = p
+                    break
+    
+    if not plugin:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin not found for the provided URL")
+
+    if not plugin.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Plugin integration is inactive")
+
+    collection = plugin.collection
+    if not collection or not collection.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Collection is inactive")
+
+    # Get or create the plugin user
+    plugin_user, _, _ = _ensure_plugin_user_for_collection(
+        db,
+        collection=collection,
+        plugin=plugin,
+        creator_user_id=None,
+    )
+    db.commit()
+
+    if not plugin_user or not plugin_user.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin user not found or inactive")
+
+    # Generate auto-login token (5 minutes expiry)
+    expires_minutes = 5
+    auto_login_token = create_auto_login_token(
+        user_id=plugin_user.user_id,
+        username=plugin_user.username,
+        collection_id=collection.collection_id,
+        expires_minutes=expires_minutes,
+    )
+
+    # Construct the login URL
+    # Use the frontend URL from settings or default
+    frontend_base_url = getattr(settings, 'FRONTEND_URL', 'https://dev-chatbot.polussolutions.com')
+    login_url = f"{frontend_base_url}/chatbot/auto-login?token={auto_login_token}"
+
+    logger.info("Generated auto-login URL for plugin: %s, collection: %s", plugin.id, collection.collection_id)
+
+    return GenerateLoginUrlResponse(
+        login_url=login_url,
+        expires_in=expires_minutes * 60,  # Convert to seconds
+    )
+
