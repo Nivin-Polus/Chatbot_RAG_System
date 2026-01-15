@@ -60,8 +60,9 @@ export default function AutoLoginPage() {
 
                 sessionStorage.setItem('auth_user', JSON.stringify(authUser));
 
-                // Redirect to plugin user chat
-                navigate('/pluginuser/chat', { replace: true });
+                // Use window.location.href instead of navigate() to force a full page reload
+                // This ensures AuthContext re-reads the sessionStorage on mount
+                window.location.href = '/chatbot/pluginuser/chat';
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'Auto-login failed.');
                 setIsLoading(false);
