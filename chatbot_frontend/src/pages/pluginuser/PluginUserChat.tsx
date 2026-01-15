@@ -9,6 +9,7 @@ import { apiPost } from '@/utils/api';
 import { saveSession, getSession } from '@/utils/chatStorage';
 import { useSearchParams } from 'react-router-dom';
 import { getAssetUrl } from '@/utils/assets';
+import { DashboardLayout } from '@/components/DashboardLayout';
 
 export default function PluginUserChat() {
     const { user } = useAuth();
@@ -760,26 +761,16 @@ export default function PluginUserChat() {
         return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
 
-    // Simple layout without DashboardLayout (no sidebar/logout)
     return (
-        <div className="min-h-screen bg-background dark:bg-gray-950">
-            {/* Header */}
-            <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 dark:bg-gray-900/95">
-                <div className="container flex h-14 items-center px-4">
-                    <div className="flex items-center gap-3">
-                        <img
-                            src={getAssetUrl('leto.svg')}
-                            alt="Leto Logo"
-                            className="h-8 w-8"
-                        />
-                        <span className="text-lg font-semibold text-foreground dark:text-white">Leto Chat</span>
+        <DashboardLayout>
+            <div className="flex flex-col space-y-6 min-h-[calc(100vh-140px)]">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="text-3xl font-bold text-foreground dark:text-white">Leto Chat</h1>
                     </div>
                 </div>
-            </header>
 
-            {/* Main Content */}
-            <main className="container mx-auto px-4 py-6">
-                <Card className="flex flex-col min-h-[calc(100vh-140px)] bg-card dark:bg-gray-900">
+                <Card className="flex flex-col min-h-[calc(100vh-220px)] bg-card dark:bg-gray-900">
                     <CardHeader className="flex-shrink-0">
                         <div className="flex items-center justify-end">
                             {hasMessages && (
@@ -910,7 +901,7 @@ export default function PluginUserChat() {
                         )}
                     </CardContent>
                 </Card>
-            </main>
-        </div>
+            </div>
+        </DashboardLayout>
     );
 }
