@@ -111,6 +111,7 @@ export interface ChatSource {
   chunk_indices?: number[];
   source_type?: 'file' | 'web_crawl';
   url?: string;
+  confidence?: number;  // Confidence score (0.0-1.0) for source relevance
 }
 
 export interface ChatMessage {

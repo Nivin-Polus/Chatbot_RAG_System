@@ -386,6 +386,9 @@ import "./styles.css";
     inFlight = true;
     abortController = new AbortController();
 
+    // Capture the session ID where this request started
+    const requestSessionId = chatService.sessionId;
+
     try {
       input.disabled = true;
       showProcessingState();
@@ -412,12 +415,18 @@ import "./styles.css";
 
       const reply = await chatService.sendMessage(userMsg, { signal: abortController.signal });
 
+      console.log('[DEBUG] Reply received:', JSON.stringify(reply, null, 2));
+
       removeTypingIndicator(typingIndicator);
       input.disabled = false;
       if (stopBtn) stopBtn.style.display = "inline-flex";
 
       // Check again before typing the message
       if (currentRequestId !== requestId) {
+        // We switched sessions! Save response to background session history.
+        if (requestSessionId) {
+          saveBackgroundResponse(requestSessionId, reply);
+        }
         showSendButton();
         return;
       }
@@ -525,7 +534,7 @@ import "./styles.css";
 
     // Abort any ongoing fetch request
     if (abortController) {
-      abortController.abort();
+      // abortController.abort();
       abortController = null;
     }
 
@@ -669,6 +678,7 @@ import "./styles.css";
   }
 
   function typeAssistantMessage(fullText, sources = [], requestId = null, isGenericFlag = false, isFollowup = false) {
+    console.log('[DEBUG] typeAssistantMessage called with:', { fullText, isFollowup, isGenericFlag });
     return new Promise((resolve) => {
       // Check if this request is still valid
       if (requestId !== null && currentRequestId !== requestId) {
@@ -685,6 +695,8 @@ import "./styles.css";
         .replace(/\r?\n+[\s>*-]*\*{0,2}\s*Sources?\s*:?\s*\*{0,2}\s*[\s\S]*$/i, '')
         .replace(/\r?\n+Sources?\s*:[\s\S]*$/i, '')
         .trim();
+
+      console.log('[DEBUG] enhancedText after processing:', enhancedText);
 
       // Follow-up messages don't show sources and use different styling
       // Generic messages also don't show sources
@@ -860,6 +872,61 @@ import "./styles.css";
     }
   }
 
+  function saveBackgroundResponse(sessionId, reply) {
+    try {
+      if (!sessionId || !reply) return;
+
+      const storedMsgsKey = CHAT_MESSAGES_PREFIX + sessionId;
+      const storedMsgsStr = localStorage.getItem(storedMsgsKey);
+      let msgs = storedMsgsStr ? JSON.parse(storedMsgsStr) : [];
+
+      const normalizeSourcesForStorage = (sources) => {
+        if (!Array.isArray(sources)) return [];
+        return sources.map(source => {
+          if (!source || typeof source !== 'object') return null;
+          return {
+            file_name: source.file_name || null,
+            file_id: source.file_id || null,
+            chunk_indices: Array.isArray(source.chunk_indices) ? source.chunk_indices : null,
+            source_type: source.source_type || 'file',
+            url: source.url || null
+          };
+        }).filter(source => source !== null && source.file_name);
+      };
+
+      const assistantMsg = {
+        user: false,
+        text: reply.text || "",
+        formatted: true,
+        timestamp: new Date().toISOString(),
+        sources: normalizeSourcesForStorage(reply.sources || []),
+        isFollowup: Boolean(reply.is_followup),
+        isError: false,
+        isTyping: false,
+        isTypingIndicator: false
+      };
+
+      msgs.push(assistantMsg);
+      localStorage.setItem(storedMsgsKey, JSON.stringify(msgs));
+
+      const sessionIndex = sessions.findIndex(s => s.id === sessionId);
+      if (sessionIndex >= 0) {
+        sessions[sessionIndex].timestamp = Date.now();
+        localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
+      }
+
+      // If we are somehow back on this session (race condition?), reload history
+      if (chatService.sessionId === sessionId) {
+        chatService.restoreHistory(msgs);
+        // If UI is showing this session, maybe we should render? 
+        // But safely we assume UI is elsewhere.
+      }
+
+    } catch (err) {
+      console.error("Failed to save background response", err);
+    }
+  }
+
   // Load chat history from localStorage
   function loadChatHistory() {
     try {
@@ -898,8 +965,9 @@ import "./styles.css";
     if (currentSessionId === sessionId && messages.length > 0) return;
 
     // Abort any ongoing fetch request
+    // MODIFIED: Do not abort the request itself, just detach from UI
     if (abortController) {
-      abortController.abort();
+      // abortController.abort(); // Don't abort so it completes in background
       abortController = null;
     }
 
@@ -1069,28 +1137,21 @@ import "./styles.css";
   // Strip incomplete markdown patterns from streaming text
   function stripIncompleteMarkdown(text) {
     if (!text) return text;
-    let result = text;
-    // Remove trailing incomplete bold/italic patterns: **, *, ***, ****
-    // Match trailing asterisks that aren't properly closed
-    result = result.replace(/\*{1,4}[^*]*$/, (match) => {
-      // Check if the asterisks at the start have a matching close
-      const asteriskMatch = match.match(/^(\*{1,4})/);
-      if (asteriskMatch) {
-        const pattern = asteriskMatch[1];
-        // Check if there's a closing pattern - if not, remove the opening
-        const closePattern = new RegExp(`\\${pattern.split('').join('\\')}`, 'g');
-        const matches = match.match(closePattern);
-        if (!matches || matches.length < 2) {
-          // Incomplete - strip the opening asterisks
-          return match.replace(/^\*{1,4}/, '');
-        }
+
+    // Fix: Only strip ** if it is an unmatched opening tag (odd count)
+    // This prevents stripping the closing ** of a completed bold section,
+    // which caused the raw "**" to be visible for a split second (or longer)
+    // before the renderer could detect the pair.
+
+    const doubleStarCount = (text.match(/\*\*/g) || []).length;
+    if (doubleStarCount % 2 !== 0) {
+      const lastIndex = text.lastIndexOf("**");
+      if (lastIndex !== -1) {
+        return text.substring(0, lastIndex) + text.substring(lastIndex + 2);
       }
-      return match;
-    });
-    // Also handle trailing bullet points that are incomplete
-    result = result.replace(/\n\s*[-•]\s*\*{1,2}\s*$/, '');
-    result = result.replace(/\*{1,2}\s*$/, '');
-    return result;
+    }
+
+    return text;
   }
 
   function renderAssistantContent(message) {

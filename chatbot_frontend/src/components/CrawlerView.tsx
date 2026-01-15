@@ -66,6 +66,7 @@ import {
     Timer,
     Info,
     Trash2,
+    Database,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiGet, apiPost, apiDelete } from '@/utils/api';
@@ -840,7 +841,24 @@ export default function CrawlerView({ collectionId }: CrawlerViewProps) {
                                                 </div>
                                             </TableCell>
                                             {!collectionId && <TableCell>{getCollectionName(job.collection_id)}</TableCell>}
-                                            <TableCell>{getStatusBadge(job.status)}</TableCell>
+                                            <TableCell>
+                                                <div className="flex items-center gap-1.5">
+                                                    {getStatusBadge(job.status)}
+                                                    {job.status === 'cancelled' && job.chunks_created > 0 && (
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-xs">
+                                                                    <Database className="h-3 w-3 mr-1" />
+                                                                    Data Kept
+                                                                </Badge>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent className="text-xs max-w-[200px]">
+                                                                {job.chunks_created.toLocaleString()} chunks remain in the knowledge base
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    )}
+                                                </div>
+                                            </TableCell>
                                             <TableCell className="text-right">{job.pages_crawled}</TableCell>
                                             <TableCell className="text-right">{job.chunks_created}</TableCell>
                                             <TableCell className="text-sm text-muted-foreground">
