@@ -804,106 +804,105 @@ export default function PluginUserChat() {
                     }
                     continue;
                 }
-            }
 
-            if (inSourcesSection && trimmed.length === 0) {
-                continue;
-            }
+                if (inSourcesSection && trimmed.length === 0) {
+                    continue;
+                }
 
-            if (inSourcesSection && trimmed.length > 0 && !trimmed.startsWith('-')) {
-                inSourcesSection = false;
-            }
+                if (inSourcesSection && trimmed.length > 0 && !trimmed.startsWith('-')) {
+                    inSourcesSection = false;
+                }
 
-            nodes.push(...createInlineElements(rawLine));
-        }
+                nodes.push(...createInlineElements(rawLine));
+            }
 
             if (sourcesNodes.length > 0) {
-        nodes.push(
-            <div key={`${messageId}-sources-container`} className="mt-4 pt-3 border-t border-border/40 bg-muted/30 rounded-lg p-3 space-y-2">
-                <span className="block text-xs font-bold uppercase text-muted-foreground/80 mb-2">
-                    Sources:
-                </span>
-                <div className="flex flex-col gap-2 w-full">
-                    {sourcesNodes}
-                </div>
-            </div>
-        );
-    }
-
-    return nodes;
-}, [handleDownloadSource, user?.access_token]);
-
-const handleMessageScroll = useCallback(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-
-    const threshold = 40;
-    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
-
-    if (isAutoScrollRef.current !== isNearBottom) {
-        isAutoScrollRef.current = isNearBottom;
-        setIsAutoScroll(isNearBottom);
-    }
-}, []);
-
-const formatTime = (date: Date) => {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-};
-
-return (
-    <DashboardLayout>
-        <div className="flex flex-col space-y-4 pt-6 h-[calc(100vh-6rem)]">
-            <div className="flex items-center justify-between shrink-0">
-                <div>
-                    <h1 className="text-3xl font-bold text-foreground dark:text-white">Leto Chat</h1>
-                </div>
-            </div>
-
-            <Card className="flex flex-col flex-1 bg-card dark:bg-gray-900 overflow-hidden">
-                <CardHeader className="flex-shrink-0 py-3">
-                    <div className="flex items-center justify-end">
-                        {hasMessages && (
-                            <Button variant="outline" onClick={clearChat} size="sm">
-                                Clear Chat
-                            </Button>
-                        )}
-                    </div>
-                </CardHeader>
-                <CardContent className="relative flex-1 flex flex-col min-h-0 overflow-hidden p-0">
-                    {!selectedCollection ? (
-                        <div className="flex-1 flex items-center justify-center text-muted-foreground dark:text-gray-300">
-                            No knowledge base configured. Please contact support.
+                nodes.push(
+                    <div key={`${messageId}-sources-container`} className="mt-4 pt-3 border-t border-border/40 bg-muted/30 rounded-lg p-3 space-y-2">
+                        <span className="block text-xs font-bold uppercase text-muted-foreground/80 mb-2">
+                            Sources:
+                        </span>
+                        <div className="flex flex-col gap-2 w-full">
+                            {sourcesNodes}
                         </div>
-                    ) : (
-                        <div className="flex flex-1 flex-col min-h-0">
-                            <div
-                                className="flex-1 overflow-y-auto space-y-4 px-4 pt-4"
-                                ref={messagesContainerRef}
-                                onScroll={handleMessageScroll}
-                                onWheel={handleWheel}
-                                onPointerDown={handleManualScrollIntent}
-                                onTouchMove={handleTouchMove}
-                            >
-                                {messages.length === 0 ? (
-                                    <div className="flex items-center justify-center text-muted-foreground dark:text-gray-300 h-[50vh]">
-                                        <div className="flex flex-col items-center gap-3 text-center">
-                                            <MessageSquare className="h-12 w-12 opacity-50" />
-                                            <p className="text-base font-medium">You can start the conversation by sending a message below.</p>
+                    </div>
+                );
+            }
+
+            return nodes;
+        }, [handleDownloadSource, user?.access_token]);
+
+    const handleMessageScroll = useCallback(() => {
+        const container = messagesContainerRef.current;
+        if (!container) return;
+
+        const threshold = 40;
+        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+
+        if (isAutoScrollRef.current !== isNearBottom) {
+            isAutoScrollRef.current = isNearBottom;
+            setIsAutoScroll(isNearBottom);
+        }
+    }, []);
+
+    const formatTime = (date: Date) => {
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    };
+
+    return (
+        <DashboardLayout>
+            <div className="flex flex-col space-y-4 pt-6 h-[calc(100vh-6rem)]">
+                <div className="flex items-center justify-between shrink-0">
+                    <div>
+                        <h1 className="text-3xl font-bold text-foreground dark:text-white">Leto Chat</h1>
+                    </div>
+                </div>
+
+                <Card className="flex flex-col flex-1 bg-card dark:bg-gray-900 overflow-hidden">
+                    <CardHeader className="flex-shrink-0 py-3">
+                        <div className="flex items-center justify-end">
+                            {hasMessages && (
+                                <Button variant="outline" onClick={clearChat} size="sm">
+                                    Clear Chat
+                                </Button>
+                            )}
+                        </div>
+                    </CardHeader>
+                    <CardContent className="relative flex-1 flex flex-col min-h-0 overflow-hidden p-0">
+                        {!selectedCollection ? (
+                            <div className="flex-1 flex items-center justify-center text-muted-foreground dark:text-gray-300">
+                                No knowledge base configured. Please contact support.
+                            </div>
+                        ) : (
+                            <div className="flex flex-1 flex-col min-h-0">
+                                <div
+                                    className="flex-1 overflow-y-auto space-y-4 px-4 pt-4"
+                                    ref={messagesContainerRef}
+                                    onScroll={handleMessageScroll}
+                                    onWheel={handleWheel}
+                                    onPointerDown={handleManualScrollIntent}
+                                    onTouchMove={handleTouchMove}
+                                >
+                                    {messages.length === 0 ? (
+                                        <div className="flex items-center justify-center text-muted-foreground dark:text-gray-300 h-[50vh]">
+                                            <div className="flex flex-col items-center gap-3 text-center">
+                                                <MessageSquare className="h-12 w-12 opacity-50" />
+                                                <p className="text-base font-medium">You can start the conversation by sending a message below.</p>
+                                            </div>
                                         </div>
-                                    </div>
-                                ) : (
-                                    messages.map((message) => {
-                                        const isUser = message.role === 'user';
-                                        return (
-                                            <div
-                                                key={message.id}
-                                                className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
-                                            >
+                                    ) : (
+                                        messages.map((message) => {
+                                            const isUser = message.role === 'user';
+                                            return (
                                                 <div
-                                                    className={`rounded-xl px-4 py-3 shadow-sm ${isUser
-                                                        ? 'bg-primary text-primary-foreground max-w-[65%] dark:text-white'
-                                                        : 'bg-muted border border-border/60 text-foreground max-w-[80%] dark:bg-gray-800 dark:text-gray-100'
-                                                        }`}
+                                                    key={message.id}
+                                                    className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
+                                                >
+                                                    <div
+                                                        className={`rounded-xl px-4 py-3 shadow-sm ${isUser
+                                                            ? 'bg-primary text-primary-foreground max-w-[65%] dark:text-white'
+                                                            : 'bg-muted border border-border/60 text-foreground max-w-[80%] dark:bg-gray-800 dark:text-gray-100'
+                                                            }`}
                                                 >
                                                     <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                                                         <div className="flex items-center gap-2.5">
