@@ -105,7 +105,7 @@ class Settings(BaseSettings):
     ACTIVITY_RETENTION_DAYS: int = Field(30, validation_alias="ACTIVITY_RETENTION_DAYS")
 
     # RAG Configuration
-    SOURCE_MIN_SCORE: float = Field(0.35, validation_alias="SOURCE_MIN_SCORE")  # Minimum confidence score to show a source to users
+    SOURCE_MIN_SCORE: float = Field(0.50, validation_alias="SOURCE_MIN_SCORE")  # Minimum confidence score to show a source to users
 
     # API credentials
     API_USERNAME: str = Field("your_username", validation_alias="API_USERNAME")

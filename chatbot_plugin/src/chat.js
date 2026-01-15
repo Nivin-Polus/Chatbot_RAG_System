@@ -139,16 +139,21 @@ export class ChatService {
   /** Send message to backend */
   async sendMessage(message, options = {}) {
     const { signal } = options;
+    const startSessionId = this.sessionId; // Capture session ID at start
+
     try {
       await this.ensureToken(); // make sure token is valid
 
       // Add user message to history before sending
-      this.addToHistory('user', message);
+      // Note: We assume this is called while the session is still active
+      if (this.sessionId === startSessionId) {
+        this.addToHistory('user', message);
+      }
 
       // Prepare payload with conversation context
       const payload = {
         question: message,
-        session_id: this.sessionId,
+        session_id: startSessionId, // Use captured session ID
         conversation_history: this.conversationHistory.slice(0, -1), // Exclude the current message
         maintain_context: this.conversationHistory.length > 1
       };
@@ -181,8 +186,10 @@ export class ChatService {
 
       // NEW: Handle follow-up response
       if (data.is_followup) {
-        // Add follow-up to conversation history (marked as such)
-        this.addToHistory('assistant', data.followup_questions);
+        // Add follow-up to conversation history ONLY if we are still in the same session
+        if (this.sessionId === startSessionId) {
+          this.addToHistory('assistant', data.followup_questions);
+        }
 
         return {
           text: data.followup_questions,
@@ -190,7 +197,7 @@ export class ChatService {
           followup_reason: data.followup_reason,
           sources: [],
           generic: false,
-          session_id: data.session_id
+          session_id: data.session_id || startSessionId
         };
       }
 
@@ -198,8 +205,10 @@ export class ChatService {
       const formattedResponse = this.formatResponse(data.answer);
       const isGeneric = Boolean(data.generic || data.is_generic);
 
-      // Add assistant response to history
-      this.addToHistory('assistant', data.answer);
+      // Add assistant response to history ONLY if we are still in the same session
+      if (this.sessionId === startSessionId) {
+        this.addToHistory('assistant', data.answer);
+      }
 
       // Normalize sources to ensure all fields are captured
       const normalizeSources = (sources) => {
@@ -223,19 +232,21 @@ export class ChatService {
         sources: normalizeSources(data.sources || []),
         generic: isGeneric,
         is_followup: false,
-        session_id: data.session_id
+        session_id: data.session_id || startSessionId
       };
     } catch (err) {
       if (err?.name === 'AbortError') {
         // On abort, roll back the last user message and rethrow for UI to handle
-        if (this.conversationHistory.length > 0 &&
+        if (this.sessionId === startSessionId &&
+          this.conversationHistory.length > 0 &&
           this.conversationHistory[this.conversationHistory.length - 1].role === 'user') {
           this.conversationHistory.pop();
         }
         throw err;
       }
       // Remove the user message from history if the request failed
-      if (this.conversationHistory.length > 0 &&
+      if (this.sessionId === startSessionId &&
+        this.conversationHistory.length > 0 &&
         this.conversationHistory[this.conversationHistory.length - 1].role === 'user') {
         this.conversationHistory.pop();
       }
