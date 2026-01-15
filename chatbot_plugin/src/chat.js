@@ -8,7 +8,7 @@ export class ChatService {
     this.tokenContext = AuthService.getTokenContext?.() || null;
     this.sessionId = this.generateSessionId();
     this.conversationHistory = [];
-    this.maxHistoryLength = 10; // Keep last 10 messages for context
+    this.maxHistoryLength = 20; // Keep last 10 Q&A pairs (20 messages) for context
   }
 
   /** Generate unique session ID */
@@ -178,12 +178,12 @@ export class ChatService {
       }
 
       const data = await response.json();
-      
+
       // NEW: Handle follow-up response
       if (data.is_followup) {
         // Add follow-up to conversation history (marked as such)
         this.addToHistory('assistant', data.followup_questions);
-        
+
         return {
           text: data.followup_questions,
           is_followup: true,
@@ -193,7 +193,7 @@ export class ChatService {
           session_id: data.session_id
         };
       }
-      
+
       // Normal response handling
       const formattedResponse = this.formatResponse(data.answer);
       const isGeneric = Boolean(data.generic || data.is_generic);

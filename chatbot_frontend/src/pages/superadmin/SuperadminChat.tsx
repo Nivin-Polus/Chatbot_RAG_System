@@ -304,8 +304,9 @@ export default function SuperadminChat() {
     setIsLoading(true);
     enableAutoScroll();
 
+    // Prepare conversation history (last ~20 messages)
     const conversationHistory = updatedMessages
-      .slice(-10)
+      .slice(-20)
       .map((msg) => ({
         role: msg.role,
         content: msg.content,

@@ -273,7 +273,8 @@ export default function UserChat() {
     enableAutoScroll();
 
     try {
-      const conversationHistory = updatedMessages.slice(-10).map((msg) => ({
+      // Prepare conversation history (last ~20 messages)
+      const conversationHistory = updatedMessages.slice(-20).map((msg) => ({
         role: msg.role,
         content: msg.content,
         timestamp: msg.timestamp.toISOString(),

@@ -23,6 +23,10 @@ MAX_QUERY_EXPANSIONS = 8   # Maximum queries (original + expansions)
 MAX_CONTEXT_TOKENS = 2500  # Token cap for Claude Sonnet
 MIN_SCORE = 0.45           # Minimum similarity threshold to filter low-confidence chunks
 
+# Conversation summarization settings
+MAX_VERBATIM_MESSAGES = 20   # Keep last 10 Q&A pairs (20 messages) verbatim
+SUMMARY_TRIGGER_THRESHOLD = 20  # Start summarizing when history exceeds this count
+
 
 def _estimate_tokens(text: str) -> int:
     """Estimate token count (~4 chars per token for English)."""
