@@ -599,7 +599,24 @@ import "./styles.css";
 
   // ... (addMessage, etc.)
 
-  function deleteSession(sessionId) {
+  async function deleteSession(sessionId) {
+    // Delete from backend first
+    if (chatService.token && sessionId) {
+      try {
+        const apiBase = (CONFIG.apiBase || '').replace(/\/+$/, '');
+        await fetch(`${apiBase}/chat/sessions/${sessionId}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${chatService.token}`,
+          },
+        });
+      } catch (error) {
+        // Silently fail - session might not exist in backend yet
+        console.warn('Failed to delete session from backend:', error);
+      }
+    }
+
+    // Delete from localStorage
     sessions = sessions.filter(s => s.id !== sessionId);
     localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
     localStorage.removeItem(CHAT_MESSAGES_PREFIX + sessionId);

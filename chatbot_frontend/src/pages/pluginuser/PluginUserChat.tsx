@@ -5,8 +5,8 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { User, Send, Loader2, MessageSquare, ExternalLink, FileText, Download } from 'lucide-react';
 import { ChatMessage, ChatSource } from '@/types/auth';
 import { toast } from 'sonner';
-import { apiPost } from '@/utils/api';
-import { saveSession, getSession, migratePluginSession, hasPluginSession, importTransferredSession } from '@/utils/chatStorage';
+import { apiPost, apiDelete } from '@/utils/api';
+import { saveSession, getSession, deleteSession, migratePluginSession, hasPluginSession, importTransferredSession } from '@/utils/chatStorage';
 import { useSearchParams } from 'react-router-dom';
 import { getAssetUrl } from '@/utils/assets';
 import { DashboardLayout } from '@/components/DashboardLayout';
@@ -77,7 +77,7 @@ export default function PluginUserChat() {
                     user?.role || 'plugin_user',
                     import.meta.env.VITE_API_BASE_URL
                 );
-                
+
                 if (importedId) {
                     // Load the imported session
                     const storedSession = getSession(importedId);
@@ -106,7 +106,7 @@ export default function PluginUserChat() {
                     user?.role || 'plugin_user',
                     selectedCollection
                 );
-                
+
                 if (migratedId) {
                     // Load the migrated session
                     const storedSession = getSession(migratedId);
@@ -416,10 +416,28 @@ export default function PluginUserChat() {
         }
     };
 
-    const clearChat = () => {
+    const clearChat = async () => {
         if (stopStreamingRef.current) {
             stopStreamingRef.current();
         }
+
+        // Delete from backend if we have a session ID
+        if (sessionId && user?.access_token) {
+            try {
+                await apiDelete(
+                    `${import.meta.env.VITE_API_BASE_URL}/chat/sessions/${sessionId}`,
+                    user.access_token,
+                    false // Don't show error toast - session might not exist in backend
+                );
+            } catch (error) {
+                // Silently fail - session might not exist in backend yet
+                console.warn('Failed to delete session from backend:', error);
+            }
+
+            // Delete from localStorage
+            deleteSession(sessionId, user.user_id, user.role || 'plugin_user');
+        }
+
         setSearchParams({});
         enableAutoScroll();
     };
@@ -619,7 +637,12 @@ export default function PluginUserChat() {
                             const fileId = matchedFileId ?? linkTarget;
                             const fileName = downloadName || displayText || label;
 
-                            const commonClasses = "inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border/60 rounded-md bg-card hover:bg-muted transition-all hover:shadow-sm text-foreground no-underline mx-1";
+                            // Plugin style:
+                            // background: #ffffff; color: #1f2937; border: 1px solid rgba(17, 24, 39, 0.15); boxShadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+                            // Hover: background: linear-gradient(135deg, rgba(69, 98, 187, 0.1), rgba(2, 241, 124, 0.1));
+                            //        border-color: rgba(69, 98, 187, 0.3); boxShadow: 0 3px 8px rgba(69, 98, 187, 0.15); transform: translateY(-1px);
+
+                            const commonClasses = "inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-[rgba(17,24,39,0.15)] rounded-md bg-white text-[#1f2937] shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-[linear-gradient(135deg,rgba(69,98,187,0.1),rgba(2,241,124,0.1))] hover:border-[rgba(69,98,187,0.3)] hover:shadow-[0_3px_8px_rgba(69,98,187,0.15)] hover:-translate-y-[1px] transition-all no-underline mx-1 dark:bg-gray-800 dark:text-gray-100 dark:border-gray-700 dark:hover:bg-gray-700";
 
                             if (detectedSourceType === 'web_crawl') {
                                 elements.push(
@@ -630,7 +653,7 @@ export default function PluginUserChat() {
                                         rel="noopener noreferrer"
                                         className={commonClasses}
                                     >
-                                        <ExternalLink className="w-3 h-3 text-muted-foreground" />
+                                        <ExternalLink className="w-3 h-3 text-[rgba(107,114,128,0.7)]" />
                                         {displayText.trim() || 'View source'}
                                     </a>
                                 );
@@ -642,7 +665,7 @@ export default function PluginUserChat() {
                                         className={commonClasses}
                                         onClick={() => handleDownloadSource(fileId, fileName)}
                                     >
-                                        <FileText className="w-3 h-3 text-muted-foreground" />
+                                        <FileText className="w-3 h-3 text-[rgba(107,114,128,0.7)]" />
                                         {displayText.trim() || 'Download source'}
                                     </button>
                                 );
@@ -682,7 +705,8 @@ export default function PluginUserChat() {
                     const normalizedName = sourceName.trim().toLowerCase();
                     const metadata = sourceMetadataLookup.get(normalizedName);
 
-                    const commonButtonClass = "inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium border border-border/40 rounded-md bg-background hover:bg-muted/50 transition-all hover:shadow-sm hover:-translate-y-0.5 text-foreground cursor-pointer no-underline max-w-full";
+                    // Source styling - vertical list with full width items
+                    const commonButtonClass = "flex items-center justify-between gap-2 px-3 py-2 text-sm font-medium border border-[rgba(17,24,39,0.15)] rounded-md bg-white text-[#1f2937] shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-[linear-gradient(135deg,rgba(69,98,187,0.1),rgba(2,241,124,0.1))] hover:border-[rgba(69,98,187,0.3)] hover:shadow-[0_3px_8px_rgba(69,98,187,0.15)] hover:-translate-y-[1px] transition-all cursor-pointer no-underline w-full dark:bg-gray-800 dark:text-gray-100 dark:border-gray-700 dark:hover:bg-gray-700";
 
                     if (metadata && (metadata.source_type === 'web_crawl' || metadata.url)) {
                         const url = metadata.url || '';
@@ -694,8 +718,8 @@ export default function PluginUserChat() {
                                 rel="noopener noreferrer"
                                 className={commonButtonClass}
                             >
-                                <span className="truncate">{sourceName}</span>
-                                <ExternalLink className="w-3.5 h-3.5 opacity-70 shrink-0" />
+                                <span className="truncate text-left flex-1">{sourceName}</span>
+                                <ExternalLink className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
                             </a>
                         );
                     } else if (metadata && metadata.file_id) {
@@ -706,8 +730,8 @@ export default function PluginUserChat() {
                                 className={commonButtonClass}
                                 onClick={() => handleDownloadSource(metadata.file_id!, sourceName)}
                             >
-                                <span className="truncate">{sourceName}</span>
-                                <Download className="w-3.5 h-3.5 opacity-70 shrink-0" />
+                                <span className="truncate text-left flex-1">{sourceName}</span>
+                                <Download className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
                             </button>
                         );
                     } else if (linkMatch) {
@@ -738,8 +762,8 @@ export default function PluginUserChat() {
                                     rel="noopener noreferrer"
                                     className={commonButtonClass}
                                 >
-                                    <span className="truncate">{fileName}</span>
-                                    <ExternalLink className="w-3.5 h-3.5 opacity-70 shrink-0" />
+                                    <span className="truncate text-left flex-1">{fileName}</span>
+                                    <ExternalLink className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
                                 </a>
                             );
                         } else {
@@ -750,8 +774,8 @@ export default function PluginUserChat() {
                                     className={commonButtonClass}
                                     onClick={() => handleDownloadSource(resolvedFileId, fileName)}
                                 >
-                                    <span className="truncate">{fileName}</span>
-                                    <Download className="w-3.5 h-3.5 opacity-70 shrink-0" />
+                                    <span className="truncate text-left flex-1">{fileName}</span>
+                                    <Download className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
                                 </button>
                             );
                         }
@@ -766,8 +790,8 @@ export default function PluginUserChat() {
                                     className={commonButtonClass}
                                     onClick={() => handleDownloadSource(reference, downloadName ?? displayText)}
                                 >
-                                    <span className="truncate">{displayText}</span>
-                                    <Download className="w-3.5 h-3.5 opacity-70 shrink-0" />
+                                    <span className="truncate text-left flex-1">{displayText}</span>
+                                    <Download className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
                                 </button>
                             );
                         } else {
@@ -780,192 +804,193 @@ export default function PluginUserChat() {
                     }
                     continue;
                 }
-
-                if (inSourcesSection && trimmed.length === 0) {
-                    continue;
-                }
-
-                if (inSourcesSection && trimmed.length > 0 && !trimmed.startsWith('-')) {
-                    inSourcesSection = false;
-                }
-
-                nodes.push(...createInlineElements(rawLine));
             }
+
+            if (inSourcesSection && trimmed.length === 0) {
+                continue;
+            }
+
+            if (inSourcesSection && trimmed.length > 0 && !trimmed.startsWith('-')) {
+                inSourcesSection = false;
+            }
+
+            nodes.push(...createInlineElements(rawLine));
+        }
 
             if (sourcesNodes.length > 0) {
-                nodes.push(
-                    <div key={`${messageId}-sources-container`} className="mt-4 pt-3 border-t border-border/40 bg-muted/30 rounded-lg p-3 space-y-2">
-                        <span className="block text-xs font-bold uppercase text-muted-foreground/80 mb-2">
-                            Sources:
-                        </span>
-                        <div className="flex flex-wrap gap-2 items-start">
-                            {sourcesNodes}
-                        </div>
-                    </div>
-                );
-            }
-
-            return nodes;
-        }, [handleDownloadSource, user?.access_token]);
-
-    const handleMessageScroll = useCallback(() => {
-        const container = messagesContainerRef.current;
-        if (!container) return;
-
-        const threshold = 40;
-        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
-
-        if (isAutoScrollRef.current !== isNearBottom) {
-            isAutoScrollRef.current = isNearBottom;
-            setIsAutoScroll(isNearBottom);
-        }
-    }, []);
-
-    const formatTime = (date: Date) => {
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    };
-
-    return (
-        <DashboardLayout>
-            <div className="flex flex-col space-y-4 pt-6 h-[calc(100vh-6rem)]">
-                <div className="flex items-center justify-between shrink-0">
-                    <div>
-                        <h1 className="text-3xl font-bold text-foreground dark:text-white">Leto Chat</h1>
-                    </div>
+        nodes.push(
+            <div key={`${messageId}-sources-container`} className="mt-4 pt-3 border-t border-border/40 bg-muted/30 rounded-lg p-3 space-y-2">
+                <span className="block text-xs font-bold uppercase text-muted-foreground/80 mb-2">
+                    Sources:
+                </span>
+                <div className="flex flex-col gap-2 w-full">
+                    {sourcesNodes}
                 </div>
+            </div>
+        );
+    }
 
-                <Card className="flex flex-col flex-1 bg-card dark:bg-gray-900 overflow-hidden">
-                    <CardHeader className="flex-shrink-0 py-3">
-                        <div className="flex items-center justify-end">
-                            {hasMessages && (
-                                <Button variant="outline" onClick={clearChat} size="sm">
-                                    Clear Chat
-                                </Button>
-                            )}
+    return nodes;
+}, [handleDownloadSource, user?.access_token]);
+
+const handleMessageScroll = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const threshold = 40;
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+
+    if (isAutoScrollRef.current !== isNearBottom) {
+        isAutoScrollRef.current = isNearBottom;
+        setIsAutoScroll(isNearBottom);
+    }
+}, []);
+
+const formatTime = (date: Date) => {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+return (
+    <DashboardLayout>
+        <div className="flex flex-col space-y-4 pt-6 h-[calc(100vh-6rem)]">
+            <div className="flex items-center justify-between shrink-0">
+                <div>
+                    <h1 className="text-3xl font-bold text-foreground dark:text-white">Leto Chat</h1>
+                </div>
+            </div>
+
+            <Card className="flex flex-col flex-1 bg-card dark:bg-gray-900 overflow-hidden">
+                <CardHeader className="flex-shrink-0 py-3">
+                    <div className="flex items-center justify-end">
+                        {hasMessages && (
+                            <Button variant="outline" onClick={clearChat} size="sm">
+                                Clear Chat
+                            </Button>
+                        )}
+                    </div>
+                </CardHeader>
+                <CardContent className="relative flex-1 flex flex-col min-h-0 overflow-hidden p-0">
+                    {!selectedCollection ? (
+                        <div className="flex-1 flex items-center justify-center text-muted-foreground dark:text-gray-300">
+                            No knowledge base configured. Please contact support.
                         </div>
-                    </CardHeader>
-                    <CardContent className="relative flex-1 flex flex-col min-h-0 overflow-hidden p-0">
-                        {!selectedCollection ? (
-                            <div className="flex-1 flex items-center justify-center text-muted-foreground dark:text-gray-300">
-                                No knowledge base configured. Please contact support.
-                            </div>
-                        ) : (
-                            <div className="flex flex-1 flex-col min-h-0">
-                                <div
-                                    className="flex-1 overflow-y-auto space-y-4 px-4 pt-4"
-                                    ref={messagesContainerRef}
-                                    onScroll={handleMessageScroll}
-                                    onWheel={handleWheel}
-                                    onPointerDown={handleManualScrollIntent}
-                                    onTouchMove={handleTouchMove}
-                                >
-                                    {messages.length === 0 ? (
-                                        <div className="flex items-center justify-center text-muted-foreground dark:text-gray-300 h-[50vh]">
-                                            <div className="flex flex-col items-center gap-3 text-center">
-                                                <MessageSquare className="h-12 w-12 opacity-50" />
-                                                <p className="text-base font-medium">You can start the conversation by sending a message below.</p>
-                                            </div>
+                    ) : (
+                        <div className="flex flex-1 flex-col min-h-0">
+                            <div
+                                className="flex-1 overflow-y-auto space-y-4 px-4 pt-4"
+                                ref={messagesContainerRef}
+                                onScroll={handleMessageScroll}
+                                onWheel={handleWheel}
+                                onPointerDown={handleManualScrollIntent}
+                                onTouchMove={handleTouchMove}
+                            >
+                                {messages.length === 0 ? (
+                                    <div className="flex items-center justify-center text-muted-foreground dark:text-gray-300 h-[50vh]">
+                                        <div className="flex flex-col items-center gap-3 text-center">
+                                            <MessageSquare className="h-12 w-12 opacity-50" />
+                                            <p className="text-base font-medium">You can start the conversation by sending a message below.</p>
                                         </div>
-                                    ) : (
-                                        messages.map((message) => {
-                                            const isUser = message.role === 'user';
-                                            return (
+                                    </div>
+                                ) : (
+                                    messages.map((message) => {
+                                        const isUser = message.role === 'user';
+                                        return (
+                                            <div
+                                                key={message.id}
+                                                className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
+                                            >
                                                 <div
-                                                    key={message.id}
-                                                    className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
+                                                    className={`rounded-xl px-4 py-3 shadow-sm ${isUser
+                                                        ? 'bg-primary text-primary-foreground max-w-[65%] dark:text-white'
+                                                        : 'bg-muted border border-border/60 text-foreground max-w-[80%] dark:bg-gray-800 dark:text-gray-100'
+                                                        }`}
                                                 >
-                                                    <div
-                                                        className={`rounded-xl px-4 py-3 shadow-sm ${isUser
-                                                            ? 'bg-primary text-primary-foreground max-w-[65%] dark:text-white'
-                                                            : 'bg-muted border border-border/60 text-foreground max-w-[80%] dark:bg-gray-800 dark:text-gray-100'
-                                                            }`}
-                                                    >
-                                                        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                                                            <div className="flex items-center gap-2.5">
-                                                                <div
-                                                                    className={`flex h-8 w-8 items-center justify-center rounded-full ${isUser
-                                                                        ? 'bg-primary-foreground/20 text-primary-foreground'
-                                                                        : 'bg-white text-foreground shadow-sm dark:bg-gray-900/80 dark:text-gray-100'
-                                                                        }`}
-                                                                >
-                                                                    {isUser ? (
-                                                                        <User className="h-4 w-4" />
-                                                                    ) : (
-                                                                        <img src={getAssetUrl('leto.svg')} alt="Leto logo" className="h-4 w-4" />
-                                                                    )}
-                                                                </div>
-                                                                <span
-                                                                    className={`text-sm font-semibold leading-none ${isUser ? 'text-primary-foreground dark:text-white' : 'text-foreground dark:text-gray-100'
-                                                                        }`}
-                                                                >
-                                                                    {isUser ? 'You' : 'Leto Assistant'}
-                                                                </span>
-                                                            </div>
-                                                            <p
-                                                                className={`text-xs ${isUser
-                                                                    ? 'text-primary-foreground/70 dark:text-white/70'
-                                                                    : 'text-muted-foreground dark:text-gray-400'
+                                                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                                        <div className="flex items-center gap-2.5">
+                                                            <div
+                                                                className={`flex h-8 w-8 items-center justify-center rounded-full ${isUser
+                                                                    ? 'bg-primary-foreground/20 text-primary-foreground'
+                                                                    : 'bg-white text-foreground shadow-sm dark:bg-gray-900/80 dark:text-gray-100'
                                                                     }`}
                                                             >
-                                                                {formatTime(message.timestamp)}
-                                                            </p>
+                                                                {isUser ? (
+                                                                    <User className="h-4 w-4" />
+                                                                ) : (
+                                                                    <img src={getAssetUrl('leto.svg')} alt="Leto logo" className="h-4 w-4" />
+                                                                )}
+                                                            </div>
+                                                            <span
+                                                                className={`text-sm font-semibold leading-none ${isUser ? 'text-primary-foreground dark:text-white' : 'text-foreground dark:text-gray-100'
+                                                                    }`}
+                                                            >
+                                                                {isUser ? 'You' : 'Leto Assistant'}
+                                                            </span>
                                                         </div>
-                                                        <div className="flex flex-col gap-1 text-sm leading-relaxed">
-                                                            {renderMessageContent(message.content, message.id, message.sources)}
-                                                        </div>
+                                                        <p
+                                                            className={`text-xs ${isUser
+                                                                ? 'text-primary-foreground/70 dark:text-white/70'
+                                                                : 'text-muted-foreground dark:text-gray-400'
+                                                                }`}
+                                                        >
+                                                            {formatTime(message.timestamp)}
+                                                        </p>
                                                     </div>
-                                                </div>
-                                            );
-                                        })
-                                    )}
-                                    {isLoading && !isStreaming && (
-                                        <div className="flex justify-start pt-2">
-                                            <div className="bg-muted border rounded-lg px-4 py-3 dark:bg-gray-800 dark:text-gray-300">
-                                                <div className="flex items-center space-x-2">
-                                                    <img src={getAssetUrl('leto.svg')} alt="Leto logo" className="h-4 w-4" />
-                                                    <div className="flex items-center space-x-2">
-                                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                                        <span className="text-sm text-muted-foreground dark:text-gray-300">
-                                                            Leto is thinking...
-                                                        </span>
+                                                    <div className="flex flex-col gap-1 text-sm leading-relaxed">
+                                                        {renderMessageContent(message.content, message.id, message.sources)}
                                                     </div>
                                                 </div>
                                             </div>
+                                        );
+                                    })
+                                )}
+                                {isLoading && !isStreaming && (
+                                    <div className="flex justify-start pt-2">
+                                        <div className="bg-muted border rounded-lg px-4 py-3 dark:bg-gray-800 dark:text-gray-300">
+                                            <div className="flex items-center space-x-2">
+                                                <img src={getAssetUrl('leto.svg')} alt="Leto logo" className="h-4 w-4" />
+                                                <div className="flex items-center space-x-2">
+                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                    <span className="text-sm text-muted-foreground dark:text-gray-300">
+                                                        Leto is thinking...
+                                                    </span>
+                                                </div>
+                                            </div>
                                         </div>
-                                    )}
-                                    <div ref={messagesEndRef} />
-                                </div>
-
-                                <form
-                                    onSubmit={sendMessage}
-                                    className="sticky bottom-0 left-0 right-0 z-10 flex items-center gap-2 bg-card p-3 border-t border-border/60 dark:bg-gray-900"
-                                >
-                                    <input
-                                        type="text"
-                                        value={inputMessage}
-                                        onChange={(e) => setInputMessage(e.target.value)}
-                                        placeholder="Type your message..."
-                                        className="flex-1 h-11 px-3 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:bg-gray-800 dark:text-white"
-                                        disabled={isLoading || isStreaming}
-                                    />
-                                    {isStreaming && (
-                                        <Button type="button" variant="secondary" onClick={handleStopStreaming} className="h-11">
-                                            Stop
-                                        </Button>
-                                    )}
-                                    <Button
-                                        type="submit"
-                                        disabled={isLoading || isStreaming || !inputMessage.trim()}
-                                        className="h-11"
-                                    >
-                                        <Send className="h-4 w-4" />
-                                    </Button>
-                                </form>
+                                    </div>
+                                )}
+                                <div ref={messagesEndRef} />
                             </div>
-                        )}
-                    </CardContent>
-                </Card>
-            </div>
-        </DashboardLayout>
-    );
+
+                            <form
+                                onSubmit={sendMessage}
+                                className="sticky bottom-0 left-0 right-0 z-10 flex items-center gap-2 bg-card p-3 border-t border-border/60 dark:bg-gray-900"
+                            >
+                                <input
+                                    type="text"
+                                    value={inputMessage}
+                                    onChange={(e) => setInputMessage(e.target.value)}
+                                    placeholder="Type your message..."
+                                    className="flex-1 h-11 px-3 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:bg-gray-800 dark:text-white"
+                                    disabled={isLoading || isStreaming}
+                                />
+                                {isStreaming && (
+                                    <Button type="button" variant="secondary" onClick={handleStopStreaming} className="h-11">
+                                        Stop
+                                    </Button>
+                                )}
+                                <Button
+                                    type="submit"
+                                    disabled={isLoading || isStreaming || !inputMessage.trim()}
+                                    className="h-11"
+                                >
+                                    <Send className="h-4 w-4" />
+                                </Button>
+                            </form>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+        </div>
+    </DashboardLayout>
+);
 }
