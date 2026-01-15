@@ -780,20 +780,38 @@ export default function PluginUserChat() {
                             );
                         }
                     } else {
-                        const { displayText, downloadName, sourceRef, matchedFileId } = extractSourceInfo(label);
+                        const { displayText, downloadName, sourceRef, matchedFileId, sourceType } = extractSourceInfo(label);
                         const reference = matchedFileId ?? sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
+
                         if (reference) {
-                            sourcesNodes.push(
-                                <button
-                                    key={nextKey()}
-                                    type="button"
-                                    className={commonButtonClass}
-                                    onClick={() => handleDownloadSource(reference, downloadName ?? displayText)}
-                                >
-                                    <span className="truncate text-left flex-1">{displayText}</span>
-                                    <Download className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
-                                </button>
-                            );
+                            const isWebCrawl = sourceType === 'web_crawl' || (typeof reference === 'string' && reference.startsWith('http'));
+
+                            if (isWebCrawl) {
+                                sourcesNodes.push(
+                                    <a
+                                        key={nextKey()}
+                                        href={reference.startsWith('http') ? reference : `https://${reference}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className={commonButtonClass}
+                                    >
+                                        <span className="truncate text-left flex-1">{displayText}</span>
+                                        <ExternalLink className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
+                                    </a>
+                                );
+                            } else {
+                                sourcesNodes.push(
+                                    <button
+                                        key={nextKey()}
+                                        type="button"
+                                        className={commonButtonClass}
+                                        onClick={() => handleDownloadSource(reference, downloadName ?? displayText)}
+                                    >
+                                        <span className="truncate text-left flex-1">{displayText}</span>
+                                        <Download className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
+                                    </button>
+                                );
+                            }
                         } else {
                             sourcesNodes.push(
                                 <span key={nextKey()} className="block whitespace-pre-wrap text-sm text-muted-foreground px-1">
@@ -903,93 +921,93 @@ export default function PluginUserChat() {
                                                             ? 'bg-primary text-primary-foreground max-w-[65%] dark:text-white'
                                                             : 'bg-muted border border-border/60 text-foreground max-w-[80%] dark:bg-gray-800 dark:text-gray-100'
                                                             }`}
-                                                >
-                                                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                                                        <div className="flex items-center gap-2.5">
-                                                            <div
-                                                                className={`flex h-8 w-8 items-center justify-center rounded-full ${isUser
-                                                                    ? 'bg-primary-foreground/20 text-primary-foreground'
-                                                                    : 'bg-white text-foreground shadow-sm dark:bg-gray-900/80 dark:text-gray-100'
-                                                                    }`}
-                                                            >
-                                                                {isUser ? (
-                                                                    <User className="h-4 w-4" />
-                                                                ) : (
-                                                                    <img src={getAssetUrl('leto.svg')} alt="Leto logo" className="h-4 w-4" />
-                                                                )}
+                                                    >
+                                                        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                                            <div className="flex items-center gap-2.5">
+                                                                <div
+                                                                    className={`flex h-8 w-8 items-center justify-center rounded-full ${isUser
+                                                                        ? 'bg-primary-foreground/20 text-primary-foreground'
+                                                                        : 'bg-white text-foreground shadow-sm dark:bg-gray-900/80 dark:text-gray-100'
+                                                                        }`}
+                                                                >
+                                                                    {isUser ? (
+                                                                        <User className="h-4 w-4" />
+                                                                    ) : (
+                                                                        <img src={getAssetUrl('leto.svg')} alt="Leto logo" className="h-4 w-4" />
+                                                                    )}
+                                                                </div>
+                                                                <span
+                                                                    className={`text-sm font-semibold leading-none ${isUser ? 'text-primary-foreground dark:text-white' : 'text-foreground dark:text-gray-100'
+                                                                        }`}
+                                                                >
+                                                                    {isUser ? 'You' : 'Leto Assistant'}
+                                                                </span>
                                                             </div>
-                                                            <span
-                                                                className={`text-sm font-semibold leading-none ${isUser ? 'text-primary-foreground dark:text-white' : 'text-foreground dark:text-gray-100'
+                                                            <p
+                                                                className={`text-xs ${isUser
+                                                                    ? 'text-primary-foreground/70 dark:text-white/70'
+                                                                    : 'text-muted-foreground dark:text-gray-400'
                                                                     }`}
                                                             >
-                                                                {isUser ? 'You' : 'Leto Assistant'}
-                                                            </span>
+                                                                {formatTime(message.timestamp)}
+                                                            </p>
                                                         </div>
-                                                        <p
-                                                            className={`text-xs ${isUser
-                                                                ? 'text-primary-foreground/70 dark:text-white/70'
-                                                                : 'text-muted-foreground dark:text-gray-400'
-                                                                }`}
-                                                        >
-                                                            {formatTime(message.timestamp)}
-                                                        </p>
-                                                    </div>
-                                                    <div className="flex flex-col gap-1 text-sm leading-relaxed">
-                                                        {renderMessageContent(message.content, message.id, message.sources)}
+                                                        <div className="flex flex-col gap-1 text-sm leading-relaxed">
+                                                            {renderMessageContent(message.content, message.id, message.sources)}
+                                                        </div>
                                                     </div>
                                                 </div>
-                                            </div>
-                                        );
-                                    })
-                                )}
-                                {isLoading && !isStreaming && (
-                                    <div className="flex justify-start pt-2">
-                                        <div className="bg-muted border rounded-lg px-4 py-3 dark:bg-gray-800 dark:text-gray-300">
-                                            <div className="flex items-center space-x-2">
-                                                <img src={getAssetUrl('leto.svg')} alt="Leto logo" className="h-4 w-4" />
+                                            );
+                                        })
+                                    )}
+                                    {isLoading && !isStreaming && (
+                                        <div className="flex justify-start pt-2">
+                                            <div className="bg-muted border rounded-lg px-4 py-3 dark:bg-gray-800 dark:text-gray-300">
                                                 <div className="flex items-center space-x-2">
-                                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                                    <span className="text-sm text-muted-foreground dark:text-gray-300">
-                                                        Leto is thinking...
-                                                    </span>
+                                                    <img src={getAssetUrl('leto.svg')} alt="Leto logo" className="h-4 w-4" />
+                                                    <div className="flex items-center space-x-2">
+                                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                                        <span className="text-sm text-muted-foreground dark:text-gray-300">
+                                                            Leto is thinking...
+                                                        </span>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
-                                    </div>
-                                )}
-                                <div ref={messagesEndRef} />
-                            </div>
+                                    )}
+                                    <div ref={messagesEndRef} />
+                                </div>
 
-                            <form
-                                onSubmit={sendMessage}
-                                className="sticky bottom-0 left-0 right-0 z-10 flex items-center gap-2 bg-card p-3 border-t border-border/60 dark:bg-gray-900"
-                            >
-                                <input
-                                    type="text"
-                                    value={inputMessage}
-                                    onChange={(e) => setInputMessage(e.target.value)}
-                                    placeholder="Type your message..."
-                                    className="flex-1 h-11 px-3 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:bg-gray-800 dark:text-white"
-                                    disabled={isLoading || isStreaming}
-                                />
-                                {isStreaming && (
-                                    <Button type="button" variant="secondary" onClick={handleStopStreaming} className="h-11">
-                                        Stop
-                                    </Button>
-                                )}
-                                <Button
-                                    type="submit"
-                                    disabled={isLoading || isStreaming || !inputMessage.trim()}
-                                    className="h-11"
+                                <form
+                                    onSubmit={sendMessage}
+                                    className="sticky bottom-0 left-0 right-0 z-10 flex items-center gap-2 bg-card p-3 border-t border-border/60 dark:bg-gray-900"
                                 >
-                                    <Send className="h-4 w-4" />
-                                </Button>
-                            </form>
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
-        </div>
-    </DashboardLayout>
-);
+                                    <input
+                                        type="text"
+                                        value={inputMessage}
+                                        onChange={(e) => setInputMessage(e.target.value)}
+                                        placeholder="Type your message..."
+                                        className="flex-1 h-11 px-3 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:bg-gray-800 dark:text-white"
+                                        disabled={isLoading || isStreaming}
+                                    />
+                                    {isStreaming && (
+                                        <Button type="button" variant="secondary" onClick={handleStopStreaming} className="h-11">
+                                            Stop
+                                        </Button>
+                                    )}
+                                    <Button
+                                        type="submit"
+                                        disabled={isLoading || isStreaming || !inputMessage.trim()}
+                                        className="h-11"
+                                    >
+                                        <Send className="h-4 w-4" />
+                                    </Button>
+                                </form>
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+            </div>
+        </DashboardLayout>
+    );
 }
