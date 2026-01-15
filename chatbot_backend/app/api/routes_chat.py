@@ -237,6 +237,7 @@ def _process_chat_request(
         file_id = chunk.get("file_id")
         file_name = chunk.get("file_name") or "Unknown File"
         chunk_index = chunk.get("chunk_index")
+        chunk_score = chunk.get("score", 0.0)  # Get confidence score
         # Get source type and URL for web crawl sources
         source_type = chunk.get("source_type", "file")
         url = chunk.get("url") or chunk.get("canonical_url", "")
@@ -253,16 +254,37 @@ def _process_chat_request(
                 "chunk_indices": [],
                 "source_type": source_type,
                 "url": url,
+                "max_score": chunk_score,  # Track max confidence score for this source
+                "scores": [chunk_score],  # Track all scores for averaging if needed
             }
             source_records[record_key] = record
+        else:
+            # Update max score if this chunk has higher confidence
+            record["max_score"] = max(record.get("max_score", 0.0), chunk_score)
+            record["scores"].append(chunk_score)
 
         if chunk_index is not None:
             record["chunk_indices"].append(chunk_index)
 
+    # Import settings for SOURCE_MIN_SCORE threshold
+    from app.config import settings
+    source_min_score = getattr(settings, "SOURCE_MIN_SCORE", 0.35)
+    
     sources_payload = []
+    filtered_sources_count = 0
+    
     for record in source_records.values():
+        max_score = record.get("max_score", 0.0)
+        
+        # Filter out sources below confidence threshold
+        if max_score < source_min_score:
+            filtered_sources_count += 1
+            logger.info(f"[SOURCE FILTER] Excluding '{record.get('file_name')}' (score: {max_score:.4f} < threshold: {source_min_score})")
+            continue
+        
         payload = {
             "file_name": record.get("file_name", "Unknown File"),
+            "confidence": round(max_score, 4),  # Add confidence score to payload
         }
         if record.get("file_id"):
             payload["file_id"] = record["file_id"]
@@ -274,6 +296,9 @@ def _process_chat_request(
         if record.get("url"):
             payload["url"] = record["url"]
         sources_payload.append(payload)
+    
+    if filtered_sources_count > 0:
+        logger.info(f"[SOURCE FILTER] Filtered out {filtered_sources_count} low-confidence sources (threshold: {source_min_score})")
 
     # Step 2: Check if follow-up is needed (BEFORE answer generation)
     needs_followup, followup_reason = rag_instance.needs_followup(
