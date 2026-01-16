@@ -304,6 +304,9 @@ export default function CrawlerView({ collectionId }: CrawlerViewProps) {
                 setTargetUrl('');
                 setShowAdvanced(false);
                 fetchJobs();
+            } else if (response.status === 429) {
+                // Crawl already running - show friendly dialog instead of toast
+                setCrawlInProgressOpen(true);
             } else {
                 const error = await response.json();
                 toast.error(error.detail || 'Failed to start crawl');
@@ -378,6 +381,8 @@ export default function CrawlerView({ collectionId }: CrawlerViewProps) {
             if (response.ok) {
                 toast.success('Recrawl started');
                 fetchJobs();
+            } else if (response.status === 429) {
+                setCrawlInProgressOpen(true);
             } else {
                 toast.error('Failed to start recrawl');
             }
@@ -413,6 +418,9 @@ export default function CrawlerView({ collectionId }: CrawlerViewProps) {
                 toast.success(`Scheduled to run every ${intervalHours} hours`);
                 setScheduleDialogOpen(false);
                 fetchJobs();
+            } else if (response.status === 429) {
+                setScheduleDialogOpen(false);
+                setCrawlInProgressOpen(true);
             } else {
                 toast.error('Failed to schedule crawl');
             }
@@ -745,8 +753,8 @@ export default function CrawlerView({ collectionId }: CrawlerViewProps) {
                         </div>
                     )}
 
-                    <Button 
-                        onClick={handleStartCrawl} 
+                    <Button
+                        onClick={handleStartCrawl}
                         disabled={isStarting || !targetUrl || !selectedCollection}
                     >
                         {isStarting ? (
