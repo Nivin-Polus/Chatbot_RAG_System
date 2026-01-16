@@ -13,6 +13,7 @@ import {
   SidebarFooter,
   useSidebar,
   SidebarMenuAction,
+  SidebarTrigger,
 } from '@/components/ui/sidebar';
 import {
   Database,
@@ -35,6 +36,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { getAssetUrl } from '@/utils/assets';
 import { getSessions, deleteSession, renameSession, ChatSession } from '@/utils/chatStorage';
+import { ThemeToggle } from './ThemeToggle';
 
 // Navigation definitions
 const superadminNav = [
@@ -218,18 +220,26 @@ export function AppSidebar() {
     <Sidebar className="border-r border-sidebar-border">
       <SidebarContent>
         <div className="p-6">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="h-10 w-10 rounded-lg border border-logo flex items-center justify-center p-1">
-              <img
-                src={getAssetUrl('leto.svg')}
-                alt="Leto Logo"
-                className="h-8 w-8 object-contain"
-              />
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-3">
+              <div className={`rounded-lg border border-logo flex items-center justify-center p-1 ${user?.role === 'plugin_user' ? 'h-14 w-14' : 'h-10 w-10'}`}>
+                <img
+                  src={getAssetUrl('leto.svg')}
+                  alt="Leto Logo"
+                  className={`${user?.role === 'plugin_user' ? 'h-12 w-12' : 'h-8 w-8'} object-contain`}
+                />
+              </div>
+              {open && user?.role !== 'plugin_user' && (
+                <div>
+                  <h2 className="text-lg font-semibold">{sidebarHeading(user?.role)}</h2>
+                  <p className="text-xs text-muted-foreground capitalize">{user?.role}</p>
+                </div>
+              )}
             </div>
             {open && (
-              <div>
-                <h2 className="text-lg font-semibold">{sidebarHeading(user?.role)}</h2>
-                <p className="text-xs text-muted-foreground capitalize">{user?.role}</p>
+              <div className="flex items-center gap-1">
+                <ThemeToggle />
+                <SidebarTrigger />
               </div>
             )}
           </div>
@@ -246,7 +256,7 @@ export function AppSidebar() {
         </div>
 
         <SidebarGroup>
-          {open && <SidebarGroupLabel>Navigation</SidebarGroupLabel>}
+          {open && navItems.length > 0 && <SidebarGroupLabel>Navigation</SidebarGroupLabel>}
           <SidebarGroupContent>
             <SidebarMenu>
               {navItems.map((item) => {

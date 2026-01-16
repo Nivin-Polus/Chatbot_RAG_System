@@ -3,15 +3,15 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { User, Send, Loader2, MessageSquare, ExternalLink, FileText, Download, Menu } from 'lucide-react';
-import { useSidebar, SidebarTrigger } from '@/components/ui/sidebar';
+import { useSidebar } from '@/components/ui/sidebar';
 import { ChatMessage, ChatSource } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiPost, apiDelete } from '@/utils/api';
-import { saveSession, getSession, deleteSession, migratePluginSession, hasPluginSession, importTransferredSessions } from '@/utils/chatStorage';
+import { saveSession, getSession, deleteSession, migratePluginSession, hasPluginSession, importTransferredSessions, syncSessionsToBackend, getSessions } from '@/utils/chatStorage';
 import { useSearchParams } from 'react-router-dom';
 import { getAssetUrl } from '@/utils/assets';
 import { DashboardLayout } from '@/components/DashboardLayout';
-import { ThemeToggle } from '@/components/ThemeToggle';
+
 
 const ChatContainer = ({ children }: { children: ReactNode }) => {
     return (
@@ -220,6 +220,111 @@ export default function PluginUserChat() {
             stopStreamingRef.current = null;
         };
     }, []);
+
+    // Sync sessions to backend for plugin access
+    // This runs on page unload and periodically
+    // Get visitor_id from URL params (passed from regular plugin for session isolation)
+    const visitorId = searchParams.get('visitor_id');
+    
+    useEffect(() => {
+        if (!user?.user_id || !selectedCollection) return;
+
+        const websiteUrl = window.location.origin;
+        const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
+
+        // Sync function - includes visitor_id for user isolation
+        const doSync = () => {
+            // Get all sessions from localStorage
+            const allSessions = getSessions(user.user_id, user.role || 'plugin_user');
+            if (allSessions.length > 0) {
+                syncSessionsToBackend(
+                    user.user_id,
+                    user.role || 'plugin_user',
+                    sessionId || null,
+                    websiteUrl,
+                    apiBaseUrl,
+                    visitorId  // Pass visitor ID for isolation
+                );
+            }
+        };
+
+        // Sync on visibility change (when user switches tabs/leaves page)
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'hidden') {
+                doSync();
+            }
+        };
+
+        // Sync on beforeunload (when user closes/refreshes page)
+        const handleBeforeUnload = () => {
+            // Use sendBeacon for reliable sync on page unload
+            const allSessions = getSessions(user.user_id, user.role || 'plugin_user');
+            if (allSessions.length > 0) {
+                const syncPayload: Array<{
+                    session_id: string;
+                    title: string;
+                    timestamp: number;
+                    messages: Array<{
+                        user: boolean;
+                        text: string;
+                        formatted: boolean;
+                        timestamp: string;
+                        sources?: Array<{ file_name?: string; file_id?: string; }>;
+                        isFollowup?: boolean;
+                    }>;
+                }> = [];
+
+                for (const session of allSessions) {
+                    const sessionData = getSession(session.id);
+                    if (!sessionData || sessionData.messages.length === 0) continue;
+
+                    syncPayload.push({
+                        session_id: session.id,
+                        title: session.title,
+                        timestamp: session.timestamp,
+                        messages: sessionData.messages.map(msg => ({
+                            user: msg.role === 'user',
+                            text: msg.content,
+                            formatted: true,
+                            timestamp: msg.timestamp.toISOString(),
+                            sources: msg.sources?.map(s => ({
+                                file_name: s.file_name,
+                                file_id: s.file_id,
+                            })),
+                            isFollowup: msg.isFollowup || false,
+                        })),
+                    });
+                }
+
+                if (syncPayload.length > 0) {
+                    const payload = JSON.stringify({
+                        website_url: websiteUrl,
+                        visitor_id: visitorId || null,  // Include visitor ID for isolation
+                        current_session_id: sessionId || null,
+                        sessions: syncPayload,
+                    });
+                    navigator.sendBeacon(`${apiBaseUrl}/plugins/sync-sessions`, new Blob([payload], { type: 'application/json' }));
+                }
+            }
+        };
+
+        // Add event listeners
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        window.addEventListener('beforeunload', handleBeforeUnload);
+
+        // Also sync periodically (every 30 seconds) when there are changes
+        const syncInterval = setInterval(() => {
+            if (!isStreaming && messages.length > 0) {
+                doSync();
+            }
+        }, 30000);
+
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+            clearInterval(syncInterval);
+        };
+    }, [user?.user_id, user?.role, selectedCollection, sessionId, isStreaming, messages.length, visitorId]);
 
     const streamAssistantResponse = useCallback(
         (rawContent: string, sources?: ChatSource[], isFollowup?: boolean) => {
@@ -973,10 +1078,6 @@ export default function PluginUserChat() {
         <DashboardLayout>
             <ChatContainer>
                 <Card className="flex flex-col flex-1 bg-card dark:bg-gray-900 overflow-hidden">
-                    <CardHeader className="flex-shrink-0 py-3 border-b flex flex-row items-center justify-start space-y-0 gap-2">
-                        <ThemeToggle />
-                        <SidebarTrigger />
-                    </CardHeader>
                     <CardContent className="relative flex-1 flex flex-col min-h-0 overflow-hidden p-0">
                         {!selectedCollection ? (
                             <div className="flex-1 flex items-center justify-center text-muted-foreground dark:text-gray-300">
@@ -1072,8 +1173,8 @@ export default function PluginUserChat() {
                             </div>
                         )}
                     </CardContent>
-                </Card>
-            </ChatContainer>
-        </DashboardLayout>
+                </Card >
+            </ChatContainer >
+        </DashboardLayout >
     );
 }

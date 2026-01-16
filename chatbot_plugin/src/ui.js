@@ -284,6 +284,9 @@ export class ChatbotUI {
           // Try to transfer ALL chat sessions to backend for seamless migration
           const allSessions = this.getAllSessions?.() || [];
           const currentSessionId = this.getCurrentSessionId?.() || null;
+          
+          // Get visitor ID for user isolation
+          const visitorId = localStorage.getItem('chatbot_visitor_id') || '';
 
           if (allSessions.length > 0 && CONFIG?.websiteUrl) {
             try {
@@ -293,6 +296,7 @@ export class ChatbotUI {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   website_url: CONFIG.websiteUrl,
+                  visitor_id: visitorId,  // Include visitor ID for user isolation
                   current_session_id: currentSessionId,
                   sessions: allSessions.map(session => ({
                     session_id: session.id,
@@ -313,7 +317,8 @@ export class ChatbotUI {
               if (transferResponse.ok) {
                 const transferData = await transferResponse.json();
                 const separator = loginUrl.includes('?') ? '&' : '?';
-                finalUrl = `${loginUrl}${separator}transfer_token=${encodeURIComponent(transferData.transfer_token)}`;
+                // Include visitor_id so extended plugin can sync back to the same visitor
+                finalUrl = `${loginUrl}${separator}transfer_token=${encodeURIComponent(transferData.transfer_token)}&visitor_id=${encodeURIComponent(visitorId)}`;
                 transferSuccessful = true;
               } else {
                 console.warn('Could not transfer sessions, proceeding without chat history');
@@ -323,8 +328,9 @@ export class ChatbotUI {
             }
           }
 
-          // If transfer was successful, clear the plugin's localStorage
-          // This prevents deleted chats from coming back when user expands again
+          // Notify that transfer was successful
+          // Note: We preserve localStorage so users can continue their chat
+          // when they return to the plugin after closing the extended frontend
           if (transferSuccessful && this.onTransferComplete) {
             this.onTransferComplete();
           }

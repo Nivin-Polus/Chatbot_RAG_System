@@ -48,22 +48,12 @@ import "./styles.css";
       return { ...session, messages: [] };
     }).filter(s => s.messages && s.messages.length > 0); // Only include sessions with messages
   };
-  // Clear plugin localStorage after successful transfer to frontend
+  // After transfer to frontend, keep localStorage intact so users can continue
+  // their chat when they return to the plugin
   ui.onTransferComplete = () => {
-    console.log('Transfer successful - clearing plugin localStorage');
-    // Clear all session data from localStorage
-    sessions.forEach(session => {
-      localStorage.removeItem(CHAT_MESSAGES_PREFIX + session.id);
-    });
-    localStorage.removeItem(CHAT_SESSIONS_INDEX_KEY);
-    sessions = [];
-
-    // Clear current chat and start fresh
-    chatService.clearContext();
-    currentSessionId = chatService.sessionId;
-    messages.length = 0;
-    initializeMessages();
-    renderMessages();
+    console.log('Transfer successful - preserving plugin localStorage for session continuity');
+    // Do NOT clear localStorage - users should be able to continue their chat
+    // when they close the extended frontend and return to the plugin
   };
   ui.init();
 
@@ -93,6 +83,20 @@ import "./styles.css";
   const CHAT_SESSION_KEY = 'chatbot_chat_session_id';
   const CHAT_SESSIONS_INDEX_KEY = 'chatbot_sessions_index';
   const CHAT_MESSAGES_PREFIX = 'chatbot_messages_';
+  const VISITOR_ID_KEY = 'chatbot_visitor_id';
+
+  // Generate or retrieve unique visitor ID for this browser
+  function getVisitorId() {
+    let visitorId = localStorage.getItem(VISITOR_ID_KEY);
+    if (!visitorId) {
+      // Generate a unique visitor ID
+      visitorId = 'visitor_' + Date.now() + '_' + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem(VISITOR_ID_KEY, visitorId);
+    }
+    return visitorId;
+  }
+
+  const visitorId = getVisitorId();
 
   let sessions = []; // [{id, title, timestamp}]
   const downloadRegistry = {
@@ -165,6 +169,19 @@ import "./styles.css";
 
   // Initialize user message counter based on any restored history
   userMessageCount = messages.filter(m => m && m.user).length;
+
+  // Fetch synced sessions from backend (async, will update UI if newer sessions found)
+  // This allows loading sessions created in the extended plugin
+  fetchSyncedSessions().then(synced => {
+    if (synced) {
+      console.log('Synced sessions loaded from backend');
+      // Update UI with any newly loaded sessions
+      renderMessages();
+      userMessageCount = messages.filter(m => m && m.user).length;
+    }
+  }).catch(err => {
+    console.warn('Could not fetch synced sessions:', err);
+  });
 
   if (CONFIG?.ui) {
     const root = document.documentElement;
@@ -1065,6 +1082,119 @@ import "./styles.css";
       return false;
     } catch (err) {
       console.error("Failed to load history", err);
+      return false;
+    }
+  }
+
+  // Fetch synced sessions from backend (sessions created in extended plugin)
+  async function fetchSyncedSessions() {
+    try {
+      if (!CONFIG?.websiteUrl || !CONFIG?.apiBase) {
+        console.log('Missing config for synced sessions fetch');
+        return false;
+      }
+
+      const apiBase = (CONFIG.apiBase || '').replace(/\/+$/, '');
+      const websiteUrl = encodeURIComponent(CONFIG.websiteUrl);
+      const vid = encodeURIComponent(visitorId);
+      
+      const response = await fetch(`${apiBase}/plugins/sync-sessions?website_url=${websiteUrl}&visitor_id=${vid}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      if (!response.ok) {
+        console.warn('Failed to fetch synced sessions:', response.status);
+        return false;
+      }
+
+      const data = await response.json();
+      
+      if (!data.sessions || data.sessions.length === 0) {
+        console.log('No synced sessions from backend');
+        return false;
+      }
+
+      console.log(`Found ${data.sessions.length} synced sessions from backend`);
+
+      // Merge synced sessions with local sessions
+      let localUpdated = false;
+      const existingIds = new Set(sessions.map(s => s.id));
+
+      for (const syncedSession of data.sessions) {
+        // Check if this session exists locally
+        const localMsgsStr = localStorage.getItem(CHAT_MESSAGES_PREFIX + syncedSession.session_id);
+        const syncedTimestamp = syncedSession.timestamp || Date.now();
+
+        // Compare timestamps to determine which is newer
+        let shouldUseBackend = false;
+
+        if (!localMsgsStr) {
+          // Session doesn't exist locally - use backend version
+          shouldUseBackend = true;
+        } else {
+          // Session exists - check which is newer
+          const existingSession = sessions.find(s => s.id === syncedSession.session_id);
+          if (existingSession && syncedTimestamp > existingSession.timestamp) {
+            shouldUseBackend = true;
+          }
+        }
+
+        if (shouldUseBackend && syncedSession.messages && syncedSession.messages.length > 0) {
+          console.log(`Importing synced session: ${syncedSession.session_id}`);
+          
+          // Convert backend message format to plugin format
+          const pluginMessages = syncedSession.messages.map(msg => ({
+            user: msg.user === true,
+            text: msg.text || '',
+            formatted: msg.formatted !== false,
+            timestamp: msg.timestamp || new Date().toISOString(),
+            sources: msg.sources || [],
+            isFollowup: msg.isFollowup || false,
+          }));
+
+          // Save messages to localStorage
+          localStorage.setItem(
+            CHAT_MESSAGES_PREFIX + syncedSession.session_id,
+            JSON.stringify(pluginMessages)
+          );
+
+          // Update sessions index
+          if (!existingIds.has(syncedSession.session_id)) {
+            sessions.push({
+              id: syncedSession.session_id,
+              title: syncedSession.title || 'New Chat',
+              timestamp: syncedTimestamp,
+            });
+            existingIds.add(syncedSession.session_id);
+          } else {
+            // Update existing session timestamp
+            const idx = sessions.findIndex(s => s.id === syncedSession.session_id);
+            if (idx >= 0) {
+              sessions[idx].timestamp = syncedTimestamp;
+              sessions[idx].title = syncedSession.title || sessions[idx].title;
+            }
+          }
+          localUpdated = true;
+        }
+      }
+
+      if (localUpdated) {
+        // Save updated sessions index
+        sessions.sort((a, b) => b.timestamp - a.timestamp);
+        localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
+        
+        // Load the most recent session (or the current_session_id if specified)
+        const targetSessionId = data.current_session_id || sessions[0]?.id;
+        if (targetSessionId) {
+          switchSession(targetSessionId);
+        }
+        return true;
+      }
+
+      return false;
+    } catch (err) {
+      console.error('Failed to fetch synced sessions:', err);
       return false;
     }
   }

@@ -604,3 +604,58 @@ export function clearAllChatHistories(userId: string | undefined, role: string):
   clearAllSessions(userId, role);
 }
 
+/**
+ * Sync sessions to backend
+ */
+export async function syncSessionsToBackend(
+  userId: string,
+  role: string,
+  currentSessionId: string | null,
+  websiteUrl: string,
+  apiBaseUrl: string,
+  visitorId?: string | null
+): Promise<void> {
+  try {
+    const sessions = getSessions(userId, role);
+    if (sessions.length === 0) return;
+
+    const syncPayload = sessions.map(session => {
+      const details = getSession(session.id);
+      return {
+        session_id: session.id,
+        title: session.title,
+        timestamp: session.timestamp,
+        messages: details?.messages.map(msg => ({
+          user: msg.role === 'user',
+          text: msg.content,
+          formatted: true,
+          timestamp: msg.timestamp.toISOString(),
+          sources: msg.sources?.map(s => ({
+            file_name: s.file_name,
+            file_id: s.file_id
+          })),
+          isFollowup: msg.isFollowup
+        })) || []
+      };
+    });
+
+    const payload = {
+      website_url: websiteUrl,
+      current_session_id: currentSessionId,
+      sessions: syncPayload,
+      visitor_id: visitorId
+    };
+
+    await fetch(`${apiBaseUrl}/plugins/sync-sessions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+  } catch (error) {
+    console.error('Failed to sync sessions:', error);
+  }
+}
+

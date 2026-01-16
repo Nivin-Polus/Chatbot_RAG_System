@@ -927,3 +927,192 @@ async def retrieve_sessions(transfer_token: str):
             collection_id=transfer_data["collection_id"],
         )
 
+
+# --- Persistent Session Sync (Bidirectional) ---
+# This allows extended plugin to sync sessions back so regular plugin can load them
+
+# In-memory storage for persistent synced sessions (keyed by "plugin_id:visitor_id")
+# This ensures each browser/user has isolated sessions
+# In production, this should use Redis or database
+_synced_sessions: dict[str, dict] = {}
+_synced_sessions_lock = Lock()
+_SYNC_EXPIRY_SECONDS = 86400  # 24 hours
+
+
+def _get_sync_key(plugin_id: int, visitor_id: str) -> str:
+    """Generate a unique key for session sync storage."""
+    # Use visitor_id if provided, otherwise fall back to plugin-only key
+    if visitor_id:
+        return f"{plugin_id}:{visitor_id}"
+    return f"{plugin_id}:default"
+
+
+def _cleanup_expired_syncs():
+    """Remove expired synced sessions."""
+    now = time.time()
+    with _synced_sessions_lock:
+        expired_keys = [
+            key for key, data in _synced_sessions.items()
+            if now - data.get("updated_at", 0) > _SYNC_EXPIRY_SECONDS
+        ]
+        for key in expired_keys:
+            del _synced_sessions[key]
+
+
+class SyncSessionsRequest(BaseModel):
+    """Request to sync sessions from extended plugin to backend."""
+    website_url: str
+    visitor_id: Optional[str] = None  # Unique identifier for this browser/user
+    current_session_id: Optional[str] = None
+    sessions: List[TransferredSession]
+
+
+class SyncSessionsResponse(BaseModel):
+    """Response after syncing sessions."""
+    success: bool
+    synced_count: int
+    message: str
+
+
+class GetSyncedSessionsResponse(BaseModel):
+    """Response with synced sessions for plugin to load."""
+    current_session_id: Optional[str] = None
+    sessions: List[dict]
+    collection_id: str
+    last_synced: Optional[str] = None
+
+
+@router.post("/sync-sessions", response_model=SyncSessionsResponse)
+async def sync_sessions_to_backend(
+    payload: SyncSessionsRequest,
+    db: Session = Depends(get_db),
+):
+    """Sync sessions from extended plugin to backend for plugin to retrieve.
+    
+    This endpoint allows the extended frontend to save its sessions
+    so that the regular plugin can load them when reopened.
+    Unlike transfer-sessions, this is persistent (not one-time use).
+    """
+    _cleanup_expired_syncs()
+    
+    normalized = _normalize_url(payload.website_url)
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid URL")
+    
+    # Find the plugin integration
+    plugin = db.query(PluginIntegration).filter(
+        PluginIntegration.normalized_url == normalized,
+        PluginIntegration.is_active == True
+    ).first()
+    
+    if not plugin:
+        # Try partial match for subdomains/paths
+        all_plugins = db.query(PluginIntegration).filter(
+            PluginIntegration.is_active == True
+        ).all()
+        
+        for p in all_plugins:
+            if normalized.startswith(p.normalized_url) or p.normalized_url.startswith(normalized):
+                plugin = p
+                break
+    
+    if not plugin:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin not found for the provided URL")
+    
+    if not plugin.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Plugin integration is inactive")
+    
+    # Build sessions data
+    sessions_data = []
+    for session in payload.sessions:
+        sessions_data.append({
+            "session_id": session.session_id,
+            "title": session.title or "New Chat",
+            "timestamp": session.timestamp or int(time.time() * 1000),
+            "messages": [msg.model_dump() for msg in session.messages],
+        })
+    
+    # Store synced sessions (persistent, keyed by plugin ID + visitor ID for isolation)
+    sync_key = _get_sync_key(plugin.id, payload.visitor_id or "")
+    with _synced_sessions_lock:
+        _synced_sessions[sync_key] = {
+            "current_session_id": payload.current_session_id,
+            "sessions": sessions_data,
+            "collection_id": plugin.collection_id,
+            "visitor_id": payload.visitor_id,
+            "updated_at": time.time(),
+        }
+    
+    logger.info("Sessions synced for plugin %s (visitor: %s): %d sessions", plugin.id, payload.visitor_id or "default", len(sessions_data))
+    
+    return SyncSessionsResponse(
+        success=True,
+        synced_count=len(sessions_data),
+        message=f"Successfully synced {len(sessions_data)} sessions"
+    )
+
+
+@router.get("/sync-sessions", response_model=GetSyncedSessionsResponse)
+async def get_synced_sessions(
+    website_url: str,
+    visitor_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Retrieve synced sessions for a plugin.
+    
+    This endpoint allows the plugin to load sessions that were
+    synced from the extended frontend.
+    Unlike transfer retrieval, this does NOT delete the data.
+    visitor_id is used to isolate sessions per browser/user.
+    """
+    _cleanup_expired_syncs()
+    
+    normalized = _normalize_url(website_url)
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid URL")
+    
+    # Find the plugin integration
+    plugin = db.query(PluginIntegration).filter(
+        PluginIntegration.normalized_url == normalized,
+        PluginIntegration.is_active == True
+    ).first()
+    
+    if not plugin:
+        # Try partial match
+        all_plugins = db.query(PluginIntegration).filter(
+            PluginIntegration.is_active == True
+        ).all()
+        
+        for p in all_plugins:
+            if normalized.startswith(p.normalized_url) or p.normalized_url.startswith(normalized):
+                plugin = p
+                break
+    
+    if not plugin:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin not found")
+    
+    # Get synced sessions (without deleting), using visitor_id for isolation
+    sync_key = _get_sync_key(plugin.id, visitor_id or "")
+    with _synced_sessions_lock:
+        sync_data = _synced_sessions.get(sync_key)
+    
+    if not sync_data:
+        # Return empty response if no synced sessions
+        return GetSyncedSessionsResponse(
+            current_session_id=None,
+            sessions=[],
+            collection_id=plugin.collection_id,
+            last_synced=None
+        )
+    
+    from datetime import datetime
+    last_synced = datetime.fromtimestamp(sync_data.get("updated_at", 0)).isoformat()
+    
+    logger.info("Synced sessions retrieved for plugin %s (visitor: %s): %d sessions", plugin.id, visitor_id or "default", len(sync_data.get("sessions", [])))
+    
+    return GetSyncedSessionsResponse(
+        current_session_id=sync_data.get("current_session_id"),
+        sessions=sync_data.get("sessions", []),
+        collection_id=sync_data["collection_id"],
+        last_synced=last_synced
+    )
