@@ -3,16 +3,18 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { User, Send, Loader2, MessageSquare, ExternalLink, FileText, Download } from 'lucide-react';
+import { useSidebar } from '@/components/ui/sidebar';
 import { ChatMessage, ChatSource } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiPost, apiDelete } from '@/utils/api';
-import { saveSession, getSession, deleteSession, migratePluginSession, hasPluginSession, importTransferredSession } from '@/utils/chatStorage';
+import { saveSession, getSession, deleteSession, migratePluginSession, hasPluginSession, importTransferredSessions } from '@/utils/chatStorage';
 import { useSearchParams } from 'react-router-dom';
 import { getAssetUrl } from '@/utils/assets';
 import { DashboardLayout } from '@/components/DashboardLayout';
 
 export default function PluginUserChat() {
     const { user } = useAuth();
+    const { open } = useSidebar();
     // Plugin users have their collection_id set during auto-login
     const selectedCollection = user?.collection_id || '';
     const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -68,24 +70,25 @@ export default function PluginUserChat() {
         const importPluginSession = searchParams.get('import_plugin_session');
         const transferToken = searchParams.get('transfer_token');
 
-        // Handle backend-based session transfer (cross-origin safe)
+        // Handle backend-based session transfer (cross-origin safe) - imports ALL chat history
         if (transferToken && selectedCollection) {
             const doTransfer = async () => {
-                const importedId = await importTransferredSession(
+                const currentSessionId = await importTransferredSessions(
                     transferToken,
                     user?.user_id,
                     user?.role || 'plugin_user',
                     import.meta.env.VITE_API_BASE_URL
                 );
 
-                if (importedId) {
-                    // Load the imported session
-                    const storedSession = getSession(importedId);
+                if (currentSessionId) {
+                    // Load the current session (the one user was viewing in plugin)
+                    const storedSession = getSession(currentSessionId);
                     if (storedSession) {
                         setMessages(storedSession.messages);
-                        setSessionId(importedId);
+                        setSessionId(currentSessionId);
                         // Replace URL to remove the transfer parameter and set the session
-                        setSearchParams({ session: importedId }, { replace: true });
+                        setSearchParams({ session: currentSessionId }, { replace: true });
+                        toast.success('Chat history imported successfully');
                         return;
                     }
                 }
@@ -873,13 +876,7 @@ export default function PluginUserChat() {
 
     return (
         <DashboardLayout>
-            <div className="flex flex-col space-y-4 pt-6 h-[calc(100vh-6rem)]">
-                <div className="flex items-center justify-between shrink-0">
-                    <div>
-                        <h1 className="text-3xl font-bold text-foreground dark:text-white">Leto Chat</h1>
-                    </div>
-                </div>
-
+            <div className={`flex flex-col space-y-4 pt-6 h-[calc(100vh-6rem)] transition-all duration-300 ${!open ? 'max-w-[90%] mx-auto w-full' : 'w-full'}`}>
                 <Card className="flex flex-col flex-1 bg-card dark:bg-gray-900 overflow-hidden">
                     <CardHeader className="flex-shrink-0 py-3">
                         <div className="flex items-center justify-end">

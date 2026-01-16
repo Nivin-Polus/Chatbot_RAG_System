@@ -23,6 +23,31 @@ import "./styles.css";
   // Provide callbacks for chat history transfer to frontend
   ui.getCurrentSessionId = () => chatService.sessionId;
   ui.getSessionMessages = () => messages; // Return current session messages
+  // Return all sessions with their messages for full history transfer
+  ui.getAllSessions = () => {
+    return sessions.map(session => {
+      // For current session, use in-memory messages
+      if (session.id === chatService.sessionId) {
+        return {
+          ...session,
+          messages: messages.filter(m => !m.isTypingIndicator && !m.isTyping)
+        };
+      }
+      // For other sessions, load from localStorage
+      try {
+        const storedMsgs = localStorage.getItem(CHAT_MESSAGES_PREFIX + session.id);
+        if (storedMsgs) {
+          return {
+            ...session,
+            messages: JSON.parse(storedMsgs)
+          };
+        }
+      } catch (e) {
+        console.warn('Failed to load messages for session:', session.id);
+      }
+      return { ...session, messages: [] };
+    }).filter(s => s.messages && s.messages.length > 0); // Only include sessions with messages
+  };
   ui.init();
 
   const chatService = new ChatService();

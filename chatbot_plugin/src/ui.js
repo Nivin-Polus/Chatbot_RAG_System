@@ -30,6 +30,7 @@ export class ChatbotUI {
     this.activeSidebarMode = 'history'; // 'history' | 'settings'
     this.getCurrentSessionId = null; // Callback to get current session ID for chat history transfer
     this.getSessionMessages = null; // Callback to get current session messages for transfer
+    this.getAllSessions = null; // Callback to get all sessions for full history transfer
   }
 
   init() {
@@ -270,7 +271,7 @@ export class ChatbotUI {
 
   async toggleExpand(forceMode) {
     // If already expanded and clicking expand again, redirect to full React frontend
-    if (this.isExpanded && !forceMode) {
+    if (!forceMode) {
       try {
         // Import dependencies dynamically to avoid circular dependency
         const { AuthService } = await import('./auth.js');
@@ -278,43 +279,48 @@ export class ChatbotUI {
         const loginUrl = await AuthService.getAutoLoginUrl();
         if (loginUrl) {
           let finalUrl = loginUrl;
-          
-          // Try to transfer chat session to backend for seamless migration
+
+          // Try to transfer ALL chat sessions to backend for seamless migration
+          const allSessions = this.getAllSessions?.() || [];
           const currentSessionId = this.getCurrentSessionId?.() || null;
-          const currentMessages = this.getSessionMessages?.() || [];
-          
-          if (currentSessionId && currentMessages.length > 0 && CONFIG?.websiteUrl) {
+
+          if (allSessions.length > 0 && CONFIG?.websiteUrl) {
             try {
               const apiBase = (CONFIG.apiBase || '').replace(/\/+$/, '');
-              const transferResponse = await fetch(`${apiBase}/plugins/transfer-session`, {
+              const transferResponse = await fetch(`${apiBase}/plugins/transfer-sessions`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   website_url: CONFIG.websiteUrl,
-                  session_id: currentSessionId,
-                  messages: currentMessages.filter(m => !m.isTypingIndicator && !m.isTyping).map(m => ({
-                    user: Boolean(m.user),
-                    text: m.text || '',
-                    formatted: Boolean(m.formatted),
-                    timestamp: m.timestamp || new Date().toISOString(),
-                    sources: m.sources || [],
-                    isFollowup: Boolean(m.isFollowup),
+                  current_session_id: currentSessionId,
+                  sessions: allSessions.map(session => ({
+                    session_id: session.id,
+                    title: session.title || 'New Chat',
+                    timestamp: session.timestamp,
+                    messages: (session.messages || []).filter(m => !m.isTypingIndicator && !m.isTyping).map(m => ({
+                      user: Boolean(m.user),
+                      text: m.text || '',
+                      formatted: Boolean(m.formatted),
+                      timestamp: m.timestamp || new Date().toISOString(),
+                      sources: m.sources || [],
+                      isFollowup: Boolean(m.isFollowup),
+                    })),
                   })),
                 }),
               });
-              
+
               if (transferResponse.ok) {
                 const transferData = await transferResponse.json();
                 const separator = loginUrl.includes('?') ? '&' : '?';
                 finalUrl = `${loginUrl}${separator}transfer_token=${encodeURIComponent(transferData.transfer_token)}`;
               } else {
-                console.warn('Could not transfer session, proceeding without chat history');
+                console.warn('Could not transfer sessions, proceeding without chat history');
               }
             } catch (transferErr) {
               console.warn('Session transfer failed:', transferErr);
             }
           }
-          
+
           window.open(finalUrl, '_blank');
           return;
         } else {

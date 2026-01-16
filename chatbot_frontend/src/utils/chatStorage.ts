@@ -96,7 +96,7 @@ export function saveSession(
     const firstUserMsg = messages.find((m) => m.role === 'user');
     let title = 'New Chat';
     if (firstUserMsg) {
-      title = firstUserMsg.content.slice(0, 30) + (firstUserMsg.content.length > 30 ? '...' : '');
+      title = firstUserMsg.content.slice(0, 100) + (firstUserMsg.content.length > 100 ? '...' : '');
     }
 
     const sessionInfo: ChatSession = {
@@ -258,14 +258,14 @@ export function migratePluginSession(
     // Read plugin session messages
     const pluginMessagesKey = `${PLUGIN_MESSAGES_PREFIX}${pluginSessionId}`;
     const pluginMessagesStr = localStorage.getItem(pluginMessagesKey);
-    
+
     if (!pluginMessagesStr) {
       console.warn('Plugin session not found:', pluginSessionId);
       return null;
     }
 
     const pluginMessages: PluginMessage[] = JSON.parse(pluginMessagesStr);
-    
+
     if (!Array.isArray(pluginMessages) || pluginMessages.length === 0) {
       console.warn('No messages in plugin session:', pluginSessionId);
       return null;
@@ -289,7 +289,7 @@ export function migratePluginSession(
 
     // Save to frontend storage format
     saveSession(pluginSessionId, frontendMessages, collectionId, userId, role);
-    
+
     return pluginSessionId;
   } catch (error) {
     console.error('Failed to migrate plugin session:', error);
@@ -314,7 +314,7 @@ export function migrateAllPluginSessions(
     if (!Array.isArray(pluginSessions)) return [];
 
     const migratedIds: string[] = [];
-    
+
     for (const session of pluginSessions) {
       const migratedId = migratePluginSession(session.id, userId, role, collectionId);
       if (migratedId) {
@@ -376,14 +376,14 @@ export async function importTransferredSession(
 ): Promise<string | null> {
   try {
     const response = await fetch(`${apiBaseUrl}/plugins/transfer-session/${encodeURIComponent(transferToken)}`);
-    
+
     if (!response.ok) {
       console.warn('Failed to fetch transferred session:', response.status);
       return null;
     }
 
     const data: TransferSessionData = await response.json();
-    
+
     if (!data.session_id || !Array.isArray(data.messages) || data.messages.length === 0) {
       console.warn('Invalid transferred session data');
       return null;
@@ -407,10 +407,114 @@ export async function importTransferredSession(
 
     // Save to frontend storage
     saveSession(data.session_id, frontendMessages, data.collection_id, userId, role);
-    
+
     return data.session_id;
   } catch (error) {
     console.error('Failed to import transferred session:', error);
+    return null;
+  }
+}
+
+// --- Multiple Sessions Transfer Support ---
+
+interface TransferredSessionData {
+  session_id: string;
+  title?: string;
+  timestamp?: number;
+  messages: TransferredMessage[];
+}
+
+interface TransferSessionsResponse {
+  current_session_id: string | null;
+  sessions: TransferredSessionData[];
+  collection_id: string;
+}
+
+/**
+ * Fetch and import ALL transferred sessions from the backend
+ * Returns the current session ID if successful, null otherwise
+ */
+export async function importTransferredSessions(
+  transferToken: string,
+  userId: string | undefined,
+  role: string,
+  apiBaseUrl: string
+): Promise<string | null> {
+  try {
+    // Try the multi-session endpoint first
+    let response = await fetch(`${apiBaseUrl}/plugins/transfer-sessions/${encodeURIComponent(transferToken)}`);
+
+    if (!response.ok) {
+      // Fallback to single-session endpoint for backward compatibility
+      response = await fetch(`${apiBaseUrl}/plugins/transfer-session/${encodeURIComponent(transferToken)}`);
+      if (!response.ok) {
+        console.warn('Failed to fetch transferred sessions:', response.status);
+        return null;
+      }
+      // Handle legacy single-session response
+      const legacyData = await response.json();
+      if (legacyData.session_id && Array.isArray(legacyData.messages)) {
+        const frontendMessages: ChatMessage[] = legacyData.messages.map((msg: TransferredMessage, index: number) => ({
+          id: msg.user ? `user_${Date.now()}_${index}` : `assistant_${Date.now()}_${index}`,
+          role: msg.user ? 'user' as const : 'assistant' as const,
+          content: msg.text || '',
+          timestamp: new Date(msg.timestamp || Date.now()),
+          sources: msg.sources?.map(s => ({
+            file_name: s.file_name || '',
+            file_id: s.file_id,
+            chunk_indices: s.chunk_indices,
+            source_type: s.source_type,
+            url: s.url,
+          })).filter(s => s.file_name),
+          isFollowup: msg.isFollowup,
+        }));
+        saveSession(legacyData.session_id, frontendMessages, legacyData.collection_id, userId, role);
+        return legacyData.session_id;
+      }
+      return null;
+    }
+
+    const data: TransferSessionsResponse = await response.json();
+
+    if (!Array.isArray(data.sessions) || data.sessions.length === 0) {
+      console.warn('No sessions in transferred data');
+      return null;
+    }
+
+    // Import all sessions
+    let importedCount = 0;
+    for (const session of data.sessions) {
+      if (!session.session_id || !Array.isArray(session.messages) || session.messages.length === 0) {
+        continue;
+      }
+
+      // Convert transferred messages to frontend format
+      const frontendMessages: ChatMessage[] = session.messages.map((msg, index) => ({
+        id: msg.user ? `user_${Date.now()}_${index}_${session.session_id}` : `assistant_${Date.now()}_${index}_${session.session_id}`,
+        role: msg.user ? 'user' as const : 'assistant' as const,
+        content: msg.text || '',
+        timestamp: new Date(msg.timestamp || Date.now()),
+        sources: msg.sources?.map(s => ({
+          file_name: s.file_name || '',
+          file_id: s.file_id,
+          chunk_indices: s.chunk_indices,
+          source_type: s.source_type,
+          url: s.url,
+        })).filter(s => s.file_name),
+        isFollowup: msg.isFollowup,
+      }));
+
+      // Save to frontend storage
+      saveSession(session.session_id, frontendMessages, data.collection_id, userId, role);
+      importedCount++;
+    }
+
+    console.log(`Imported ${importedCount} sessions from plugin`);
+
+    // Return the current session ID (the one user was viewing in plugin)
+    return data.current_session_id || (data.sessions[0]?.session_id ?? null);
+  } catch (error) {
+    console.error('Failed to import transferred sessions:', error);
     return null;
   }
 }

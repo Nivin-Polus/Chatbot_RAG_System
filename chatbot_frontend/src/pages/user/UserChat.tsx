@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { User, Send, Loader2, MessageSquare, Bot } from 'lucide-react';
+import { User, Send, Loader2, MessageSquare, Bot, ExternalLink, FileText, Download } from 'lucide-react';
 import { Collection, ChatMessage, ChatSource } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost } from '@/utils/api';
@@ -601,6 +601,8 @@ export default function UserChat() {
           );
         };
 
+        const commonClasses = "inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-[rgba(17,24,39,0.15)] rounded-md bg-white text-[#1f2937] shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-[linear-gradient(135deg,rgba(69,98,187,0.1),rgba(2,241,124,0.1))] hover:border-[rgba(69,98,187,0.3)] hover:shadow-[0_3px_8px_rgba(69,98,187,0.15)] hover:-translate-y-[1px] transition-all no-underline mx-1 dark:bg-gray-800 dark:text-gray-100 dark:border-gray-700 dark:hover:bg-gray-700";
+
         while ((match = tokenRegex.exec(line)) !== null) {
           if (match.index > lastIndex) {
             pushText(line.slice(lastIndex, match.index));
@@ -645,9 +647,10 @@ export default function UserChat() {
                     href={linkTarget.startsWith('http') ? linkTarget : `https://${linkTarget}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer`}
+                    className={commonClasses}
                   >
-                    {displayText.trim() || 'View source'} ↗
+                    <ExternalLink className="w-3 h-3 text-[rgba(107,114,128,0.7)]" />
+                    {displayText.trim() || 'View source'}
                   </a>
                 );
               } else {
@@ -656,9 +659,10 @@ export default function UserChat() {
                   <button
                     key={nextKey()}
                     type="button"
-                    className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer`}
+                    className={commonClasses}
                     onClick={() => handleDownloadSource(fileId, fileName)}
                   >
+                    <FileText className="w-3 h-3 text-[rgba(107,114,128,0.7)]" />
                     {displayText.trim() || 'Download source'}
                   </button>
                 );
@@ -780,7 +784,6 @@ export default function UserChat() {
           const label = trimmed.replace(/^-\s*/, '');
           const linkMatch = label.match(/\[([^\]]+)\]\(([^)]+)\)/);
 
-          // Extract source name for metadata lookup
           let sourceName = label;
           if (linkMatch) {
             sourceName = linkMatch[1];
@@ -788,9 +791,9 @@ export default function UserChat() {
           const normalizedName = sourceName.trim().toLowerCase();
           const metadata = sourceMetadataLookup.get(normalizedName);
 
-          // Check if we have metadata from API response
+          const commonButtonClass = "flex items-center justify-between gap-2 px-3 py-2 text-sm font-medium border border-[rgba(17,24,39,0.15)] rounded-md bg-white text-[#1f2937] shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-[linear-gradient(135deg,rgba(69,98,187,0.1),rgba(2,241,124,0.1))] hover:border-[rgba(69,98,187,0.3)] hover:shadow-[0_3px_8px_rgba(69,98,187,0.15)] hover:-translate-y-[1px] transition-all cursor-pointer no-underline w-full dark:bg-gray-800 dark:text-gray-100 dark:border-gray-700 dark:hover:bg-gray-700";
+
           if (metadata && (metadata.source_type === 'web_crawl' || metadata.url)) {
-            // Web crawl source - open URL in new tab
             const url = metadata.url || '';
             sourcesNodes.push(
               <a
@@ -798,28 +801,28 @@ export default function UserChat() {
                 href={url.startsWith('http') ? url : `https://${url}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
+                className={commonButtonClass}
               >
-                {sourceName} ↗
+                <span className="truncate text-left flex-1">{sourceName}</span>
+                <ExternalLink className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
               </a>
             );
           } else if (metadata && metadata.file_id) {
-            // File source with known file_id - trigger download
             sourcesNodes.push(
               <button
                 key={nextKey()}
                 type="button"
-                className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
+                className={commonButtonClass}
                 onClick={() => handleDownloadSource(metadata.file_id!, sourceName)}
               >
-                {sourceName}
+                <span className="truncate text-left flex-1">{sourceName}</span>
+                <Download className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
               </button>
             );
           } else if (linkMatch) {
             const [, fileName, rawLinkTarget] = linkMatch;
             const matchedFileId = normalizedName ? sourceIdLookup.get(normalizedName) : undefined;
 
-            // Parse source_type from linkTarget
             let linkTarget = rawLinkTarget;
             let sourceType: 'file' | 'web_crawl' = 'file';
             if (rawLinkTarget.includes('|')) {
@@ -829,7 +832,6 @@ export default function UserChat() {
                 sourceType = 'web_crawl';
               }
             }
-            // Also detect from URL pattern
             if (linkTarget.startsWith('http')) {
               sourceType = 'web_crawl';
             }
@@ -837,80 +839,70 @@ export default function UserChat() {
             const resolvedFileId = matchedFileId ?? linkTarget;
 
             if (sourceType === 'web_crawl') {
-              // Web crawl source - open URL in new tab
               sourcesNodes.push(
                 <a
                   key={nextKey()}
                   href={linkTarget.startsWith('http') ? linkTarget : `https://${linkTarget}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
+                  className={commonButtonClass}
                 >
-                  {fileName} ↗
+                  <span className="truncate text-left flex-1">{fileName}</span>
+                  <ExternalLink className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
                 </a>
               );
             } else {
-              // File source - trigger download
               sourcesNodes.push(
                 <button
                   key={nextKey()}
                   type="button"
-                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
+                  className={commonButtonClass}
                   onClick={() => handleDownloadSource(resolvedFileId, fileName)}
                 >
-                  {fileName}
+                  <span className="truncate text-left flex-1">{fileName}</span>
+                  <Download className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
                 </button>
               );
             }
           } else {
-            // Plain text source - try to find in metadata lookup
-            const plainMetadata = sourceMetadataLookup.get(label.trim().toLowerCase());
-            if (plainMetadata && (plainMetadata.source_type === 'web_crawl' || plainMetadata.url)) {
-              const url = plainMetadata.url || '';
-              sourcesNodes.push(
-                <a
-                  key={nextKey()}
-                  href={url.startsWith('http') ? url : `https://${url}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
-                >
-                  {label} ↗
-                </a>
-              );
-            } else if (plainMetadata && plainMetadata.file_id) {
-              sourcesNodes.push(
-                <button
-                  key={nextKey()}
-                  type="button"
-                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
-                  onClick={() => handleDownloadSource(plainMetadata.file_id!, label)}
-                >
-                  {label}
-                </button>
-              );
-            } else {
-              // Fallback for old format
-              const { displayText, downloadName, sourceRef, matchedFileId } = extractSourceInfo(label);
-              const reference = matchedFileId ?? sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
-              if (reference) {
+            const { displayText, downloadName, sourceRef, matchedFileId, sourceType } = extractSourceInfo(label);
+            const reference = matchedFileId ?? sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
+
+            if (reference) {
+              const isWebCrawl = sourceType === 'web_crawl' || (typeof reference === 'string' && reference.startsWith('http'));
+
+              if (isWebCrawl) {
+                sourcesNodes.push(
+                  <a
+                    key={nextKey()}
+                    href={reference.startsWith('http') ? reference : `https://${reference}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={commonButtonClass}
+                  >
+                    <span className="truncate text-left flex-1">{displayText}</span>
+                    <ExternalLink className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
+                  </a>
+                );
+              } else {
                 sourcesNodes.push(
                   <button
                     key={nextKey()}
                     type="button"
-                    className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer text-sm"
+                    className={commonButtonClass}
                     onClick={() => handleDownloadSource(reference, downloadName ?? displayText)}
                   >
-                    {displayText}
+                    <span className="truncate text-left flex-1">{displayText}</span>
+                    <Download className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
                   </button>
                 );
-              } else {
-                sourcesNodes.push(
-                  <span key={nextKey()} className="block whitespace-pre-wrap text-sm">
-                    {label}
-                  </span>
-                );
               }
+            } else {
+              sourcesNodes.push(
+                <span key={nextKey()} className="block whitespace-pre-wrap text-sm text-muted-foreground px-1">
+                  {label}
+                </span>
+              );
             }
           }
           continue;
@@ -946,11 +938,11 @@ export default function UserChat() {
 
       if (sourcesNodes.length > 0) {
         nodes.push(
-          <div key={`${messageId}-sources-container`} className="mt-4 pt-3 border-t border-border/40 bg-muted/50 rounded-lg p-3 space-y-2 dark:bg-gray-800/50">
-            <span className="block text-xs font-bold uppercase text-muted-foreground/80 mb-1">
+          <div key={`${messageId}-sources-container`} className="mt-4 pt-3 border-t border-border/40 bg-muted/30 rounded-lg p-3 space-y-2">
+            <span className="block text-xs font-bold uppercase text-muted-foreground/80 mb-2">
               Sources:
             </span>
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-2 w-full">
               {sourcesNodes}
             </div>
           </div>

@@ -308,7 +308,7 @@ export function AppSidebar() {
                         </div>
                       ) : (
                         <>
-                          <SidebarMenuButton asChild isActive={isActiveSession}>
+                          <SidebarMenuButton asChild isActive={isActiveSession} title={session.title}>
                             <NavLink to={sessionUrl} className="flex items-center justify-between pr-16">
                               <span className="truncate">{session.title}</span>
                             </NavLink>

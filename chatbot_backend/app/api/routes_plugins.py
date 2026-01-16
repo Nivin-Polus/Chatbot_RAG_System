@@ -783,3 +783,147 @@ async def retrieve_session(transfer_token: str):
         collection_id=transfer_data["collection_id"],
     )
 
+
+# --- Multiple Sessions Transfer ---
+
+class TransferSessionData(BaseModel):
+    session_id: str
+    title: Optional[str] = "New Chat"
+    timestamp: Optional[int] = None
+    messages: List[SessionMessage]
+
+
+class TransferSessionsRequest(BaseModel):
+    website_url: str
+    current_session_id: Optional[str] = None
+    sessions: List[TransferSessionData]
+
+
+class RetrieveSessionsResponse(BaseModel):
+    current_session_id: Optional[str]
+    sessions: List[dict]
+    collection_id: str
+
+
+@router.post("/transfer-sessions", response_model=TransferSessionResponse)
+async def transfer_sessions(
+    payload: TransferSessionsRequest,
+    db: Session = Depends(get_db),
+):
+    """Store ALL plugin chat sessions temporarily for transfer to the frontend.
+    
+    This endpoint allows the plugin to send all of its chat history
+    to the backend for transfer when user opens the full frontend.
+    """
+    _cleanup_expired_transfers()
+    
+    normalized = _normalize_url(payload.website_url)
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid URL")
+
+    # Find plugin to verify it exists and get collection_id
+    plugin = (
+        db.query(PluginIntegration)
+        .join(Collection, PluginIntegration.collection_id == Collection.collection_id)
+        .filter(PluginIntegration.normalized_url == normalized)
+        .first()
+    )
+    
+    # If exact match fails, try prefix matching
+    if not plugin:
+        parsed_request = urlparse(f"https://{normalized}" if "://" not in normalized else normalized)
+        request_domain = parsed_request.netloc.lower()
+        request_path = parsed_request.path.rstrip('/')
+        
+        plugins = (
+            db.query(PluginIntegration)
+            .join(Collection, PluginIntegration.collection_id == Collection.collection_id)
+            .all()
+        )
+        
+        for p in plugins:
+            parsed_plugin = urlparse(f"https://{p.normalized_url}" if "://" not in p.normalized_url else p.normalized_url)
+            plugin_domain = parsed_plugin.netloc.lower()
+            plugin_path = parsed_plugin.path.rstrip('/')
+            
+            if request_domain == plugin_domain:
+                if not plugin_path or request_path.startswith(plugin_path):
+                    plugin = p
+                    break
+    
+    if not plugin:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin not found for the provided URL")
+
+    if not plugin.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Plugin integration is inactive")
+
+    # Generate transfer token
+    transfer_token = secrets.token_urlsafe(32)
+    
+    # Store all sessions data
+    sessions_data = []
+    for session in payload.sessions:
+        sessions_data.append({
+            "session_id": session.session_id,
+            "title": session.title or "New Chat",
+            "timestamp": session.timestamp or int(time.time() * 1000),
+            "messages": [msg.model_dump() for msg in session.messages],
+        })
+    
+    with _session_transfers_lock:
+        _session_transfers[transfer_token] = {
+            "current_session_id": payload.current_session_id,
+            "sessions": sessions_data,
+            "collection_id": plugin.collection_id,
+            "created_at": time.time(),
+            "is_multi_session": True,  # Flag to indicate this is multi-session transfer
+        }
+    
+    logger.info("Multi-session transfer created for plugin: %s, %d sessions", plugin.id, len(sessions_data))
+    
+    return TransferSessionResponse(
+        transfer_token=transfer_token,
+        expires_in=_TRANSFER_EXPIRY_SECONDS,
+    )
+
+
+@router.get("/transfer-sessions/{transfer_token}", response_model=RetrieveSessionsResponse)
+async def retrieve_sessions(transfer_token: str):
+    """Retrieve all transferred plugin chat sessions.
+    
+    This endpoint retrieves all session data stored by the plugin and
+    deletes it from the temporary storage (one-time retrieval).
+    """
+    _cleanup_expired_transfers()
+    
+    with _session_transfers_lock:
+        transfer_data = _session_transfers.pop(transfer_token, None)
+    
+    if not transfer_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Transfer not found or expired"
+        )
+    
+    # Handle both single and multi-session transfers
+    if transfer_data.get("is_multi_session"):
+        logger.info("Multi-session transfer retrieved: %d sessions", len(transfer_data.get("sessions", [])))
+        return RetrieveSessionsResponse(
+            current_session_id=transfer_data.get("current_session_id"),
+            sessions=transfer_data.get("sessions", []),
+            collection_id=transfer_data["collection_id"],
+        )
+    else:
+        # Legacy single-session format - convert to multi-session format
+        logger.info("Single session transfer retrieved: %s", transfer_data.get("session_id"))
+        return RetrieveSessionsResponse(
+            current_session_id=transfer_data.get("session_id"),
+            sessions=[{
+                "session_id": transfer_data["session_id"],
+                "title": "New Chat",
+                "timestamp": int(time.time() * 1000),
+                "messages": transfer_data.get("messages", []),
+            }],
+            collection_id=transfer_data["collection_id"],
+        )
+

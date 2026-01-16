@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { MessageSquare, Send, Loader2, User } from 'lucide-react';
+import { MessageSquare, Send, Loader2, User, ExternalLink, FileText, Download } from 'lucide-react';
 import { ChatMessage, ChatSource, Collection } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost } from '@/utils/api';
@@ -650,7 +650,6 @@ export default function UserAdminChat() {
           if (!sourceIdLookup.has(normalized) && source.file_id) {
             sourceIdLookup.set(normalized, source.file_id);
           }
-          // Store full metadata for the source
           if (!sourceMetadataLookup.has(normalized)) {
             sourceMetadataLookup.set(normalized, {
               url: source.url,
@@ -675,7 +674,6 @@ export default function UserAdminChat() {
           displayText = linkMatch[1].trim() || displayText;
           let linkTarget = linkMatch[2].trim();
 
-          // Parse source_type from format: reference|source_type
           if (linkTarget.includes('|')) {
             const parts = linkTarget.split('|');
             linkTarget = parts[0];
@@ -697,7 +695,7 @@ export default function UserAdminChat() {
         }
 
         if (!downloadName) {
-          const withoutPrefix = raw.replace(/^source\s*\d+[:-]?\s*/i, '').trim();
+          const withoutPrefix = raw.replace(/^source\s*\d+[:\-]?\s*/i, '').trim();
           if (withoutPrefix && withoutPrefix !== raw.trim() && looksLikeFileName(withoutPrefix)) {
             downloadName = withoutPrefix;
           }
@@ -722,7 +720,6 @@ export default function UserAdminChat() {
         const normalizedDisplay = displayText.trim().toLowerCase();
         const matchedFileId = normalizedDisplay ? sourceIdLookup.get(normalizedDisplay) : undefined;
 
-        // Detect web_crawl from URL pattern if not already set
         if (sourceRef && sourceRef.startsWith('http') && sourceType === 'file') {
           sourceType = 'web_crawl';
         }
@@ -755,7 +752,6 @@ export default function UserAdminChat() {
 
       const createInlineElements = (line: string, block: boolean = true): ReactNode[] => {
         const elements: ReactNode[] = [];
-        // Match links OR bold text
         const tokenRegex = /(\[.*?\]\(.*?\))|(\*\*.*?\*\*)/g;
         let lastIndex = 0;
         let match: RegExpExecArray | null;
@@ -768,6 +764,8 @@ export default function UserAdminChat() {
           );
         };
 
+        const commonClasses = "inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-[rgba(17,24,39,0.15)] rounded-md bg-white text-[#1f2937] shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-[linear-gradient(135deg,rgba(69,98,187,0.1),rgba(2,241,124,0.1))] hover:border-[rgba(69,98,187,0.3)] hover:shadow-[0_3px_8px_rgba(69,98,187,0.15)] hover:-translate-y-[1px] transition-all no-underline mx-1 dark:bg-gray-800 dark:text-gray-100 dark:border-gray-700 dark:hover:bg-gray-700";
+
         while ((match = tokenRegex.exec(line)) !== null) {
           if (match.index > lastIndex) {
             pushText(line.slice(lastIndex, match.index));
@@ -776,7 +774,6 @@ export default function UserAdminChat() {
           const fullMatch = match[0];
 
           if (fullMatch.startsWith('**')) {
-            // Handle Bold
             const content = fullMatch.slice(2, -2);
             elements.push(
               <strong key={nextKey()} className="font-bold">
@@ -784,13 +781,11 @@ export default function UserAdminChat() {
               </strong>
             );
           } else {
-            // Handle Link
             const linkMatch = fullMatch.match(/\[([^\]]+)\]\(([^)]+)\)/);
             if (linkMatch) {
               const [, label, rawLinkTarget] = linkMatch;
               const { displayText, downloadName, matchedFileId, sourceType } = extractSourceInfo(`[${label}](${rawLinkTarget})`);
 
-              // Parse source_type from linkTarget if present
               let linkTarget = rawLinkTarget;
               let detectedSourceType = sourceType;
               if (rawLinkTarget.includes('|')) {
@@ -805,16 +800,16 @@ export default function UserAdminChat() {
               const fileName = downloadName || displayText || label;
 
               if (detectedSourceType === 'web_crawl') {
-                // Web crawl source - open URL in new tab (no access check needed for web links)
                 elements.push(
                   <a
                     key={nextKey()}
                     href={linkTarget.startsWith('http') ? linkTarget : `https://${linkTarget}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer`}
+                    className={commonClasses}
                   >
-                    {displayText.trim() || 'View source'} ↗
+                    <ExternalLink className="w-3 h-3 text-[rgba(107,114,128,0.7)]" />
+                    {displayText.trim() || 'View source'}
                   </a>
                 );
               } else if (canDownloadSource(fileId, fileName)) {
@@ -822,9 +817,10 @@ export default function UserAdminChat() {
                   <button
                     key={nextKey()}
                     type="button"
-                    className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer`}
+                    className={commonClasses}
                     onClick={() => handleDownloadSource(fileId, fileName)}
                   >
+                    <FileText className="w-3 h-3 text-[rgba(107,114,128,0.7)]" />
                     {displayText.trim() || 'Download source'}
                   </button>
                 );
@@ -848,7 +844,7 @@ export default function UserAdminChat() {
       const isTableLine = (line: string): boolean => {
         const trimmed = line.trim();
         if (!trimmed) return false;
-        if (/^sources?:\s*$/i.test(trimmed)) return false;
+        if (/^\**\s*sources?\s*:?\s*\**$/i.test(trimmed)) return false;
         if (/^-\s+/.test(trimmed)) return false;
         const pipeCount = (trimmed.match(/\|/g) || []).length;
         if (pipeCount < 2) return false;
@@ -932,42 +928,24 @@ export default function UserAdminChat() {
         );
       };
 
+      const sourcesNodes: ReactNode[] = [];
+
       for (let i = 0; i < lines.length; i += 1) {
         const rawLine = lines[i];
         const trimmed = rawLine.trim();
         const isSourcesHeading = /^\**\s*sources?\s*:?\s*\**$/i.test(trimmed);
 
         if (isSourcesHeading) {
-          nodes.push(
-            <span
-              key={nextKey()}
-              className="block text-xs font-semibold uppercase text-muted-foreground"
-            >
-              Sources:
-            </span>
-          );
           inSourcesSection = true;
           continue;
         }
 
-        if (inSourcesSection) {
-          if (trimmed.length === 0) {
-            nodes.push(
-              <span key={nextKey()} className="block whitespace-pre-wrap">
-                {' '}
-              </span>
-            );
-            continue;
-          }
-
+        if (inSourcesSection && /^-\s*(.+)$/.test(trimmed)) {
           const bulletPattern = /^[-•\u2022]\s*/;
           const normalizedLabel = trimmed.replace(bulletPattern, '').trim();
           const label = normalizedLabel.length > 0 ? normalizedLabel : trimmed;
-
-          // Parse markdown link format: [filename](file_id)
           const linkMatch = label.match(/\[([^\]]+)\]\(([^)]+)\)/);
 
-          // Extract source name for metadata lookup
           let sourceName = label;
           if (linkMatch) {
             sourceName = linkMatch[1];
@@ -975,38 +953,38 @@ export default function UserAdminChat() {
           const normalizedName = sourceName.trim().toLowerCase();
           const metadata = sourceMetadataLookup.get(normalizedName);
 
-          // Check if we have metadata from API response
+          const commonButtonClass = "flex items-center justify-between gap-2 px-3 py-2 text-sm font-medium border border-[rgba(17,24,39,0.15)] rounded-md bg-white text-[#1f2937] shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-[linear-gradient(135deg,rgba(69,98,187,0.1),rgba(2,241,124,0.1))] hover:border-[rgba(69,98,187,0.3)] hover:shadow-[0_3px_8px_rgba(69,98,187,0.15)] hover:-translate-y-[1px] transition-all cursor-pointer no-underline w-full dark:bg-gray-800 dark:text-gray-100 dark:border-gray-700 dark:hover:bg-gray-700";
+
           if (metadata && (metadata.source_type === 'web_crawl' || metadata.url)) {
-            // Web crawl source - open URL in new tab (no access check needed for web links)
             const url = metadata.url || '';
-            nodes.push(
+            sourcesNodes.push(
               <a
                 key={nextKey()}
                 href={url.startsWith('http') ? url : `https://${url}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                className={commonButtonClass}
               >
-                {sourceName} ↗
+                <span className="truncate text-left flex-1">{sourceName}</span>
+                <ExternalLink className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
               </a>
             );
           } else if (metadata && metadata.file_id && canDownloadSource(metadata.file_id, sourceName)) {
-            // File source with known file_id - trigger download
-            nodes.push(
+            sourcesNodes.push(
               <button
                 key={nextKey()}
                 type="button"
-                className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                className={commonButtonClass}
                 onClick={() => handleDownloadSource(metadata.file_id!, sourceName)}
               >
-                {sourceName}
+                <span className="truncate text-left flex-1">{sourceName}</span>
+                <Download className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
               </button>
             );
           } else if (linkMatch) {
             const [, fileName, rawLinkTarget] = linkMatch;
             const matchedFileId = normalizedName ? sourceIdLookup.get(normalizedName) : undefined;
 
-            // Parse source_type from linkTarget
             let linkTarget = rawLinkTarget;
             let sourceType: 'file' | 'web_crawl' = 'file';
             if (rawLinkTarget.includes('|')) {
@@ -1016,7 +994,6 @@ export default function UserAdminChat() {
                 sourceType = 'web_crawl';
               }
             }
-            // Also detect from URL pattern
             if (linkTarget.startsWith('http')) {
               sourceType = 'web_crawl';
             }
@@ -1024,88 +1001,93 @@ export default function UserAdminChat() {
             const resolvedFileId = matchedFileId ?? linkTarget;
 
             if (sourceType === 'web_crawl') {
-              // Web crawl source - open URL in new tab
-              nodes.push(
+              sourcesNodes.push(
                 <a
                   key={nextKey()}
                   href={linkTarget.startsWith('http') ? linkTarget : `https://${linkTarget}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                  className={commonButtonClass}
                 >
-                  {fileName} ↗
+                  <span className="truncate text-left flex-1">{fileName}</span>
+                  <ExternalLink className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
                 </a>
               );
             } else if (canDownloadSource(resolvedFileId, fileName)) {
-              nodes.push(
+              sourcesNodes.push(
                 <button
                   key={nextKey()}
                   type="button"
-                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                  className={commonButtonClass}
                   onClick={() => handleDownloadSource(resolvedFileId, fileName)}
                 >
-                  {fileName}
+                  <span className="truncate text-left flex-1">{fileName}</span>
+                  <Download className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
                 </button>
               );
             } else {
-              nodes.push(
-                <span key={nextKey()} className="block whitespace-pre-wrap">
+              sourcesNodes.push(
+                <span key={nextKey()} className="block whitespace-pre-wrap text-sm text-muted-foreground px-1">
                   {fileName}
                 </span>
               );
             }
           } else {
-            // Plain text source - try to find in metadata lookup
-            const plainMetadata = sourceMetadataLookup.get(label.trim().toLowerCase());
-            if (plainMetadata && (plainMetadata.source_type === 'web_crawl' || plainMetadata.url)) {
-              const url = plainMetadata.url || '';
-              nodes.push(
-                <a
-                  key={nextKey()}
-                  href={url.startsWith('http') ? url : `https://${url}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
-                >
-                  {label} ↗
-                </a>
-              );
-            } else if (plainMetadata && plainMetadata.file_id && canDownloadSource(plainMetadata.file_id, label)) {
-              nodes.push(
-                <button
-                  key={nextKey()}
-                  type="button"
-                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
-                  onClick={() => handleDownloadSource(plainMetadata.file_id!, label)}
-                >
-                  {label}
-                </button>
-              );
-            } else {
-              // Fallback for old format
-              const { displayText, downloadName, sourceRef, matchedFileId } = extractSourceInfo(label);
-              const reference = matchedFileId ?? sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
-              if (reference && canDownloadSource(reference, downloadName)) {
-                nodes.push(
+            const { displayText, downloadName, sourceRef, matchedFileId, sourceType } = extractSourceInfo(label);
+            const reference = matchedFileId ?? sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
+
+            if (reference) {
+              const isWebCrawl = sourceType === 'web_crawl' || (typeof reference === 'string' && reference.startsWith('http'));
+
+              if (isWebCrawl) {
+                sourcesNodes.push(
+                  <a
+                    key={nextKey()}
+                    href={reference.startsWith('http') ? reference : `https://${reference}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={commonButtonClass}
+                  >
+                    <span className="truncate text-left flex-1">{label}</span>
+                    <ExternalLink className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
+                  </a>
+                );
+              } else if (canDownloadSource(reference, downloadName)) {
+                sourcesNodes.push(
                   <button
                     key={nextKey()}
                     type="button"
-                    className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                    className={commonButtonClass}
                     onClick={() => handleDownloadSource(reference, downloadName ?? displayText)}
                   >
-                    {displayText}
+                    <span className="truncate text-left flex-1">{label}</span>
+                    <Download className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
                   </button>
                 );
               } else {
-                nodes.push(
-                  <span key={nextKey()} className="block whitespace-pre-wrap">
+                sourcesNodes.push(
+                  <span key={nextKey()} className="block whitespace-pre-wrap text-sm text-muted-foreground px-1">
                     {label}
                   </span>
                 );
               }
+            } else {
+              sourcesNodes.push(
+                <span key={nextKey()} className="block whitespace-pre-wrap text-sm text-muted-foreground px-1">
+                  {label}
+                </span>
+              );
             }
           }
           continue;
+        }
+
+        if (inSourcesSection && trimmed.length === 0) {
+          continue;
+        }
+
+        if (inSourcesSection && trimmed.length > 0 && !trimmed.startsWith('-')) {
+          inSourcesSection = false;
         }
 
         if (!inSourcesSection && isTableLine(rawLine)) {
@@ -1128,9 +1110,22 @@ export default function UserAdminChat() {
         nodes.push(...createInlineElements(rawLine));
       }
 
+      if (sourcesNodes.length > 0) {
+        nodes.push(
+          <div key={`${messageId}-sources-container`} className="mt-4 pt-3 border-t border-border/40 bg-muted/30 rounded-lg p-3 space-y-2">
+            <span className="block text-xs font-bold uppercase text-muted-foreground/80 mb-2">
+              Sources:
+            </span>
+            <div className="flex flex-col gap-2 w-full">
+              {sourcesNodes}
+            </div>
+          </div>
+        );
+      }
+
       return nodes;
     },
-    [handleDownloadSource, accessibleIdsSet, accessibleNamesSet]
+    [accessibleIdsSet, accessibleNamesSet, handleDownloadSource]
   );
 
   const handleMessageScroll = useCallback(() => {
