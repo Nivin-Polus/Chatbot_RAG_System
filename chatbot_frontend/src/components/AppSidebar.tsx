@@ -238,7 +238,6 @@ export function AppSidebar() {
             </div>
             {open && (
               <div className="flex items-center gap-1">
-                <ThemeToggle />
                 <SidebarTrigger />
               </div>
             )}
