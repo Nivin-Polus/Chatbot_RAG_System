@@ -96,7 +96,8 @@ export function saveSession(
     const firstUserMsg = messages.find((m) => m.role === 'user');
     let title = 'New Chat';
     if (firstUserMsg) {
-      title = firstUserMsg.content.slice(0, 100) + (firstUserMsg.content.length > 100 ? '...' : '');
+      // Store clean title without ellipsis - CSS truncate handles display
+      title = firstUserMsg.content.replace(/\s+/g, ' ').trim().slice(0, 60);
     }
 
     const sessionInfo: ChatSession = {
@@ -454,6 +455,12 @@ export async function importTransferredSessions(
       // Handle legacy single-session response
       const legacyData = await response.json();
       if (legacyData.session_id && Array.isArray(legacyData.messages)) {
+        // Check if this session already exists and delete it first
+        const messageKey = getMessageKey(legacyData.session_id);
+        if (localStorage.getItem(messageKey)) {
+          deleteSession(legacyData.session_id, userId, role);
+        }
+
         const frontendMessages: ChatMessage[] = legacyData.messages.map((msg: TransferredMessage, index: number) => ({
           id: msg.user ? `user_${Date.now()}_${index}` : `assistant_${Date.now()}_${index}`,
           role: msg.user ? 'user' as const : 'assistant' as const,
@@ -486,6 +493,13 @@ export async function importTransferredSessions(
     for (const session of data.sessions) {
       if (!session.session_id || !Array.isArray(session.messages) || session.messages.length === 0) {
         continue;
+      }
+
+      // Check if this session already exists and delete it first to avoid duplicates
+      const messageKey = getMessageKey(session.session_id);
+      if (localStorage.getItem(messageKey)) {
+        console.log(`Removing existing session ${session.session_id} before importing fresh data`);
+        deleteSession(session.session_id, userId, role);
       }
 
       // Convert transferred messages to frontend format

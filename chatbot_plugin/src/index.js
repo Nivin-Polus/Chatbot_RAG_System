@@ -556,7 +556,7 @@ import "./styles.css";
     }
   }
 
-  function handleNewChat(skipSave = false) {
+  async function handleNewChat(skipSave = false) {
     if (!ui.canTriggerNewChat()) return;
     ui.startNewChatCooldown();
 
@@ -598,14 +598,58 @@ import "./styles.css";
     }
     showSendButton();
 
-    // Save current session before starting a new one
-    // Only save if there are user messages to avoid empty "New Chat" entries
-    if (!skipSave) {
-      const hasUserMessages = messages.some(m => m.user);
-      if (hasUserMessages && chatService.sessionId) {
-        saveChatHistory();
+    // Transfer current session to backend before clearing
+    // Only transfer if there are user messages (skip if chat is empty)
+    const hasUserMessages = messages.some(m => m.user);
+    if (hasUserMessages && chatService.sessionId && CONFIG?.websiteUrl) {
+      try {
+        const allSessions = ui.getAllSessions?.() || [];
+        const currentSessionId = chatService.sessionId;
+
+        if (allSessions.length > 0) {
+          const apiBase = (CONFIG.apiBase || '').replace(/\/+$/, '');
+          const transferResponse = await fetch(`${apiBase}/plugins/transfer-sessions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              website_url: CONFIG.websiteUrl,
+              current_session_id: currentSessionId,
+              sessions: allSessions.map(session => ({
+                session_id: session.id,
+                title: session.title || 'New Chat',
+                timestamp: session.timestamp,
+                messages: (session.messages || []).filter(m => !m.isTypingIndicator && !m.isTyping).map(m => ({
+                  user: Boolean(m.user),
+                  text: m.text || '',
+                  formatted: Boolean(m.formatted),
+                  timestamp: m.timestamp || new Date().toISOString(),
+                  sources: m.sources || [],
+                  isFollowup: Boolean(m.isFollowup),
+                })),
+              })),
+            }),
+          });
+
+          if (transferResponse.ok) {
+            console.log('Session transferred successfully before clearing');
+          } else {
+            console.warn('Could not transfer session, proceeding with clear');
+          }
+        }
+      } catch (transferErr) {
+        console.warn('Session transfer failed:', transferErr);
       }
     }
+
+    // Clear all session data from localStorage
+    // Remove all session messages
+    sessions.forEach(session => {
+      localStorage.removeItem(CHAT_MESSAGES_PREFIX + session.id);
+    });
+    // Clear sessions index
+    localStorage.removeItem(CHAT_SESSIONS_INDEX_KEY);
+    // Reset sessions array
+    sessions = [];
 
     // Clear context and messages
     chatService.clearContext();
@@ -885,9 +929,15 @@ import "./styles.css";
           sources: normalizeSourcesForStorage(msg.sources || [])
         }));
 
-      localStorage.setItem(CHAT_MESSAGES_PREFIX + chatService.sessionId, JSON.stringify(messagesToSave));
+      // Clear all old sessions from localStorage to maintain only one session
+      sessions.forEach(oldSession => {
+        if (oldSession.id !== chatService.sessionId) {
+          localStorage.removeItem(CHAT_MESSAGES_PREFIX + oldSession.id);
+        }
+      });
 
-      const existingSessionIndex = sessions.findIndex(s => s.id === chatService.sessionId);
+      // Save current session messages
+      localStorage.setItem(CHAT_MESSAGES_PREFIX + chatService.sessionId, JSON.stringify(messagesToSave));
 
       const firstUserMsg = messagesToSave.find(m => m.user);
       let title = "New Chat";
@@ -895,16 +945,12 @@ import "./styles.css";
         title = firstUserMsg.text.slice(0, 30) + (firstUserMsg.text.length > 30 ? "..." : "");
       }
 
-      if (existingSessionIndex >= 0) {
-        sessions[existingSessionIndex].timestamp = Date.now();
-        sessions[existingSessionIndex].title = title;
-      } else {
-        sessions.push({
-          id: chatService.sessionId,
-          timestamp: Date.now(),
-          title: title
-        });
-      }
+      // Replace sessions array with only the current session
+      sessions = [{
+        id: chatService.sessionId,
+        timestamp: Date.now(),
+        title: title
+      }];
 
       localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
       chatService.restoreHistory(messagesToSave);

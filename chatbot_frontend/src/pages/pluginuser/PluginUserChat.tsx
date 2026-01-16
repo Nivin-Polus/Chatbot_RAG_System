@@ -15,7 +15,7 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 const ChatContainer = ({ children }: { children: ReactNode }) => {
     const { open } = useSidebar();
     return (
-        <div className={`flex flex-col space-y-4 pt-6 h-[calc(100vh-6rem)] transition-all duration-300 ${!open ? 'max-w-[90%] mx-auto w-full' : 'w-full'}`}>
+        <div className={`flex flex-col space-y-4 h-[calc(100vh-6rem)] transition-all duration-300 ${!open ? 'max-w-[90%] mx-auto w-full' : 'w-full'}`}>
             {children}
         </div>
     );
