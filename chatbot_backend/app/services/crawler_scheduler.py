@@ -186,6 +186,14 @@ class CrawlerScheduler:
     def _run_scheduled_job(self, db: Session, job: CrawlerJob):
         """Run a single scheduled job."""
         try:
+            # Check if a crawl is already running (system-wide limit of 1)
+            if not CrawlerService.is_crawl_available():
+                logger.info(f"Skipping scheduled job {job.job_id} - another crawl is already running")
+                # Reschedule to try again in 5 minutes
+                job.next_run_at = datetime.utcnow() + timedelta(minutes=5)
+                db.commit()
+                return
+            
             # Update status
             job.status = "running"
             job.started_at = datetime.utcnow()

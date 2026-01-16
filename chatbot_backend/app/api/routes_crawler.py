@@ -181,6 +181,14 @@ async def start_crawl(
     - **exclude_patterns**: List of URL patterns to exclude
     - **include_keywords**: Only include URLs containing these keywords
     """
+    # Check if a crawl is already running (system-wide limit of 1)
+    if not CrawlerService.is_crawl_available():
+        crawl_status = CrawlerService.get_crawl_status()
+        raise HTTPException(
+            status_code=429,
+            detail=f"A crawl is already running. Only one crawl can run at a time. Active crawls: {crawl_status['active_crawl_count']}"
+        )
+    
     # Verify user has access to collection
     # TODO: Add collection access check based on user role
     
@@ -515,6 +523,14 @@ async def recrawl(
     Creates a new crawl job with the same settings as the original.
     Useful for refreshing content from a previously crawled site.
     """
+    # Check if a crawl is already running (system-wide limit of 1)
+    if not CrawlerService.is_crawl_available():
+        crawl_status = CrawlerService.get_crawl_status()
+        raise HTTPException(
+            status_code=429,
+            detail=f"A crawl is already running. Only one crawl can run at a time. Active crawls: {crawl_status['active_crawl_count']}"
+        )
+    
     original_job = db.query(CrawlerJob).filter(CrawlerJob.job_id == job_id).first()
     
     if not original_job:
@@ -579,6 +595,14 @@ async def schedule_crawl(
     - **interval_hours**: Hours between runs (e.g., 48 for every 2 days)
     - **start_immediately**: Whether to run the first crawl now
     """
+    # Check if a crawl is already running when start_immediately is requested (system-wide limit of 1)
+    if request.start_immediately and not CrawlerService.is_crawl_available():
+        crawl_status = CrawlerService.get_crawl_status()
+        raise HTTPException(
+            status_code=429,
+            detail=f"A crawl is already running. Only one crawl can run at a time. Active crawls: {crawl_status['active_crawl_count']}"
+        )
+    
     job = db.query(CrawlerJob).filter(CrawlerJob.job_id == job_id).first()
     
     if not job:

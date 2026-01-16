@@ -105,6 +105,15 @@ interface Collection {
     name: string;
 }
 
+// Crawler status interface
+interface CrawlerStatus {
+    is_crawl_running: boolean;
+    active_crawl_count: number;
+    active_job_ids: string[];
+    max_concurrent: number;
+    can_start_new: boolean;
+}
+
 export default function UserAdminCrawler() {
     const { user } = useAuth();
     const [collection, setCollection] = useState<Collection | null>(null);
@@ -112,6 +121,7 @@ export default function UserAdminCrawler() {
     const [isLoading, setIsLoading] = useState(true);
     const [isStarting, setIsStarting] = useState(false);
     const [showAdvanced, setShowAdvanced] = useState(false);
+    const [crawlerStatus, setCrawlerStatus] = useState<CrawlerStatus | null>(null);
 
     // Form state
     const [targetUrl, setTargetUrl] = useState('');
@@ -157,6 +167,24 @@ export default function UserAdminCrawler() {
         }
     }, [user?.access_token]);
 
+    // Fetch crawler status (system-wide)
+    const fetchCrawlerStatus = useCallback(async () => {
+        try {
+            const response = await apiGet(
+                `${import.meta.env.VITE_API_BASE_URL}/crawler/status`,
+                user?.access_token,
+                false,
+                false
+            );
+            if (response.ok) {
+                const data = await response.json();
+                setCrawlerStatus(data);
+            }
+        } catch (error) {
+            // Failed to fetch status
+        }
+    }, [user?.access_token]);
+
     // Fetch crawl jobs for the user's collection
     const fetchJobs = useCallback(async () => {
         if (!collection) {
@@ -189,7 +217,8 @@ export default function UserAdminCrawler() {
 
     useEffect(() => {
         fetchCollection();
-    }, [fetchCollection]);
+        fetchCrawlerStatus();
+    }, [fetchCollection, fetchCrawlerStatus]);
 
     useEffect(() => {
         if (collection) {
@@ -197,14 +226,17 @@ export default function UserAdminCrawler() {
         }
     }, [collection, fetchJobs]);
 
-    // Auto-refresh running jobs
+    // Auto-refresh running jobs and crawler status
     useEffect(() => {
         const hasRunningJobs = jobs.some(j => j.status === 'running' || j.status === 'pending');
-        if (hasRunningJobs) {
-            const interval = setInterval(fetchJobs, 3000);
+        if (hasRunningJobs || crawlerStatus?.is_crawl_running) {
+            const interval = setInterval(() => {
+                fetchJobs();
+                fetchCrawlerStatus();
+            }, 3000);
             return () => clearInterval(interval);
         }
-    }, [jobs, fetchJobs]);
+    }, [jobs, crawlerStatus?.is_crawl_running, fetchJobs, fetchCrawlerStatus]);
 
     // Start a new crawl
     const handleStartCrawl = async () => {
@@ -723,11 +755,29 @@ export default function UserAdminCrawler() {
                             </CollapsibleContent>
                         </Collapsible>
 
-                        <Button onClick={handleStartCrawl} disabled={isStarting || !targetUrl}>
+                        {/* System-wide crawl limit warning */}
+                        {crawlerStatus?.is_crawl_running && (
+                            <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-700 dark:text-amber-400">
+                                <AlertCircle className="h-4 w-4 shrink-0" />
+                                <p className="text-sm">
+                                    A crawl is already running. Only one crawl can run at a time system-wide. Please wait for the current crawl to complete.
+                                </p>
+                            </div>
+                        )}
+
+                        <Button 
+                            onClick={handleStartCrawl} 
+                            disabled={isStarting || !targetUrl || crawlerStatus?.is_crawl_running}
+                        >
                             {isStarting ? (
                                 <>
                                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                                     Starting...
+                                </>
+                            ) : crawlerStatus?.is_crawl_running ? (
+                                <>
+                                    <Clock className="h-4 w-4 mr-2" />
+                                    Crawl in Progress...
                                 </>
                             ) : (
                                 <>

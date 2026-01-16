@@ -67,6 +67,7 @@ import {
     Info,
     Trash2,
     Database,
+    AlertCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiGet, apiPost, apiDelete } from '@/utils/api';
@@ -103,6 +104,15 @@ interface CrawlerViewProps {
     collectionId?: string; // If provided, locks the view to this collection
 }
 
+// Crawler status interface
+interface CrawlerStatus {
+    is_crawl_running: boolean;
+    active_crawl_count: number;
+    active_job_ids: string[];
+    max_concurrent: number;
+    can_start_new: boolean;
+}
+
 export default function CrawlerView({ collectionId }: CrawlerViewProps) {
     const { user } = useAuth();
     const [collections, setCollections] = useState<Collection[]>([]);
@@ -110,6 +120,7 @@ export default function CrawlerView({ collectionId }: CrawlerViewProps) {
     const [isLoading, setIsLoading] = useState(true);
     const [isStarting, setIsStarting] = useState(false);
     const [showAdvanced, setShowAdvanced] = useState(false);
+    const [crawlerStatus, setCrawlerStatus] = useState<CrawlerStatus | null>(null);
 
     // Schedule dialog state
     const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
@@ -169,6 +180,24 @@ export default function CrawlerView({ collectionId }: CrawlerViewProps) {
         }
     }, [user?.access_token]);
 
+    // Fetch crawler status (system-wide)
+    const fetchCrawlerStatus = useCallback(async () => {
+        try {
+            const response = await apiGet(
+                `${import.meta.env.VITE_API_BASE_URL}/crawler/status`,
+                user?.access_token,
+                false,
+                false
+            );
+            if (response.ok) {
+                const data = await response.json();
+                setCrawlerStatus(data);
+            }
+        } catch (error) {
+            // Failed to fetch status
+        }
+    }, [user?.access_token]);
+
     // Fetch crawl jobs
     const fetchJobs = useCallback(async () => {
         try {
@@ -205,16 +234,20 @@ export default function CrawlerView({ collectionId }: CrawlerViewProps) {
     useEffect(() => {
         fetchCollections();
         fetchJobs();
-    }, [fetchCollections, fetchJobs]);
+        fetchCrawlerStatus();
+    }, [fetchCollections, fetchJobs, fetchCrawlerStatus]);
 
-    // Auto-refresh running jobs
+    // Auto-refresh running jobs and crawler status
     useEffect(() => {
         const hasRunningJobs = jobs.some(j => j.status === 'running' || j.status === 'pending');
-        if (hasRunningJobs) {
-            const interval = setInterval(fetchJobs, 3000);
+        if (hasRunningJobs || crawlerStatus?.is_crawl_running) {
+            const interval = setInterval(() => {
+                fetchJobs();
+                fetchCrawlerStatus();
+            }, 3000);
             return () => clearInterval(interval);
         }
-    }, [jobs, fetchJobs]);
+    }, [jobs, crawlerStatus?.is_crawl_running, fetchJobs, fetchCrawlerStatus]);
 
     // Start a new crawl
     const handleStartCrawl = async () => {
@@ -712,11 +745,29 @@ export default function CrawlerView({ collectionId }: CrawlerViewProps) {
                         </div>
                     )}
 
-                    <Button onClick={handleStartCrawl} disabled={isStarting || !targetUrl || !selectedCollection}>
+                    {/* System-wide crawl limit warning */}
+                    {crawlerStatus?.is_crawl_running && (
+                        <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-700 dark:text-amber-400">
+                            <AlertCircle className="h-4 w-4 shrink-0" />
+                            <p className="text-sm">
+                                A crawl is already running. Only one crawl can run at a time system-wide. Please wait for the current crawl to complete.
+                            </p>
+                        </div>
+                    )}
+
+                    <Button 
+                        onClick={handleStartCrawl} 
+                        disabled={isStarting || !targetUrl || !selectedCollection || crawlerStatus?.is_crawl_running}
+                    >
                         {isStarting ? (
                             <>
                                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                                 Starting...
+                            </>
+                        ) : crawlerStatus?.is_crawl_running ? (
+                            <>
+                                <Clock className="h-4 w-4 mr-2" />
+                                Crawl in Progress...
                             </>
                         ) : (
                             <>
