@@ -11,10 +11,13 @@ interface DashboardLayoutProps {
   children: ReactNode;
 }
 
-export function DashboardLayout({ children }: DashboardLayoutProps) {
+import { useSidebar } from '@/components/ui/sidebar';
+
+function DashboardLayoutContent({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const { open } = useSidebar();
 
   const getHomePath = () => {
     if (!user) return '/login';
@@ -38,37 +41,58 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     location.pathname !== '/useradmin/knowledge-base' &&
     !location.pathname.includes('/pluginuser/chat');
 
+  const isPluginUser = location.pathname.includes('/pluginuser/');
+
+  return (
+    <div className="min-h-screen flex w-full overflow-hidden">
+      <AppSidebar />
+      <main className="flex-1 flex flex-col min-w-0">
+        {!isPluginUser && (
+          <header className="h-14 border-b border-border bg-card flex items-center justify-between px-4 flex-none gap-2">
+            <div className="flex items-center gap-2">
+              <SidebarTrigger />
+              {showBackButton && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => navigate(homePath)}
+                  title="Back"
+                  className="h-7 w-7"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+            <div className="flex items-center space-x-4">
+              <ThemeToggle />
+            </div>
+          </header>
+        )}
+
+        {/* Plugin User Collapsed Header */}
+        {isPluginUser && !open && (
+          <header className="h-12 border-b border-border bg-card flex items-center justify-between px-4 flex-none gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="flex items-center gap-2">
+              <SidebarTrigger />
+            </div>
+            <div className="flex items-center space-x-4">
+              <ThemeToggle />
+            </div>
+          </header>
+        )}
+
+        <div className={`flex-1 animate-fade-in overflow-hidden ${isPluginUser ? 'p-0' : 'p-6'}`}>
+          {children}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+export function DashboardLayout({ children }: DashboardLayoutProps) {
   return (
     <SidebarProvider>
-      <div className="min-h-screen flex w-full overflow-hidden">
-        <AppSidebar />
-        <main className="flex-1 flex flex-col min-w-0">
-          {!location.pathname.includes('/pluginuser/') && (
-            <header className="h-14 border-b border-border bg-card flex items-center justify-between px-4 flex-none gap-2">
-              <div className="flex items-center gap-2">
-                <SidebarTrigger />
-                {showBackButton && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => navigate(homePath)}
-                    title="Back"
-                    className="h-7 w-7"
-                  >
-                    <ArrowLeft className="h-4 w-4" />
-                  </Button>
-                )}
-              </div>
-              <div className="flex items-center space-x-4">
-                <ThemeToggle />
-              </div>
-            </header>
-          )}
-          <div className={`flex-1 animate-fade-in overflow-hidden ${location.pathname.includes('/pluginuser/') ? 'p-0' : 'p-6'}`}>
-            {children}
-          </div>
-        </main>
-      </div>
+      <DashboardLayoutContent>{children}</DashboardLayoutContent>
     </SidebarProvider>
   );
 }

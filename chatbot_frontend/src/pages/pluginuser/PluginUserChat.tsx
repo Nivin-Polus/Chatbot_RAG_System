@@ -225,7 +225,7 @@ export default function PluginUserChat() {
     // This runs on page unload and periodically
     // Get visitor_id from URL params (passed from regular plugin for session isolation)
     const visitorId = searchParams.get('visitor_id');
-    
+
     useEffect(() => {
         if (!user?.user_id || !selectedCollection) return;
 
@@ -1037,7 +1037,7 @@ export default function PluginUserChat() {
                     );
                 } else {
                     // Empty line
-                    nodes.push(<div key={`${messageId}-line-${i}`} className="h-4" />);
+                    nodes.push(<div key={`${messageId}-line-${i}`} className="h-2" />);
                 }
             }
 
@@ -1114,7 +1114,7 @@ export default function PluginUserChat() {
                                                             : 'rounded-xl px-4 py-3 shadow-sm bg-muted border border-border/60 text-foreground max-w-[80%] dark:bg-gray-800 dark:text-gray-100'
                                                             }`}
                                                     >
-                                                        <div className="flex flex-col gap-1 text-sm leading-relaxed">
+                                                        <div className="flex flex-col text-sm leading-normal">
                                                             {renderMessageContent(message.content, message.id, message.sources)}
                                                         </div>
                                                         <div className="flex justify-end mt-1">
