@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, Tuple, Union
+from typing import List, Dict, Optional, Tuple, Union, Set
 import requests
 import json
 import re
@@ -8,6 +8,12 @@ try:
     import boto3
 except ImportError:
     boto3 = None
+
+try:
+    from rapidfuzz import fuzz
+    RAPIDFUZZ_AVAILABLE = True
+except ImportError:
+    RAPIDFUZZ_AVAILABLE = False
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.system_prompt import SystemPrompt
@@ -31,6 +37,232 @@ SUMMARY_TRIGGER_THRESHOLD = 20  # Start summarizing when history exceeds this co
 def _estimate_tokens(text: str) -> int:
     """Estimate token count (~4 chars per token for English)."""
     return len(text) // 4 if text else 0
+
+
+# ============================================
+# HYBRID SEARCH HELPER FUNCTIONS
+# ============================================
+
+# Hybrid scoring weights
+VECTOR_WEIGHT = 0.50
+KEYWORD_WEIGHT = 0.35
+FUZZY_WEIGHT = 0.15
+
+# Fuzzy search constraints
+FUZZY_SCORE_CAP = 0.55  # Hard cap on fuzzy contribution
+FUZZY_MAX_TEXT_LENGTH = 300  # Only apply fuzzy to short chunks
+
+# Field weights for keyword scoring
+KEYWORD_FIELD_WEIGHTS = {
+    "page_title": 1.0,      # chunk_title equivalent for web crawl
+    "section_header": 0.8,  # section_title equivalent for web crawl
+    "file_name": 0.6,
+    "first_sentence": 0.5,
+}
+
+
+def _tokenize(text: str) -> Set[str]:
+    """Lowercase tokenization with basic normalization.
+    
+    Removes punctuation and splits on whitespace.
+    Returns empty set for None/empty input.
+    """
+    if not text:
+        return set()
+    # Remove punctuation and normalize
+    normalized = re.sub(r'[^\w\s]', ' ', text.lower())
+    # Split and filter empty strings
+    return {token for token in normalized.split() if token and len(token) > 1}
+
+
+def _get_first_sentence(text: str) -> str:
+    """Extract first sentence from chunk text for keyword matching."""
+    if not text:
+        return ""
+    # Find first sentence ending
+    match = re.search(r'^[^.!?\n]+[.!?]?', text.strip())
+    return match.group(0) if match else text[:150]
+
+
+def _compute_keyword_score(query_tokens: Set[str], payload: Dict, chunk_text: str) -> float:
+    """Compute weighted Jaccard similarity across target fields.
+    
+    Target fields (with weights):
+    - page_title (1.0) - for web crawl chunks
+    - section_header (0.8) - for web crawl chunks
+    - file_name (0.6) - for all chunks
+    - first_sentence (0.5) - first sentence of chunk_text
+    
+    Returns normalized score in [0.0, 1.0].
+    """
+    if not query_tokens:
+        return 0.0
+    
+    total_weighted_score = 0.0
+    total_weight = 0.0
+    
+    # page_title (for web crawl)
+    page_title = payload.get("page_title", "")
+    if page_title:
+        field_tokens = _tokenize(page_title)
+        if field_tokens:
+            overlap = len(query_tokens & field_tokens)
+            union = len(query_tokens | field_tokens)
+            jaccard = overlap / union if union > 0 else 0.0
+            total_weighted_score += jaccard * KEYWORD_FIELD_WEIGHTS["page_title"]
+            total_weight += KEYWORD_FIELD_WEIGHTS["page_title"]
+    
+    # section_header (for web crawl)
+    section_header = payload.get("section_header", "")
+    if section_header:
+        field_tokens = _tokenize(section_header)
+        if field_tokens:
+            overlap = len(query_tokens & field_tokens)
+            union = len(query_tokens | field_tokens)
+            jaccard = overlap / union if union > 0 else 0.0
+            total_weighted_score += jaccard * KEYWORD_FIELD_WEIGHTS["section_header"]
+            total_weight += KEYWORD_FIELD_WEIGHTS["section_header"]
+    
+    # file_name (for all chunks)
+    file_name = payload.get("file_name", "")
+    if file_name:
+        # Clean file extensions for matching
+        clean_name = re.sub(r'\.(pdf|docx|pptx|xlsx|txt|csv|html?)$', '', file_name, flags=re.IGNORECASE)
+        field_tokens = _tokenize(clean_name)
+        if field_tokens:
+            overlap = len(query_tokens & field_tokens)
+            union = len(query_tokens | field_tokens)
+            jaccard = overlap / union if union > 0 else 0.0
+            total_weighted_score += jaccard * KEYWORD_FIELD_WEIGHTS["file_name"]
+            total_weight += KEYWORD_FIELD_WEIGHTS["file_name"]
+    
+    # first_sentence of chunk_text
+    first_sentence = _get_first_sentence(chunk_text)
+    if first_sentence:
+        field_tokens = _tokenize(first_sentence)
+        if field_tokens:
+            overlap = len(query_tokens & field_tokens)
+            union = len(query_tokens | field_tokens)
+            jaccard = overlap / union if union > 0 else 0.0
+            total_weighted_score += jaccard * KEYWORD_FIELD_WEIGHTS["first_sentence"]
+            total_weight += KEYWORD_FIELD_WEIGHTS["first_sentence"]
+    
+    # Normalize by total weight to get score in [0, 1]
+    if total_weight > 0:
+        return total_weighted_score / total_weight
+    return 0.0
+
+
+def _is_structured_content(text: str) -> bool:
+    """Detect structured content that should skip fuzzy matching.
+    
+    Detects:
+    - Tables (| or tab characters in patterns)
+    - Code blocks (triple backticks)
+    - Log lines (timestamp patterns)
+    """
+    if not text:
+        return False
+    
+    # Code blocks
+    if '```' in text:
+        return True
+    
+    # Tables (multiple | characters suggesting table structure)
+    if text.count('|') >= 3:
+        return True
+    
+    # Tab-separated data (likely table)
+    if text.count('\t') >= 2:
+        return True
+    
+    # Log line patterns (timestamp at start)
+    log_pattern = r'^\d{4}[-/]\d{2}[-/]\d{2}[\sT]\d{2}:\d{2}'
+    if re.search(log_pattern, text[:50]):
+        return True
+    
+    return False
+
+
+def _compute_fuzzy_score(query: str, payload: Dict, chunk_text: str) -> float:
+    """Compute fuzzy matching score with safety controls.
+    
+    Only applies fuzzy to:
+    - page_title
+    - section_header
+    - chunk_text IF len < 300 chars AND not structured content
+    
+    Returns score in [0.0, FUZZY_SCORE_CAP] (hard capped at 0.55).
+    """
+    if not RAPIDFUZZ_AVAILABLE:
+        return 0.0
+    
+    if not query:
+        return 0.0
+    
+    max_fuzzy = 0.0
+    
+    # Fuzzy on page_title
+    page_title = payload.get("page_title", "")
+    if page_title:
+        ratio = fuzz.partial_ratio(query.lower(), page_title.lower())
+        max_fuzzy = max(max_fuzzy, ratio / 100.0)
+    
+    # Fuzzy on section_header
+    section_header = payload.get("section_header", "")
+    if section_header:
+        ratio = fuzz.partial_ratio(query.lower(), section_header.lower())
+        max_fuzzy = max(max_fuzzy, ratio / 100.0)
+    
+    # Fuzzy on chunk_text (only if short and not structured)
+    if chunk_text and len(chunk_text) < FUZZY_MAX_TEXT_LENGTH:
+        if not _is_structured_content(chunk_text):
+            ratio = fuzz.partial_ratio(query.lower(), chunk_text.lower())
+            max_fuzzy = max(max_fuzzy, ratio / 100.0)
+    
+    # Apply hard cap
+    return min(max_fuzzy, FUZZY_SCORE_CAP)
+
+
+def _should_use_fuzzy(query: str, vector_results: List[Dict]) -> bool:
+    """Determine if fuzzy scoring should be activated.
+    
+    Fuzzy is enabled when ANY of these conditions are true:
+    - Query has 8 or fewer words
+    - No vector results returned
+    - Top vector score is below 0.55
+    """
+    # Short queries benefit from fuzzy
+    if len(query.split()) <= 8:
+        return True
+    
+    # No results - fuzzy might help
+    if not vector_results:
+        return True
+    
+    # Low confidence results - fuzzy might help
+    top_score = max((r.get("score", 0) for r in vector_results), default=0)
+    if top_score < 0.55:
+        return True
+    
+    return False
+
+
+def _compute_hybrid_score(
+    vector_score: float,
+    keyword_score: float,
+    fuzzy_score: float
+) -> float:
+    """Apply the hybrid fusion formula.
+    
+    Formula: 0.50 * vector + 0.35 * keyword + 0.15 * fuzzy
+    """
+    return (
+        VECTOR_WEIGHT * vector_score +
+        KEYWORD_WEIGHT * keyword_score +
+        FUZZY_WEIGHT * fuzzy_score
+    )
+
 
 # AI Classification instruction - appended to every prompt independently of user-configurable system prompts
 # This ensures users cannot disable the generic detection functionality
@@ -279,45 +511,85 @@ class RAG:
                     continue
                 seen_texts.add(text_hash)
                 
-                # Apply keyword boost for name/title matches
-                original_score = r.get("score", 0)
-                boosted_score = original_score
-                
-                if search_term:
-                    text_lower = text.lower()
-                    search_parts = search_term.split()
-                    excluded_words = ["staff", "directory", "contact", "the", "and", "for", "with", "from", "about"]
-                    meaningful_parts = [p for p in search_parts if len(p) > 2 and p not in excluded_words]
-                    
-                    # 1. Exact sequence match (Highest priority)
-                    if search_term in text_lower:
-                        boosted_score = max(boosted_score, 0.85)
-                        logger.info(f"[RAG BOOST] Exact match for '{search_term}', boosting to {boosted_score:.4f}")
-                    else:
-                        # 2. Match ratio (Multiple keyword matches)
-                        matches = [p for p in meaningful_parts if p in text_lower]
-                        if meaningful_parts:
-                            match_ratio = len(matches) / len(meaningful_parts)
-                            
-                            if match_ratio >= 1.0:
-                                boosted_score = max(boosted_score, 0.80)
-                                logger.info(f"[RAG BOOST] All keywords matched, boosting to {boosted_score:.4f}")
-                            elif match_ratio >= 0.75:
-                                boosted_score = max(boosted_score, 0.75)
-                                logger.info(f"[RAG BOOST] High match ratio ({match_ratio:.2f}), boosting to {boosted_score:.4f}")
-                            elif match_ratio >= 0.5:
-                                boosted_score = max(boosted_score, 0.65)
-                                logger.info(f"[RAG BOOST] Partial match ratio ({match_ratio:.2f}), boosting to {boosted_score:.4f}")
-                            elif matches:
-                                boosted_score = max(boosted_score, 0.60)
-                
-                r["score"] = boosted_score
-                r["original_score"] = original_score
+                # Store original vector score for hybrid fusion
+                vector_score = r.get("score", 0)
+                r["vector_score"] = vector_score
+                r["original_score"] = vector_score
                 all_results.append(r)
         
         logger.info(f"[RAG RETRIEVE] Total unique results: {len(all_results)}")
         
-        # Filter by minimum similarity score (after boosting, before sorting)
+        # ============================================
+        # [HYBRID SEARCH: COMPUTE KEYWORD + FUZZY SCORES]
+        # ============================================
+        
+        # Tokenize query once for keyword scoring
+        query_tokens = _tokenize(query)
+        
+        # Determine if fuzzy scoring should be activated
+        use_fuzzy = _should_use_fuzzy(query, all_results)
+        logger.info(f"[HYBRID SEARCH] Fuzzy scoring enabled: {use_fuzzy}")
+        
+        # Compute hybrid scores for each result
+        for r in all_results:
+            payload = r.get("payload", {})
+            text = payload.get("text", "")
+            vector_score = r.get("vector_score", r.get("score", 0))
+            
+            # Compute keyword score
+            keyword_score = _compute_keyword_score(query_tokens, payload, text)
+            
+            # Compute fuzzy score (only if activated)
+            fuzzy_score = 0.0
+            if use_fuzzy:
+                fuzzy_score = _compute_fuzzy_score(query, payload, text)
+            
+            # Apply hybrid fusion formula
+            final_score = _compute_hybrid_score(vector_score, keyword_score, fuzzy_score)
+            
+            # Apply legacy boosting for "who is X" queries (additive to hybrid)
+            # This preserves backward compatibility for name/title searches
+            if search_term:
+                text_lower = text.lower()
+                search_parts = search_term.split()
+                excluded_words = ["staff", "directory", "contact", "the", "and", "for", "with", "from", "about"]
+                meaningful_parts = [p for p in search_parts if len(p) > 2 and p not in excluded_words]
+                
+                # Exact sequence match gets highest priority
+                if search_term in text_lower:
+                    final_score = max(final_score, 0.85)
+                elif meaningful_parts:
+                    matches = [p for p in meaningful_parts if p in text_lower]
+                    match_ratio = len(matches) / len(meaningful_parts) if meaningful_parts else 0
+                    
+                    if match_ratio >= 1.0:
+                        final_score = max(final_score, 0.80)
+                    elif match_ratio >= 0.75:
+                        final_score = max(final_score, 0.75)
+                    elif match_ratio >= 0.5:
+                        final_score = max(final_score, 0.65)
+                    elif matches:
+                        final_score = max(final_score, 0.60)
+            
+            # Store scores for metadata
+            r["score"] = final_score
+            r["keyword_score"] = keyword_score
+            r["fuzzy_score"] = fuzzy_score
+            r["fusion_method"] = "hybrid" if (keyword_score > 0 or fuzzy_score > 0) else "vector_only"
+        
+        # Log hybrid scoring summary
+        if all_results:
+            top_result = max(all_results, key=lambda x: x.get("score", 0))
+            logger.info(f"[HYBRID SEARCH] Top result: final={top_result.get('score', 0):.4f}, "
+                       f"vector={top_result.get('vector_score', 0):.4f}, "
+                       f"keyword={top_result.get('keyword_score', 0):.4f}, "
+                       f"fuzzy={top_result.get('fuzzy_score', 0):.4f}")
+        
+        # ============================================
+        # [END HYBRID SEARCH]
+        # ============================================
+        
+        # Filter by minimum similarity score (after hybrid fusion, before sorting)
         pre_filter_count = len(all_results)
         all_results = [r for r in all_results if r.get("score", 0) >= MIN_SCORE]
         filtered_by_score = pre_filter_count - len(all_results)
@@ -358,7 +630,14 @@ class RAG:
                 "source_type": payload.get("source_type", "file"),
                 "url": payload.get("url", ""),
                 "canonical_url": payload.get("canonical_url", ""),
-                "score": score
+                "score": score,
+                # Hybrid search metadata for debugging
+                "metadata": {
+                    "vector_score": r.get("vector_score", score),
+                    "keyword_score": r.get("keyword_score", 0.0),
+                    "fuzzy_score": r.get("fuzzy_score", 0.0),
+                    "fusion_method": r.get("fusion_method", "vector_only")
+                }
             })
         
         return chunks_with_sources

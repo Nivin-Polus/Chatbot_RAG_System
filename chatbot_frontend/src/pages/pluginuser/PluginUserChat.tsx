@@ -12,9 +12,17 @@ import { useSearchParams } from 'react-router-dom';
 import { getAssetUrl } from '@/utils/assets';
 import { DashboardLayout } from '@/components/DashboardLayout';
 
+const ChatContainer = ({ children }: { children: ReactNode }) => {
+    const { open } = useSidebar();
+    return (
+        <div className={`flex flex-col space-y-4 pt-6 h-[calc(100vh-6rem)] transition-all duration-300 ${!open ? 'max-w-[90%] mx-auto w-full' : 'w-full'}`}>
+            {children}
+        </div>
+    );
+};
+
 export default function PluginUserChat() {
     const { user } = useAuth();
-    const { open } = useSidebar();
     // Plugin users have their collection_id set during auto-login
     const selectedCollection = user?.collection_id || '';
     const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -876,7 +884,7 @@ export default function PluginUserChat() {
 
     return (
         <DashboardLayout>
-            <div className={`flex flex-col space-y-4 pt-6 h-[calc(100vh-6rem)] transition-all duration-300 ${!open ? 'max-w-[90%] mx-auto w-full' : 'w-full'}`}>
+            <ChatContainer>
                 <Card className="flex flex-col flex-1 bg-card dark:bg-gray-900 overflow-hidden">
                     <CardHeader className="flex-shrink-0 py-3">
                         <div className="flex items-center justify-end">
@@ -1008,7 +1016,7 @@ export default function PluginUserChat() {
                         )}
                     </CardContent>
                 </Card>
-            </div>
+            </ChatContainer>
         </DashboardLayout>
     );
 }
