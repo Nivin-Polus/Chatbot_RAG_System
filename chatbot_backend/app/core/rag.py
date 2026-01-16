@@ -26,8 +26,11 @@ logging.basicConfig(level=logging.INFO)
 
 # RAG limits to prevent overloading LLM context
 MAX_QUERY_EXPANSIONS = 8   # Maximum queries (original + expansions)
-MAX_CONTEXT_TOKENS = 2500  # Token cap for Claude Sonnet
-MIN_SCORE = 0.35           # Minimum similarity threshold to filter low-confidence chunks
+# MAX_CONTEXT_TOKENS now configurable via settings.MAX_CONTEXT_TOKENS (default: 4000)
+def _get_max_context_tokens():
+    """Get max context tokens from settings."""
+    return getattr(settings, "MAX_CONTEXT_TOKENS", 4000)
+# MIN_SCORE is now configurable via settings.RAG_MIN_SCORE (default: 0.35)
 
 # Conversation summarization settings
 MAX_VERBATIM_MESSAGES = 20   # Keep last 10 Q&A pairs (20 messages) verbatim
@@ -43,10 +46,19 @@ def _estimate_tokens(text: str) -> int:
 # HYBRID SEARCH HELPER FUNCTIONS
 # ============================================
 
-# Hybrid scoring weights
-VECTOR_WEIGHT = 0.50
-KEYWORD_WEIGHT = 0.35
-FUZZY_WEIGHT = 0.15
+# Hybrid scoring weights - now configurable via settings
+# Defaults: 70% vector, 20% keyword, 10% fuzzy (must sum to 1.0)
+def _get_hybrid_weights():
+    """Get hybrid search weights from settings."""
+    vector_weight = getattr(settings, "HYBRID_VECTOR_WEIGHT", 0.70)
+    keyword_weight = getattr(settings, "HYBRID_KEYWORD_WEIGHT", 0.20)
+    fuzzy_weight = getattr(settings, "HYBRID_FUZZY_WEIGHT", 0.10)
+    return vector_weight, keyword_weight, fuzzy_weight
+
+# Legacy constants for backward compatibility (used by helper functions)
+VECTOR_WEIGHT = 0.70
+KEYWORD_WEIGHT = 0.20
+FUZZY_WEIGHT = 0.10
 
 # Fuzzy search constraints
 FUZZY_SCORE_CAP = 0.55  # Hard cap on fuzzy contribution
@@ -253,15 +265,40 @@ def _compute_hybrid_score(
     keyword_score: float,
     fuzzy_score: float
 ) -> float:
-    """Apply the hybrid fusion formula.
+    """Apply the hybrid fusion formula with dynamic weight normalization.
     
-    Formula: 0.50 * vector + 0.35 * keyword + 0.15 * fuzzy
+    Uses dynamic weight normalization to ensure scores are NEVER reduced by signals
+    that don't contribute. When keyword_score=0 or fuzzy_score=0, their weight is
+    redistributed to active signals proportionally.
+    
+    This prevents the common issue where a good vector score (e.g., 0.4455) gets
+    penalized down to a lower score (e.g., 0.3573) just because keyword matching
+    didn't find any matches.
+    
+    Weights are configurable via settings (default: 0.70, 0.20, 0.10)
     """
-    return (
-        VECTOR_WEIGHT * vector_score +
-        KEYWORD_WEIGHT * keyword_score +
-        FUZZY_WEIGHT * fuzzy_score
-    )
+    vector_weight, keyword_weight, fuzzy_weight = _get_hybrid_weights()
+    
+    # Calculate active weights (only for non-zero scores)
+    # Vector is always considered active since it's the primary signal
+    active_weights = vector_weight
+    active_score = vector_weight * vector_score
+    
+    if keyword_score > 0:
+        active_weights += keyword_weight
+        active_score += keyword_weight * keyword_score
+    
+    if fuzzy_score > 0:
+        active_weights += fuzzy_weight
+        active_score += fuzzy_weight * fuzzy_score
+    
+    # Normalize by active weights to maintain score scale
+    # This ensures the final score is never lower than the vector score alone
+    if active_weights > 0:
+        return active_score / active_weights
+    
+    # Fallback (shouldn't happen since vector_weight > 0)
+    return vector_score
 
 
 # AI Classification instruction - appended to every prompt independently of user-configurable system prompts
@@ -520,35 +557,20 @@ class RAG:
         logger.info(f"[RAG RETRIEVE] Total unique results: {len(all_results)}")
         
         # ============================================
-        # [HYBRID SEARCH: COMPUTE KEYWORD + FUZZY SCORES]
+        # [PURE VECTOR SEARCH - Hybrid scoring removed]
         # ============================================
         
-        # Tokenize query once for keyword scoring
-        query_tokens = _tokenize(query)
-        
-        # Determine if fuzzy scoring should be activated
-        use_fuzzy = _should_use_fuzzy(query, all_results)
-        logger.info(f"[HYBRID SEARCH] Fuzzy scoring enabled: {use_fuzzy}")
-        
-        # Compute hybrid scores for each result
+        # Use pure vector scores from Qdrant
         for r in all_results:
             payload = r.get("payload", {})
             text = payload.get("text", "")
             vector_score = r.get("vector_score", r.get("score", 0))
             
-            # Compute keyword score
-            keyword_score = _compute_keyword_score(query_tokens, payload, text)
+            # Start with pure vector score
+            final_score = vector_score
             
-            # Compute fuzzy score (only if activated)
-            fuzzy_score = 0.0
-            if use_fuzzy:
-                fuzzy_score = _compute_fuzzy_score(query, payload, text)
-            
-            # Apply hybrid fusion formula
-            final_score = _compute_hybrid_score(vector_score, keyword_score, fuzzy_score)
-            
-            # Apply legacy boosting for "who is X" queries (additive to hybrid)
-            # This preserves backward compatibility for name/title searches
+            # Apply legacy boosting for "who is X" queries only
+            # This helps specific name/title searches get priority
             if search_term:
                 text_lower = text.lower()
                 search_parts = search_term.split()
@@ -571,30 +593,29 @@ class RAG:
                     elif matches:
                         final_score = max(final_score, 0.60)
             
-            # Store scores for metadata
+            # Store final score
             r["score"] = final_score
-            r["keyword_score"] = keyword_score
-            r["fuzzy_score"] = fuzzy_score
-            r["fusion_method"] = "hybrid" if (keyword_score > 0 or fuzzy_score > 0) else "vector_only"
+            r["keyword_score"] = 0.0
+            r["fuzzy_score"] = 0.0
+            r["fusion_method"] = "vector_only"
         
-        # Log hybrid scoring summary
+        # Log scoring summary
         if all_results:
             top_result = max(all_results, key=lambda x: x.get("score", 0))
-            logger.info(f"[HYBRID SEARCH] Top result: final={top_result.get('score', 0):.4f}, "
-                       f"vector={top_result.get('vector_score', 0):.4f}, "
-                       f"keyword={top_result.get('keyword_score', 0):.4f}, "
-                       f"fuzzy={top_result.get('fuzzy_score', 0):.4f}")
+            logger.info(f"[VECTOR SEARCH] Top result: score={top_result.get('score', 0):.4f}")
         
         # ============================================
-        # [END HYBRID SEARCH]
+        # [END VECTOR SEARCH]
         # ============================================
         
         # Filter by minimum similarity score (after hybrid fusion, before sorting)
+        # Use configurable RAG_MIN_SCORE from settings (default: 0.35)
+        min_score = getattr(settings, "RAG_MIN_SCORE", 0.25)
         pre_filter_count = len(all_results)
-        all_results = [r for r in all_results if r.get("score", 0) >= MIN_SCORE]
+        all_results = [r for r in all_results if r.get("score", 0) >= min_score]
         filtered_by_score = pre_filter_count - len(all_results)
         if filtered_by_score > 0:
-            logger.info(f"[RAG RETRIEVE] Filtered {filtered_by_score} chunks below MIN_SCORE={MIN_SCORE}")
+            logger.info(f"[RAG RETRIEVE] Filtered {filtered_by_score} chunks below MIN_SCORE={min_score}")
         
         # Filter by collection_id BEFORE sort and top_k (Bug Fix #2)
         if collection_id is not None:
@@ -646,7 +667,7 @@ class RAG:
     # Follow-up Question Detection and Generation
     # ------------------------------------------------------------------
     
-    def needs_followup(self, question: str, chunks: list, threshold: float = 0.35) -> Tuple[bool, str]:
+    def needs_followup(self, question: str, chunks: list, threshold: float = None) -> Tuple[bool, str]:
         """
         Determine if a follow-up question should be asked instead of answering.
         
@@ -664,6 +685,10 @@ class RAG:
             tuple: (needs_followup: bool, reason: str)
             Reasons: "ambiguous_phrasing", "vague_pronoun", "missing_context", "confident"
         """
+        # Use configurable RAG_MIN_SCORE from settings if threshold not provided
+        if threshold is None:
+            threshold = getattr(settings, "RAG_MIN_SCORE", 0.25)
+        
         if not question:
             return True, "empty_question"
         
@@ -1153,8 +1178,9 @@ Summary:"""
             chunk_tokens = _estimate_tokens(chunk_text)
             
             # Check token cap before adding
-            if total_tokens + chunk_tokens > MAX_CONTEXT_TOKENS:
-                logger.info(f"[RAG TOKEN CAP] Stopping at {i} chunks, {total_tokens} tokens (limit: {MAX_CONTEXT_TOKENS})")
+            max_tokens = _get_max_context_tokens()
+            if total_tokens + chunk_tokens > max_tokens:
+                logger.info(f"[RAG TOKEN CAP] Stopping at {i} chunks, {total_tokens} tokens (limit: {max_tokens})")
                 break
             
             total_tokens += chunk_tokens
@@ -1316,8 +1342,9 @@ Answer:"""
             chunk_tokens = _estimate_tokens(chunk_text)
             
             # Check token cap before adding
-            if total_tokens + chunk_tokens > MAX_CONTEXT_TOKENS:
-                logger.info(f"[RAG TOKEN CAP] Stopping at {i} chunks, {total_tokens} tokens (limit: {MAX_CONTEXT_TOKENS})")
+            max_tokens = _get_max_context_tokens()
+            if total_tokens + chunk_tokens > max_tokens:
+                logger.info(f"[RAG TOKEN CAP] Stopping at {i} chunks, {total_tokens} tokens (limit: {max_tokens})")
                 break
             
             total_tokens += chunk_tokens

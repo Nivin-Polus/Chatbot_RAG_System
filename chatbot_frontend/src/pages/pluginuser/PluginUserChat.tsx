@@ -886,18 +886,9 @@ export default function PluginUserChat() {
         <DashboardLayout>
             <ChatContainer>
                 <Card className="flex flex-col flex-1 bg-card dark:bg-gray-900 overflow-hidden">
-                    <CardHeader className="flex-shrink-0 py-3 border-b flex flex-row items-center justify-between space-y-0">
-                        <div className="flex items-center gap-2">
-                            <SidebarTrigger />
-                            <ThemeToggle />
-                        </div>
-                        <div className="flex items-center justify-end">
-                            {hasMessages && (
-                                <Button variant="outline" onClick={clearChat} size="sm">
-                                    Clear Chat
-                                </Button>
-                            )}
-                        </div>
+                    <CardHeader className="flex-shrink-0 py-3 border-b flex flex-row items-center justify-end space-y-0 gap-2">
+                        <ThemeToggle />
+                        <SidebarTrigger />
                     </CardHeader>
                     <CardContent className="relative flex-1 flex flex-col min-h-0 overflow-hidden p-0">
                         {!selectedCollection ? (
@@ -935,38 +926,13 @@ export default function PluginUserChat() {
                                                             : 'bg-muted border border-border/60 text-foreground max-w-[80%] dark:bg-gray-800 dark:text-gray-100'
                                                             }`}
                                                     >
-                                                        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                                                            <div className="flex items-center gap-2.5">
-                                                                <div
-                                                                    className={`flex h-8 w-8 items-center justify-center rounded-full ${isUser
-                                                                        ? 'bg-primary-foreground/20 text-primary-foreground'
-                                                                        : 'bg-white text-foreground shadow-sm dark:bg-gray-900/80 dark:text-gray-100'
-                                                                        }`}
-                                                                >
-                                                                    {isUser ? (
-                                                                        <User className="h-4 w-4" />
-                                                                    ) : (
-                                                                        <img src={getAssetUrl('leto.svg')} alt="Leto logo" className="h-4 w-4" />
-                                                                    )}
-                                                                </div>
-                                                                <span
-                                                                    className={`text-sm font-semibold leading-none ${isUser ? 'text-primary-foreground dark:text-white' : 'text-foreground dark:text-gray-100'
-                                                                        }`}
-                                                                >
-                                                                    {isUser ? 'You' : 'Leto Assistant'}
-                                                                </span>
-                                                            </div>
-                                                            <p
-                                                                className={`text-xs ${isUser
-                                                                    ? 'text-primary-foreground/70 dark:text-white/70'
-                                                                    : 'text-muted-foreground dark:text-gray-400'
-                                                                    }`}
-                                                            >
-                                                                {formatTime(message.timestamp)}
-                                                            </p>
-                                                        </div>
                                                         <div className="flex flex-col gap-1 text-sm leading-relaxed">
                                                             {renderMessageContent(message.content, message.id, message.sources)}
+                                                        </div>
+                                                        <div className="flex justify-end mt-1">
+                                                            <p className={`text-[10px] ${isUser ? 'text-primary-foreground/70 dark:text-white/70' : 'text-muted-foreground dark:text-gray-400'}`}>
+                                                                {formatTime(message.timestamp)}
+                                                            </p>
                                                         </div>
                                                     </div>
                                                 </div>
