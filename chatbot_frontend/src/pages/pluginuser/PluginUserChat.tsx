@@ -15,7 +15,7 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 
 const ChatContainer = ({ children }: { children: ReactNode }) => {
     return (
-        <div className="flex flex-col h-[calc(100vh)] w-full">
+        <div className="flex flex-col h-full w-full">
             {children}
         </div>
     );

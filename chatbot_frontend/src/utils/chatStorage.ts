@@ -635,7 +635,8 @@ export async function syncSessionsToBackend(
   role: string,
   currentSessionId: string | null,
   websiteUrl: string,
-  apiBaseUrl: string
+  apiBaseUrl: string,
+  visitorId?: string | null
 ): Promise<boolean> {
   try {
     const sessions = getSessions(userId, role);
@@ -685,6 +686,7 @@ export async function syncSessionsToBackend(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         website_url: websiteUrl,
+        visitor_id: visitorId || null,
         current_session_id: currentSessionId,
         sessions: syncPayload,
       }),
