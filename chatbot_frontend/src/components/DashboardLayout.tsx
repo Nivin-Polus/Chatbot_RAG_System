@@ -73,10 +73,10 @@ function DashboardLayoutContent({ children }: { children: ReactNode }) {
         {isPluginUser && !open && (
           <header className="h-12 border-b border-border bg-card flex items-center justify-between px-4 flex-none gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
             <div className="flex items-center gap-2">
+              <ThemeToggle />
               <SidebarTrigger />
             </div>
             <div className="flex items-center space-x-4">
-              <ThemeToggle />
             </div>
           </header>
         )}
