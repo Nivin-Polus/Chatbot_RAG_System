@@ -23,6 +23,13 @@ export default function UserAdminChat() {
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null); // NEW: Ref to track current session ID
+
+  // Keep ref in sync
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
   const [collections, setCollections] = useState<Collection[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<string>('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -102,13 +109,11 @@ export default function UserAdminChat() {
     const urlSessionId = searchParams.get('session');
 
     if (urlSessionId) {
-      // Load specific session
       if (sessionId !== urlSessionId) {
         const storedFn = getSession(urlSessionId);
         if (storedFn) {
           setMessages(storedFn.messages);
           setSessionId(urlSessionId);
-          // Only update collection if it matches the session's collection
           if (storedFn.collectionId && storedFn.collectionId !== selectedCollection) {
             const collectionExists = collections.some(c => c.collection_id === storedFn.collectionId);
             if (collectionExists) {
@@ -116,30 +121,28 @@ export default function UserAdminChat() {
             }
           }
         } else {
-          // Session not found, clear param to start new
           setSearchParams({});
         }
       }
     } else {
-      // No session in URL -> Start New Chat logic
       if (!sessionId || sessionId !== 'new_session_placeholder') {
         const newId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
         setSessionId(newId);
         setMessages([]);
       }
     }
-  }, [searchParams, user?.user_id]);
+  }, [searchParams, user?.user_id]); // Removed sessionId dependency
 
   // Save chat history to localStorage once after assistant finishes streaming
+  // Modified to use shouldTouch=false
   useEffect(() => {
     if (!isStreaming && selectedCollection && user?.user_id && messages.length > 0 && sessionId) {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
       saveTimeoutRef.current = window.setTimeout(() => {
-        saveSession(sessionId, messages, selectedCollection, user.user_id, user.role || 'useradmin');
+        saveSession(sessionId, messages, selectedCollection, user.user_id, user.role || 'useradmin', false);
 
-        // If URL doesn't have session, update it
         if (!searchParams.get('session')) {
           setSearchParams({ session: sessionId }, { replace: true });
         }
@@ -178,7 +181,7 @@ export default function UserAdminChat() {
       const response = await apiGet(
         `${import.meta.env.VITE_API_BASE_URL}/collections/`,
         user?.access_token,
-        false // Don't show error toast for this call
+        false
       );
 
       if (response.ok) {
@@ -262,6 +265,8 @@ export default function UserAdminChat() {
       const messageId = `assistant_${Date.now()}`;
       const timestamp = new Date();
 
+      const targetSessionId = sessionIdRef.current; // Capture current session ID
+
       if (typingTimeoutRef.current) {
         window.clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = null;
@@ -282,19 +287,52 @@ export default function UserAdminChat() {
       return new Promise<void>((resolve) => {
         setIsStreaming(true);
 
+        // Helper to save current state to storage even if unmounted/switched
+        const saveProgressToStorage = (finalContent: string) => {
+          if (user?.user_id && selectedCollection && targetSessionId) {
+            const currentStored = getSession(targetSessionId);
+            if (currentStored) {
+              const updatedMsgs = currentStored.messages.map(m =>
+                m.id === messageId
+                  ? { ...m, content: finalContent, sources, isFollowup }
+                  : m
+              );
+
+              if (!updatedMsgs.find(m => m.id === messageId)) {
+                updatedMsgs.push({
+                  id: messageId,
+                  role: 'assistant',
+                  content: finalContent,
+                  timestamp,
+                  sources,
+                  isFollowup
+                });
+              }
+
+              saveSession(targetSessionId, updatedMsgs, selectedCollection, user.user_id, user.role || 'useradmin', true);
+            }
+          }
+        };
+
         const completeStream = () => {
           if (typingTimeoutRef.current) {
             window.clearTimeout(typingTimeoutRef.current);
             typingTimeoutRef.current = null;
           }
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === messageId ? { ...msg, content, sources, isFollowup } : msg
-            )
-          );
-          scrollToBottom();
+
+          if (sessionIdRef.current === targetSessionId) {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === messageId ? { ...msg, content, sources, isFollowup } : msg
+              )
+            );
+            scrollToBottom();
+            setIsStreaming(false);
+          } else {
+            saveProgressToStorage(content);
+          }
+
           stopStreamingRef.current = null;
-          setIsStreaming(false);
           resolve();
         };
 
@@ -311,7 +349,12 @@ export default function UserAdminChat() {
 
         const typeNext = () => {
           if (!document.hasFocus()) {
-            completeStream();
+            // Optional logic for background
+          }
+
+          if (sessionIdRef.current !== targetSessionId) {
+            saveProgressToStorage(content);
+            resolve();
             return;
           }
 
@@ -335,7 +378,7 @@ export default function UserAdminChat() {
         typeNext();
       });
     },
-    [scrollToBottom]
+    [scrollToBottom, user?.user_id, user?.role, selectedCollection]
   );
 
   const sendMessage = async (e: React.FormEvent) => {

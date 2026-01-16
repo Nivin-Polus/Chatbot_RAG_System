@@ -33,6 +33,13 @@ export default function SuperadminChat() {
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null); // NEW: Ref to track current session ID
+
+  // Keep ref in sync
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
   const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -110,16 +117,17 @@ export default function SuperadminChat() {
         setMessages([]);
       }
     }
-  }, [searchParams, user?.user_id]);
+  }, [searchParams, user?.user_id]); // Removed sessionId dependency to avoid loop
 
   // Save chat history to localStorage once after assistant finishes streaming
+  // Modified to use shouldTouch=false
   useEffect(() => {
     if (!isStreaming && selectedCollection && user?.user_id && messages.length > 0 && sessionId) {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
       saveTimeoutRef.current = window.setTimeout(() => {
-        saveSession(sessionId, messages, selectedCollection, user.user_id, user.role || 'superadmin');
+        saveSession(sessionId, messages, selectedCollection, user.user_id, user.role || 'superadmin', false);
 
         // If URL doesn't have session, update it
         if (!searchParams.get('session')) {
@@ -164,6 +172,8 @@ export default function SuperadminChat() {
       const messageId = `assistant_${Date.now()}`;
       const timestamp = new Date();
 
+      const targetSessionId = sessionIdRef.current; // Capture current session ID
+
       if (typingTimeoutRef.current) {
         window.clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = null;
@@ -184,23 +194,56 @@ export default function SuperadminChat() {
       return new Promise<void>((resolve) => {
         setIsStreaming(true);
 
+        // Helper to save current state to storage even if unmounted/switched
+        const saveProgressToStorage = (finalContent: string) => {
+          if (user?.user_id && selectedCollection && targetSessionId) {
+            const currentStored = getSession(targetSessionId);
+            if (currentStored) {
+              const updatedMsgs = currentStored.messages.map(m =>
+                m.id === messageId
+                  ? { ...m, content: finalContent, sources, isFollowup }
+                  : m
+              );
+
+              if (!updatedMsgs.find(m => m.id === messageId)) {
+                updatedMsgs.push({
+                  id: messageId,
+                  role: 'assistant',
+                  content: finalContent,
+                  timestamp,
+                  sources,
+                  isFollowup
+                });
+              }
+
+              saveSession(targetSessionId, updatedMsgs, selectedCollection, user.user_id, user.role || 'superadmin', true);
+            }
+          }
+        };
+
         const completeStream = () => {
           if (typingTimeoutRef.current) {
             window.clearTimeout(typingTimeoutRef.current);
             typingTimeoutRef.current = null;
           }
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === messageId ? { ...msg, content, sources, isFollowup } : msg
-            )
-          );
-          if (isStreaming) {
-            scrollToBottom(false);
+
+          if (sessionIdRef.current === targetSessionId) {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === messageId ? { ...msg, content, sources, isFollowup } : msg
+              )
+            );
+            if (isStreaming) {
+              scrollToBottom(false);
+            } else {
+              scrollToBottom();
+            }
+            setIsStreaming(false);
           } else {
-            scrollToBottom();
+            saveProgressToStorage(content);
           }
+
           stopStreamingRef.current = null;
-          setIsStreaming(false);
           resolve();
         };
 
@@ -217,7 +260,13 @@ export default function SuperadminChat() {
 
         const typeNext = () => {
           if (!document.hasFocus()) {
-            completeStream();
+            // Optional: Handle background tab behavior if needed
+            // For now we continue streaming unless chat switched
+          }
+
+          if (sessionIdRef.current !== targetSessionId) {
+            saveProgressToStorage(content);
+            resolve();
             return;
           }
 
@@ -239,7 +288,7 @@ export default function SuperadminChat() {
         typeNext();
       });
     },
-    [scrollToBottom]
+    [scrollToBottom, user?.user_id, user?.role, selectedCollection]
   );
   // --- End Typing Animation ---
 

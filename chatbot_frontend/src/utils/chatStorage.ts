@@ -62,12 +62,16 @@ export function getSessions(userId: string | undefined, role: string): ChatSessi
 /**
  * Save a session (updates index and message storage)
  */
+/**
+ * Save a session (updates index and message storage)
+ */
 export function saveSession(
   sessionId: string,
   messages: ChatMessage[],
   collectionId: string,
   userId: string | undefined,
-  role: string
+  role: string,
+  shouldTouch: boolean = true // If true, updates timestamp (moves to top). If false, just saves content.
 ): void {
   try {
     // 1. Save Messages
@@ -92,18 +96,36 @@ export function saveSession(
     const sessions = getSessions(userId, role);
     const existingIndex = sessions.findIndex((s) => s.id === sessionId);
 
-    // Generate title from first user message
-    const firstUserMsg = messages.find((m) => m.role === 'user');
     let title = 'New Chat';
-    if (firstUserMsg) {
-      // Store clean title without ellipsis - CSS truncate handles display
-      title = firstUserMsg.content.replace(/\s+/g, ' ').trim().slice(0, 60);
+    let previousTitle = 'New Chat';
+    let timestamp = Date.now();
+
+    if (existingIndex >= 0) {
+      // Existing session: preserve title and timestamp unless we want to touch
+      previousTitle = sessions[existingIndex].title;
+      timestamp = shouldTouch ? Date.now() : sessions[existingIndex].timestamp;
+
+      // If we are touching (active interaction), keep current timestamp
+      // If NOT touching (just loading/viewing), keep OLD timestamp
+    }
+
+    // Determine Title
+    // Only update title if it's currently "New Chat" OR if it's a brand new session
+    if (previousTitle === 'New Chat') {
+      const firstUserMsg = messages.find((m) => m.role === 'user');
+      if (firstUserMsg) {
+        title = firstUserMsg.content.replace(/\s+/g, ' ').trim().slice(0, 60);
+      } else {
+        title = previousTitle;
+      }
+    } else {
+      title = previousTitle;
     }
 
     const sessionInfo: ChatSession = {
       id: sessionId,
       title,
-      timestamp: Date.now(),
+      timestamp, // Use the determined timestamp
       collectionId,
     };
 
@@ -282,7 +304,7 @@ export function migratePluginSession(
         file_name: s.file_name || '',
         file_id: s.file_id,
         chunk_indices: s.chunk_indices,
-        source_type: s.source_type,
+        source_type: s.source_type as 'file' | 'web_crawl' | undefined,
         url: s.url,
       })).filter(s => s.file_name),
       isFollowup: msg.isFollowup,
@@ -400,7 +422,7 @@ export async function importTransferredSession(
         file_name: s.file_name || '',
         file_id: s.file_id,
         chunk_indices: s.chunk_indices,
-        source_type: s.source_type,
+        source_type: s.source_type as 'file' | 'web_crawl' | undefined,
         url: s.url,
       })).filter(s => s.file_name),
       isFollowup: msg.isFollowup,
@@ -470,7 +492,7 @@ export async function importTransferredSessions(
             file_name: s.file_name || '',
             file_id: s.file_id,
             chunk_indices: s.chunk_indices,
-            source_type: s.source_type,
+            source_type: s.source_type as 'file' | 'web_crawl' | undefined,
             url: s.url,
           })).filter(s => s.file_name),
           isFollowup: msg.isFollowup,
@@ -512,7 +534,7 @@ export async function importTransferredSessions(
           file_name: s.file_name || '',
           file_id: s.file_id,
           chunk_indices: s.chunk_indices,
-          source_type: s.source_type,
+          source_type: s.source_type as 'file' | 'web_crawl' | undefined,
           url: s.url,
         })).filter(s => s.file_name),
         isFollowup: msg.isFollowup,

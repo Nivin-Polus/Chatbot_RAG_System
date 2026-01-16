@@ -33,6 +33,13 @@ export default function PluginUserChat() {
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const typingTimeoutRef = useRef<number | null>(null);
     const [sessionId, setSessionId] = useState<string>('');
+    const sessionIdRef = useRef<string>(''); // NEW: Ref to track current session ID for async operations
+
+    // Keep ref in sync
+    useEffect(() => {
+        sessionIdRef.current = sessionId;
+    }, [sessionId]);
+
     const stopStreamingRef = useRef<(() => void) | null>(null);
     const [isAutoScroll, setIsAutoScroll] = useState(true);
     const isAutoScrollRef = useRef(true);
@@ -155,13 +162,25 @@ export default function PluginUserChat() {
     }, [searchParams, user?.user_id, selectedCollection, user?.role]);
 
     // Save chat history to localStorage once after assistant finishes streaming
+    // Modified to control "touch" (timestamp update) logic
     useEffect(() => {
+        // Only trigger auto-save if we have something meaningful
         if (!isStreaming && selectedCollection && user?.user_id && messages.length > 0 && sessionId) {
             if (saveTimeoutRef.current) {
                 clearTimeout(saveTimeoutRef.current);
             }
             saveTimeoutRef.current = window.setTimeout(() => {
-                saveSession(sessionId, messages, selectedCollection, user.user_id, user.role || 'plugin_user');
+                // If this effect runs due to initial load, we might not want to touch timestamp.
+                // However, determining "initial load" vs "msg added" inside this effect is tricky.
+                // For now, simpler approach: interactions (send msg) call saveSession explicitly with shouldTouch=true?
+                // Actually, this effect runs when 'messages' changes. If I just loaded messages, it runs.
+                // Logic: validation - if last message is OLD, don't touch?
+                // Better: rely on the fact that 'saveSession' is also called explicitly after streaming/sending.
+                // This effect is a fallback/debouncer.
+                // Let's set shouldTouch=false here to avoid reordering on just viewing/loading.
+                // Reordering should mostly happen when WE send a message or finish receiving one.
+
+                saveSession(sessionId, messages, selectedCollection, user.user_id, user.role || 'plugin_user', false);
 
                 if (!searchParams.get('session')) {
                     setSearchParams({ session: sessionId }, { replace: true });
@@ -210,6 +229,9 @@ export default function PluginUserChat() {
             const messageId = `assistant_${Date.now()}`;
             const timestamp = new Date();
 
+            // Capture session ID at start of streaming
+            const targetSessionId = sessionIdRef.current;
+
             if (typingTimeoutRef.current) {
                 window.clearTimeout(typingTimeoutRef.current);
                 typingTimeoutRef.current = null;
@@ -230,23 +252,66 @@ export default function PluginUserChat() {
             return new Promise<void>((resolve) => {
                 setIsStreaming(true);
 
+                // Helper to save current state to storage even if unmounted/switched
+                const saveProgressToStorage = (finalContent: string) => {
+                    if (user?.user_id && selectedCollection) {
+                        // We need to fetch the LATEST messages from state or construct them
+                        // Since we can't easily access 'messages' state inside this closure without dependencies,
+                        // we'll fetch from storage, append/update the new message, and save back.
+                        // But that might be race-y.
+                        // Better: We know 'messages' prior to this response.
+                        // Actually, simpler: just use getSession to get current list, append this msg, and save.
+                        const currentStored = getSession(targetSessionId);
+                        if (currentStored) {
+                            const updatedMsgs = currentStored.messages.map(m =>
+                                m.id === messageId
+                                    ? { ...m, content: finalContent, sources, isFollowup }
+                                    : m
+                            );
+
+                            // If message wasn't in storage yet (it was just added to state), we need to add it.
+                            if (!updatedMsgs.find(m => m.id === messageId)) {
+                                updatedMsgs.push({
+                                    id: messageId,
+                                    role: 'assistant',
+                                    content: finalContent,
+                                    timestamp,
+                                    sources,
+                                    isFollowup
+                                });
+                            }
+
+                            saveSession(targetSessionId, updatedMsgs, selectedCollection, user.user_id, user.role || 'plugin_user', true);
+                        }
+                    }
+                };
+
                 const completeStream = () => {
                     if (typingTimeoutRef.current) {
                         window.clearTimeout(typingTimeoutRef.current);
                         typingTimeoutRef.current = null;
                     }
-                    setMessages((prev) =>
-                        prev.map((msg) =>
-                            msg.id === messageId ? { ...msg, content, sources, isFollowup } : msg
-                        )
-                    );
-                    if (isStreaming) {
-                        scrollToBottom(false);
+
+                    // Only update UI if we are still on the same session
+                    if (sessionIdRef.current === targetSessionId) {
+                        setMessages((prev) =>
+                            prev.map((msg) =>
+                                msg.id === messageId ? { ...msg, content, sources, isFollowup } : msg
+                            )
+                        );
+                        if (isStreaming) {
+                            scrollToBottom(false);
+                        } else {
+                            scrollToBottom();
+                        }
+                        setIsStreaming(false);
                     } else {
-                        scrollToBottom();
+                        // User switched away. We should still save the completed message to storage
+                        // so it's there when they come back.
+                        saveProgressToStorage(content);
                     }
+
                     stopStreamingRef.current = null;
-                    setIsStreaming(false);
                     resolve();
                 };
 
@@ -262,12 +327,23 @@ export default function PluginUserChat() {
                 };
 
                 const typeNext = () => {
-                    if (!document.hasFocus()) {
-                        completeStream();
+                    // Even if document loses focus, we might want to continue or just finish
+                    // But if user switched chat (sessionId changed), we must handle it.
+
+                    if (sessionIdRef.current !== targetSessionId) {
+                        // Detected switch!
+                        // Finish silently (save to storage) and stop updating UI for this session.
+                        saveProgressToStorage(content);
+                        // We don't resolve() yet? Or we do? 
+                        // The outer loop awaits this.
+                        // If we resolve, it moves on.
+                        resolve();
                         return;
                     }
 
                     index += 1;
+
+                    // Update UI
                     setMessages((prev) =>
                         prev.map((msg) =>
                             msg.id === messageId
@@ -287,7 +363,7 @@ export default function PluginUserChat() {
                 typeNext();
             });
         },
-        [scrollToBottom]
+        [scrollToBottom, user?.user_id, user?.role, selectedCollection]
     );
 
     const sendMessage = async (e: React.FormEvent) => {
