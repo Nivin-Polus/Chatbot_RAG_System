@@ -1054,7 +1054,18 @@ export default function SuperadminChat() {
           continue;
         }
 
-        nodes.push(...createInlineElements(rawLine));
+        // Wrap each line in a container to keep inline elements together
+        const lineNodes = createInlineElements(rawLine, false); // block=false
+        if (lineNodes.length > 0) {
+          nodes.push(
+            <div key={`${messageId}-line-${i}`} className="min-h-[1.5em]">
+              {lineNodes}
+            </div>
+          );
+        } else {
+          // Empty line
+          nodes.push(<div key={`${messageId}-line-${i}`} className="h-4" />);
+        }
       }
 
       if (sourcesNodes.length > 0) {
@@ -1169,7 +1180,7 @@ export default function SuperadminChat() {
                           <div
                             className={`rounded-xl px-4 py-3 shadow-sm ${isUser
                               ? 'bg-primary text-primary-foreground max-w-[65%] dark:text-white'
-                              : 'bg-muted border border-border/60 text-foreground max-w-[80%] dark:bg-gray-800 dark:text-gray-100'
+                              : 'rounded-xl px-4 py-3 shadow-sm bg-muted border border-border/60 text-foreground max-w-[80%] dark:bg-gray-800 dark:text-gray-100'
                               }`}
                           >
                             <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
@@ -1211,8 +1222,8 @@ export default function SuperadminChat() {
                     })
                   )}
                   {isThinking && (
-                    <div className="flex justify-start">
-                      <div className="bg-muted border rounded-lg px-4 py-3 dark:bg-gray-800 dark:text-gray-300">
+                    <div className="flex justify-start pt-2">
+                      <div className="bg-muted border border-border/60 rounded-xl px-4 py-3 shadow-sm dark:bg-gray-800 dark:text-gray-100 max-w-[80%]">
                         <div className="flex items-center space-x-2">
                           <img src={getAssetUrl('leto.svg')} alt="Leto logo" className="h-4 w-4" />
                           <div className="flex items-center space-x-2">
