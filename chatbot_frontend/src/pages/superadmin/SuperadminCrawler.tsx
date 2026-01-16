@@ -153,6 +153,9 @@ export default function SuperadminCrawler() {
     skipped_urls: { url: string; reason: string }[];
   } | null>(null);
 
+  // Crawl in progress dialog state
+  const [crawlInProgressOpen, setCrawlInProgressOpen] = useState(false);
+
   // Form state
   const [targetUrl, setTargetUrl] = useState('');
   const [selectedCollection, setSelectedCollection] = useState('');
@@ -255,12 +258,28 @@ export default function SuperadminCrawler() {
       return;
     }
 
-    // Parse numeric values, defaulting to 0/5 if empty or invalid
-    const parsedMaxPages = maxPages === '' ? 0 : parseInt(String(maxPages));
-    const parsedMaxDepth = maxDepth === '' ? 5 : parseInt(String(maxDepth));
-
     setIsStarting(true);
     try {
+      // First check if a crawl is already running
+      const statusResponse = await apiGet(
+        `${import.meta.env.VITE_API_BASE_URL}/crawler/status`,
+        user?.access_token
+      );
+
+      if (statusResponse.ok) {
+        const status = await statusResponse.json();
+        if (status.is_crawl_running) {
+          // Show popup that a crawl is already in progress
+          setCrawlInProgressOpen(true);
+          setIsStarting(false);
+          return;
+        }
+      }
+
+      // Parse numeric values, defaulting to 0/5 if empty or invalid
+      const parsedMaxPages = maxPages === '' ? 0 : parseInt(String(maxPages));
+      const parsedMaxDepth = maxDepth === '' ? 5 : parseInt(String(maxDepth));
+
       const response = await apiPost(
         `${import.meta.env.VITE_API_BASE_URL}/crawler/start`,
         {
@@ -825,29 +844,14 @@ export default function SuperadminCrawler() {
                   </CollapsibleContent>
                 </Collapsible>
 
-                {/* System-wide crawl limit warning */}
-                {crawlerStatus?.is_crawl_running && (
-                  <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-700 dark:text-amber-400">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <p className="text-sm">
-                      A crawl is already running. Only one crawl can run at a time system-wide. Please wait for the current crawl to complete.
-                    </p>
-                  </div>
-                )}
-
                 <Button 
                   onClick={handleStartCrawl} 
-                  disabled={isStarting || !targetUrl || !selectedCollection || crawlerStatus?.is_crawl_running}
+                  disabled={isStarting || !targetUrl || !selectedCollection}
                 >
                   {isStarting ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                       Starting...
-                    </>
-                  ) : crawlerStatus?.is_crawl_running ? (
-                    <>
-                      <Clock className="h-4 w-4 mr-2" />
-                      Crawl in Progress...
                     </>
                   ) : (
                     <>
@@ -1326,6 +1330,23 @@ export default function SuperadminCrawler() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+
+          {/* Crawl In Progress Alert Dialog */}
+          <AlertDialog open={crawlInProgressOpen} onOpenChange={setCrawlInProgressOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Crawl In Progress</AlertDialogTitle>
+                <AlertDialogDescription>
+                  A crawl is already in progress. Only one crawl can run at a time to ensure optimal performance and resource usage. Please wait for the current crawl to complete before starting a new one.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogAction onClick={() => setCrawlInProgressOpen(false)}>
+                  OK
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </TooltipProvider>
     </DashboardLayout >

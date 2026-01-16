@@ -745,29 +745,14 @@ export default function CrawlerView({ collectionId }: CrawlerViewProps) {
                         </div>
                     )}
 
-                    {/* System-wide crawl limit warning */}
-                    {crawlerStatus?.is_crawl_running && (
-                        <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-700 dark:text-amber-400">
-                            <AlertCircle className="h-4 w-4 shrink-0" />
-                            <p className="text-sm">
-                                A crawl is already running. Only one crawl can run at a time system-wide. Please wait for the current crawl to complete.
-                            </p>
-                        </div>
-                    )}
-
                     <Button 
                         onClick={handleStartCrawl} 
-                        disabled={isStarting || !targetUrl || !selectedCollection || crawlerStatus?.is_crawl_running}
+                        disabled={isStarting || !targetUrl || !selectedCollection}
                     >
                         {isStarting ? (
                             <>
                                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                                 Starting...
-                            </>
-                        ) : crawlerStatus?.is_crawl_running ? (
-                            <>
-                                <Clock className="h-4 w-4 mr-2" />
-                                Crawl in Progress...
                             </>
                         ) : (
                             <>
@@ -1169,17 +1154,14 @@ export default function CrawlerView({ collectionId }: CrawlerViewProps) {
             <AlertDialog open={crawlInProgressOpen} onOpenChange={setCrawlInProgressOpen}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle className="flex items-center gap-2">
-                            <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-                            Crawl In Progress
-                        </AlertDialogTitle>
+                        <AlertDialogTitle>Crawl In Progress</AlertDialogTitle>
                         <AlertDialogDescription>
                             A crawl is already in progress. Only one crawl can run at a time to ensure optimal performance and resource usage. Please wait for the current crawl to complete before starting a new one.
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogAction onClick={() => setCrawlInProgressOpen(false)}>
-                            OK, I&apos;ll Wait
+                            OK
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
