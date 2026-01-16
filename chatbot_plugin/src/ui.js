@@ -279,6 +279,7 @@ export class ChatbotUI {
         const loginUrl = await AuthService.getAutoLoginUrl();
         if (loginUrl) {
           let finalUrl = loginUrl;
+          let transferSuccessful = false;
 
           // Try to transfer ALL chat sessions to backend for seamless migration
           const allSessions = this.getAllSessions?.() || [];
@@ -313,12 +314,19 @@ export class ChatbotUI {
                 const transferData = await transferResponse.json();
                 const separator = loginUrl.includes('?') ? '&' : '?';
                 finalUrl = `${loginUrl}${separator}transfer_token=${encodeURIComponent(transferData.transfer_token)}`;
+                transferSuccessful = true;
               } else {
                 console.warn('Could not transfer sessions, proceeding without chat history');
               }
             } catch (transferErr) {
               console.warn('Session transfer failed:', transferErr);
             }
+          }
+
+          // If transfer was successful, clear the plugin's localStorage
+          // This prevents deleted chats from coming back when user expands again
+          if (transferSuccessful && this.onTransferComplete) {
+            this.onTransferComplete();
           }
 
           window.open(finalUrl, '_blank');

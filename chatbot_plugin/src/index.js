@@ -48,6 +48,23 @@ import "./styles.css";
       return { ...session, messages: [] };
     }).filter(s => s.messages && s.messages.length > 0); // Only include sessions with messages
   };
+  // Clear plugin localStorage after successful transfer to frontend
+  ui.onTransferComplete = () => {
+    console.log('Transfer successful - clearing plugin localStorage');
+    // Clear all session data from localStorage
+    sessions.forEach(session => {
+      localStorage.removeItem(CHAT_MESSAGES_PREFIX + session.id);
+    });
+    localStorage.removeItem(CHAT_SESSIONS_INDEX_KEY);
+    sessions = [];
+
+    // Clear current chat and start fresh
+    chatService.clearContext();
+    currentSessionId = chatService.sessionId;
+    messages.length = 0;
+    initializeMessages();
+    renderMessages();
+  };
   ui.init();
 
   const chatService = new ChatService();
