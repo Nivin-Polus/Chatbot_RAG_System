@@ -604,58 +604,102 @@ export function clearAllChatHistories(userId: string | undefined, role: string):
   clearAllSessions(userId, role);
 }
 
+// --- Sync Sessions to Backend for Plugin Access ---
+
+interface SyncSessionData {
+  session_id: string;
+  title: string;
+  timestamp: number;
+  messages: Array<{
+    user: boolean;
+    text: string;
+    formatted: boolean;
+    timestamp: string;
+    sources?: Array<{
+      file_name?: string;
+      file_id?: string;
+      chunk_indices?: number[];
+      source_type?: string;
+      url?: string;
+    }>;
+    isFollowup?: boolean;
+  }>;
+}
+
 /**
- * Sync sessions to backend
+ * Sync all sessions to backend so the regular plugin can access them.
+ * This should be called periodically or when the user leaves the extended plugin.
  */
 export async function syncSessionsToBackend(
-  userId: string,
+  userId: string | undefined,
   role: string,
   currentSessionId: string | null,
   websiteUrl: string,
-  apiBaseUrl: string,
-  visitorId?: string | null
-): Promise<void> {
+  apiBaseUrl: string
+): Promise<boolean> {
   try {
     const sessions = getSessions(userId, role);
-    if (sessions.length === 0) return;
+    if (sessions.length === 0) {
+      console.log('No sessions to sync');
+      return true;
+    }
 
-    const syncPayload = sessions.map(session => {
-      const details = getSession(session.id);
-      return {
+    // Build sync payload
+    const syncPayload: SyncSessionData[] = [];
+
+    for (const session of sessions) {
+      const sessionData = getSession(session.id);
+      if (!sessionData || sessionData.messages.length === 0) continue;
+
+      // Convert frontend messages to plugin message format
+      const pluginMessages = sessionData.messages.map(msg => ({
+        user: msg.role === 'user',
+        text: msg.content,
+        formatted: true,
+        timestamp: msg.timestamp.toISOString(),
+        sources: msg.sources?.map(s => ({
+          file_name: s.file_name,
+          file_id: s.file_id,
+          chunk_indices: s.chunk_indices,
+          source_type: s.source_type,
+          url: s.url,
+        })),
+        isFollowup: msg.isFollowup || false,
+      }));
+
+      syncPayload.push({
         session_id: session.id,
         title: session.title,
         timestamp: session.timestamp,
-        messages: details?.messages.map(msg => ({
-          user: msg.role === 'user',
-          text: msg.content,
-          formatted: true,
-          timestamp: msg.timestamp.toISOString(),
-          sources: msg.sources?.map(s => ({
-            file_name: s.file_name,
-            file_id: s.file_id
-          })),
-          isFollowup: msg.isFollowup
-        })) || []
-      };
-    });
+        messages: pluginMessages,
+      });
+    }
 
-    const payload = {
-      website_url: websiteUrl,
-      current_session_id: currentSessionId,
-      sessions: syncPayload,
-      visitor_id: visitorId
-    };
+    if (syncPayload.length === 0) {
+      console.log('No valid sessions to sync');
+      return true;
+    }
 
-    await fetch(`${apiBaseUrl}/plugins/sync-sessions`, {
+    const response = await fetch(`${apiBaseUrl}/plugins/sync-sessions`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        website_url: websiteUrl,
+        current_session_id: currentSessionId,
+        sessions: syncPayload,
+      }),
     });
 
+    if (!response.ok) {
+      console.warn('Failed to sync sessions to backend:', response.status);
+      return false;
+    }
+
+    const data = await response.json();
+    console.log(`Synced ${data.synced_count} sessions to backend`);
+    return true;
   } catch (error) {
-    console.error('Failed to sync sessions:', error);
+    console.error('Error syncing sessions to backend:', error);
+    return false;
   }
 }
-

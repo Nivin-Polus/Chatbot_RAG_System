@@ -964,7 +964,7 @@ class SyncSessionsRequest(BaseModel):
     website_url: str
     visitor_id: Optional[str] = None  # Unique identifier for this browser/user
     current_session_id: Optional[str] = None
-    sessions: List[TransferredSession]
+    sessions: List[TransferSessionData]  # Reuse existing model
 
 
 class SyncSessionsResponse(BaseModel):
