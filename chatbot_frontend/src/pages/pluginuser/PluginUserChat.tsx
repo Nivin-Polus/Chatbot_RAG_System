@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react'
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { User, Send, Loader2, MessageSquare, ExternalLink, FileText, Download } from 'lucide-react';
-import { useSidebar } from '@/components/ui/sidebar';
+import { User, Send, Loader2, MessageSquare, ExternalLink, FileText, Download, Menu } from 'lucide-react';
+import { useSidebar, SidebarTrigger } from '@/components/ui/sidebar';
 import { ChatMessage, ChatSource } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiPost, apiDelete } from '@/utils/api';
@@ -11,11 +11,11 @@ import { saveSession, getSession, deleteSession, migratePluginSession, hasPlugin
 import { useSearchParams } from 'react-router-dom';
 import { getAssetUrl } from '@/utils/assets';
 import { DashboardLayout } from '@/components/DashboardLayout';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 const ChatContainer = ({ children }: { children: ReactNode }) => {
-    const { open } = useSidebar();
     return (
-        <div className={`flex flex-col space-y-4 h-[calc(100vh-6rem)] transition-all duration-300 ${!open ? 'max-w-[90%] mx-auto w-full' : 'w-full'}`}>
+        <div className="flex flex-col h-[calc(100vh)] w-full">
             {children}
         </div>
     );
@@ -886,7 +886,11 @@ export default function PluginUserChat() {
         <DashboardLayout>
             <ChatContainer>
                 <Card className="flex flex-col flex-1 bg-card dark:bg-gray-900 overflow-hidden">
-                    <CardHeader className="flex-shrink-0 py-3">
+                    <CardHeader className="flex-shrink-0 py-3 border-b flex flex-row items-center justify-between space-y-0">
+                        <div className="flex items-center gap-2">
+                            <SidebarTrigger />
+                            <ThemeToggle />
+                        </div>
                         <div className="flex items-center justify-end">
                             {hasMessages && (
                                 <Button variant="outline" onClick={clearChat} size="sm">

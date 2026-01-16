@@ -66,9 +66,7 @@ const userNav = [
   { title: 'Chat', url: '/app/chat', icon: MessageSquare },
 ];
 
-const pluginUserNav = [
-  { title: 'Chat', url: '/pluginuser/chat', icon: MessageSquare },
-];
+const pluginUserNav: { title: string; url: string; icon: any }[] = [];
 
 const sidebarHeading = (role?: string) => {
   switch (role) {
@@ -309,8 +307,8 @@ export function AppSidebar() {
                       ) : (
                         <>
                           <SidebarMenuButton asChild isActive={isActiveSession} title={session.title}>
-                            <NavLink to={sessionUrl} className="flex items-center justify-between pr-16">
-                              <span className="truncate">{session.title}</span>
+                            <NavLink to={sessionUrl} className="flex items-center justify-between">
+                              <span className="truncate pr-16 block w-full">{session.title}</span>
                             </NavLink>
                           </SidebarMenuButton>
                           <div className="flex items-center absolute right-1 top-1/2 -translate-y-1/2 gap-1 px-1">

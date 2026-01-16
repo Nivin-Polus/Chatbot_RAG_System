@@ -650,59 +650,51 @@ class RAG:
         """
         Determine if a follow-up question should be asked instead of answering.
         
-        Detection criteria:
-        - No relevant chunks found (len(chunks) == 0)
-        - Low relevance score (top chunk score < threshold)
-        - Ambiguous phrasing (e.g., "tell me more", "explain this")
-        - Vague pronouns without context (e.g., "it", "this", "that")
-        - Missing domain-specific context
+        IMPORTANT: Only ask follow-up when clarification could actually help.
+        Do NOT ask follow-up when:
+        - Knowledge base simply doesn't have the information (no chunks = no data)
+        - Query is clear but scores are low (just answer with available info)
+        
+        Only ask follow-up when:
+        - Query uses vague pronouns (it, this, that) without context
+        - Query is genuinely ambiguous and chunks exist that MIGHT be relevant
+        - Missing critical domain context that user could provide
         
         Returns:
             tuple: (needs_followup: bool, reason: str)
-            Reasons: "no_relevant_chunks", "low_relevance_score", "ambiguous_phrasing", 
-                     "vague_pronoun", "missing_context", "confident"
+            Reasons: "ambiguous_phrasing", "vague_pronoun", "missing_context", "confident"
         """
         if not question:
             return True, "empty_question"
         
         normalized = question.strip().lower()
         
-        # 1. Check for no relevant chunks
+        # =============================================================
+        # CRITICAL: Do NOT ask follow-up for "no data" situations
+        # =============================================================
+        # If no chunks found OR low scores, the KB doesn't have the info.
+        # Asking for clarification won't help - just answer with what we have
+        # (or say "I don't have information")
+        
+        # 1. No chunks = KB doesn't have data, skip follow-up
         if not chunks or len(chunks) == 0:
-            logger.info(f"[FOLLOWUP] Triggered: no_relevant_chunks for query: {question[:50]}")
-            return True, "no_relevant_chunks"
+            logger.info(f"[FOLLOWUP] Skipping: no_relevant_chunks - KB has no data, will respond directly")
+            return False, "confident"  # Let answer() handle the "no info" response
         
-        # 2. Check for low relevance score
+        # 2. Low scores with a CLEAR query = KB doesn't have good matches
+        #    Only consider follow-up if query itself is ambiguous
         top_score = chunks[0].get("score", 0) if chunks else 0
-        if top_score < threshold:
-            logger.info(f"[FOLLOWUP] Triggered: low_relevance_score ({top_score:.4f} < {threshold}) for query: {question[:50]}")
-            return True, "low_relevance_score"
+        query_is_clear = self._is_clear_query(question)
         
-        # 3. Check for ambiguous phrasing
-        ambiguous_phrases = [
-            "tell me more",
-            "explain this",
-            "what about",
-            "can you elaborate",
-            "more details",
-            "more information",
-            "explain that",
-            "tell me about it",
-            "what does it mean",
-            "how does it work",
-            "why is that",
-            "what is it",
-            "what are they",
-            "what about this",
-            "what about that",
-        ]
-        for phrase in ambiguous_phrases:
-            if phrase in normalized:
-                logger.info(f"[FOLLOWUP] Triggered: ambiguous_phrasing ('{phrase}') for query: {question[:50]}")
-                return True, "ambiguous_phrasing"
+        if top_score < threshold and query_is_clear:
+            logger.info(f"[FOLLOWUP] Skipping: low_score ({top_score:.4f}) but query is clear - will answer with available info")
+            return False, "confident"  # Answer with available chunks or say "no info"
         
-        # 4. Check for vague pronouns without sufficient context
-        # Short queries with only pronouns are likely ambiguous
+        # =============================================================
+        # Only ask follow-up for GENUINELY AMBIGUOUS queries
+        # =============================================================
+        
+        # 3. Vague pronouns WITHOUT context (these genuinely need clarification)
         vague_patterns = [
             r"^(?:what|how|why|when|where)\s+(?:is|are|was|were|does|do|did)\s+(?:it|this|that|these|those)\??$",
             r"^(?:explain|describe|tell me about)\s+(?:it|this|that|these|those)\??$",
@@ -713,13 +705,87 @@ class RAG:
                 logger.info(f"[FOLLOWUP] Triggered: vague_pronoun for query: {question[:50]}")
                 return True, "vague_pronoun"
         
-        # 5. Check for missing critical domain context
-        if self._missing_critical_context(question):
+        # 4. Ambiguous phrases that genuinely need clarification
+        #    BUT only if we have SOME relevant chunks (score > 0.3)
+        if top_score >= 0.3:
+            ambiguous_phrases = [
+                "tell me more",
+                "explain this",
+                "can you elaborate",
+                "explain that",
+                "tell me about it",
+                "what does it mean",
+                "what is it",
+                "what are they",
+            ]
+            for phrase in ambiguous_phrases:
+                if phrase in normalized:
+                    logger.info(f"[FOLLOWUP] Triggered: ambiguous_phrasing ('{phrase}') for query: {question[:50]}")
+                    return True, "ambiguous_phrasing"
+        
+        # 5. Missing critical domain context (only if chunks exist)
+        if top_score >= 0.3 and self._missing_critical_context(question):
             logger.info(f"[FOLLOWUP] Triggered: missing_context for query: {question[:50]}")
             return True, "missing_context"
         
         # All checks passed - confident to answer
         return False, "confident"
+
+    def _is_clear_query(self, question: str) -> bool:
+        """
+        Determine if a query is clear and specific (not ambiguous).
+        
+        A clear query:
+        - Has specific nouns/entities (not just pronouns)
+        - Is longer than 2 words
+        - Doesn't rely on external context
+        
+        Returns:
+            bool: True if the query is clear and specific
+        """
+        if not question:
+            return False
+        
+        normalized = question.strip().lower()
+        words = normalized.split()
+        
+        # Very short queries are often ambiguous
+        if len(words) < 3:
+            return False
+        
+        # Check for vague pronouns as the main subject
+        vague_subjects = {"it", "this", "that", "these", "those", "they", "them"}
+        
+        # If query starts with or primarily uses vague pronouns, it's not clear
+        if words[0] in vague_subjects:
+            return False
+        
+        # Check if the query has at least one specific noun (not just function words)
+        function_words = {
+            "what", "how", "why", "when", "where", "who", "which",
+            "is", "are", "was", "were", "do", "does", "did", "can", "could", "would", "should",
+            "the", "a", "an", "of", "in", "on", "at", "to", "for", "with", "by", "from",
+            "it", "this", "that", "these", "those", "they", "them", "i", "me", "my", "you", "your",
+            "and", "or", "but", "if", "then", "so", "be", "been", "being", "have", "has", "had",
+            "about", "more", "some", "any", "all", "most", "other", "into", "over", "such"
+        }
+        
+        # Count meaningful words (not function words)
+        meaningful_words = [w for w in words if w not in function_words and len(w) > 2]
+        
+        # Need at least 1 meaningful word for a clear query
+        if len(meaningful_words) < 1:
+            return False
+        
+        # Check for ambiguous standalone phrases
+        ambiguous_phrases = {
+            "tell me more", "explain this", "what about", "more details",
+            "explain that", "what is it", "how does it work"
+        }
+        if normalized in ambiguous_phrases:
+            return False
+        
+        return True
 
     def _missing_critical_context(self, question: str) -> bool:
         """
