@@ -1238,12 +1238,6 @@ import "./styles.css";
     }
     showSendButton();
 
-    // Save the current session before switching (if there are user messages)
-    const hasUserMessages = messages.some(m => m.user);
-    if (hasUserMessages && chatService.sessionId) {
-      saveChatHistory();
-    }
-
     const storedMsgs = localStorage.getItem(CHAT_MESSAGES_PREFIX + sessionId);
     if (!storedMsgs) return;
 
