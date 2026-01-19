@@ -77,6 +77,7 @@ import "./styles.css";
   let originalSendBtnHTML = null; // Store original send button HTML
   let userMessageCount = 0; // Track how many user messages have been sent in this session
   let currentSessionId = null; // Track current session ID
+  let userScrolledDuringStream = false; // Track if user manually scrolled during streaming
 
   // LocalStorage keys for chat history
   const CHAT_HISTORY_KEY = 'chatbot_chat_history';
@@ -125,8 +126,12 @@ import "./styles.css";
     }
   };
 
-  function scrollChatToBottom() {
+  function scrollChatToBottom(force = false) {
     if (chatBox) {
+      // Don't auto-scroll if user has manually scrolled during streaming (unless forced)
+      if (!force && userScrolledDuringStream && inFlight) {
+        return;
+      }
       chatBox.scrollTop = chatBox.scrollHeight;
     }
   }
@@ -159,6 +164,34 @@ import "./styles.css";
     if (!originalSendBtnHTML || originalSendBtnHTML.trim() === '') {
       originalSendBtnHTML = `<img src="${CONFIG.ui.iconsBaseUrl}/send.svg" alt="Send" class="plugin-icon icon"/>`;
     }
+  }
+
+  // Track user scroll during streaming to allow manual scrolling
+  if (chatBox) {
+    let isAutoScrolling = false;
+
+    // Wrap scrollTop setter to detect programmatic scrolls
+    // This is a workaround as there's no direct way to distinguish user scroll from programmatic scroll
+    // We'll use a global helper to set scrollTop programmatically and temporarily disable user scroll detection
+
+    chatBox.addEventListener('scroll', () => {
+      // Only track user scrolls during active streaming
+      if (inFlight && !isAutoScrolling) {
+        // Check if user scrolled away from bottom
+        const isNearBottom = chatBox.scrollHeight - chatBox.clientHeight - chatBox.scrollTop <= 50;
+        if (!isNearBottom) {
+          userScrolledDuringStream = true;
+        }
+      }
+    }, { passive: true });
+
+    // Helper to set scroll without triggering user scroll detection
+    window.__chatboxAutoScroll = (value) => {
+      isAutoScrolling = true;
+      chatBox.scrollTop = value;
+      // Reset after a brief delay to allow scroll event to process
+      setTimeout(() => { isAutoScrolling = false; }, 50);
+    };
   }
 
   // Try to load chat history from localStorage
@@ -446,6 +479,7 @@ import "./styles.css";
 
     // Set inFlight flag and disable UI elements
     inFlight = true;
+    userScrolledDuringStream = false; // Reset scroll flag for new message
     abortController = new AbortController();
 
     // Capture the session ID where this request started
@@ -1089,7 +1123,7 @@ import "./styles.css";
       const apiBase = (CONFIG.apiBase || '').replace(/\/+$/, '');
       const websiteUrl = encodeURIComponent(CONFIG.websiteUrl);
       const vid = encodeURIComponent(visitorId);
-      
+
       const response = await fetch(`${apiBase}/plugins/sync-sessions?website_url=${websiteUrl}&visitor_id=${vid}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
@@ -1101,7 +1135,7 @@ import "./styles.css";
       }
 
       const data = await response.json();
-      
+
       if (!data.sessions || data.sessions.length === 0) {
         console.log('No synced sessions from backend');
         return false;
@@ -1134,7 +1168,7 @@ import "./styles.css";
 
         if (shouldUseBackend && syncedSession.messages && syncedSession.messages.length > 0) {
           console.log(`Importing synced session: ${syncedSession.session_id}`);
-          
+
           // Convert backend message format to plugin format
           const pluginMessages = syncedSession.messages.map(msg => ({
             user: msg.user === true,
@@ -1175,7 +1209,7 @@ import "./styles.css";
         // Save updated sessions index
         sessions.sort((a, b) => b.timestamp - a.timestamp);
         localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
-        
+
         // Load the most recent session (or the current_session_id if specified)
         const targetSessionId = data.current_session_id || sessions[0]?.id;
         if (targetSessionId) {
@@ -1324,8 +1358,14 @@ import "./styles.css";
     const html = messages.map(renderMessageHtml).join("");
     chatBox.innerHTML = html;
 
-    if (wasNearBottom) chatBox.scrollTop = chatBox.scrollHeight;
-    else chatBox.scrollTop = previousScrollTop;
+    // During streaming, respect user's manual scroll - don't auto-scroll if they scrolled up
+    if (userScrolledDuringStream && inFlight) {
+      chatBox.scrollTop = previousScrollTop;
+    } else if (wasNearBottom) {
+      chatBox.scrollTop = chatBox.scrollHeight;
+    } else {
+      chatBox.scrollTop = previousScrollTop;
+    }
 
     if (chatEmpty) chatEmpty.style.display = messages.length ? "none" : "flex";
   }
