@@ -153,6 +153,13 @@ def _perform_schema_migrations(engine) -> None:
                 conn.commit()
             LOGGER.info("✅ Added 'widget_token' column to 'plugin_integrations' for Chat Widget feature")
         
+        if "is_widget_active" not in plugin_columns:
+            LOGGER.info("Adding 'is_widget_active' column to 'plugin_integrations'")
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE plugin_integrations ADD COLUMN is_widget_active TINYINT(1) NOT NULL DEFAULT 1"))
+                conn.commit()
+            LOGGER.info("✅ Added 'is_widget_active' column to 'plugin_integrations'")
+        
         # Add index on widget_token if not exists
         try:
             existing_indexes = {idx["name"] for idx in inspector.get_indexes("plugin_integrations")}

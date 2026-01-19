@@ -391,4 +391,4 @@ If you encounter any issues or have questions:
 
 ---
 
-Made with ❤️ for seamless RAG integration
+Made with ELTO for seamless RAG integration

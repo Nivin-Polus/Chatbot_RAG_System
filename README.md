@@ -1417,5 +1417,5 @@ For issues and questions:
 
 ---
 
-**Built with ❤️ using React, FastAPI, Qdrant, Claude AI, and MySQL**  
+**Built with ELTO using React, FastAPI, Qdrant, Claude AI, and MySQL**  
 **🏢 Now with Enterprise Multi-Tenant Architecture!**

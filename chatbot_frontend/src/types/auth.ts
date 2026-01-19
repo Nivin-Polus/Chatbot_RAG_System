@@ -19,6 +19,8 @@ export interface PluginIntegration {
   normalized_url: string;
   display_name?: string | null;
   is_active: boolean;
+  is_widget_active: boolean;
+  widget_token?: string | null;
   created_at?: string | null;
   created_by?: string | null;
 }

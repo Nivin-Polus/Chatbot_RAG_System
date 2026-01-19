@@ -15,6 +15,7 @@ const CONFIG = {
     collectionName: '',
     userId: '',
     username: '',
+    websiteId: '',
 };
 
 // ===== State =====
@@ -110,12 +111,13 @@ function setupEventListeners() {
 // ===== Widget Lookup =====
 function getWidgetToken() {
     // Extract token from URL path: /chat-widget/{token}
+    // The token is the last segment after /chat-widget/
     const path = window.location.pathname;
-    // Try /chat-widget/ first (primary), then /widget/ as fallback
-    let match = path.match(/\/chat-widget\/([a-zA-Z0-9-]+)/i);
-    if (!match) {
-        match = path.match(/\/widget\/([a-zA-Z0-9-]+)/i);
-    }
+
+    // Match UUID pattern at the end of the path
+    const uuidPattern = /([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i;
+    const match = path.match(uuidPattern);
+
     return match ? match[1] : null;
 }
 
@@ -156,10 +158,97 @@ async function lookupWidget(token) {
         elements.collectionName.textContent = data.collection_name || 'Chat Assistant';
         document.title = `${data.collection_name || 'Chat'} - Widget`;
 
+        // Verify the token is valid
+        const tokenValid = await verifyToken(CONFIG.accessToken);
+        if (!tokenValid) {
+            showError('Authentication failed. Please try refreshing the page.');
+            return false;
+        }
+
         return true;
     } catch (error) {
         console.error('Widget lookup error:', error);
         showError('Unable to connect to the chat service. Please check your connection.');
+        return false;
+    }
+}
+
+// Verify token with the backend (same endpoint used by plugin)
+async function verifyToken(token) {
+    if (!token) return false;
+
+    try {
+        const response = await fetch(`${CONFIG.apiBaseUrl}/auth/plugin-token/verify`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+                token: token,
+            }),
+        });
+
+        if (!response.ok) {
+            console.error('Token verification failed:', response.status);
+            return false;
+        }
+
+        const data = await response.json();
+
+        if (data.valid === true) {
+            // Store additional context from verification
+            if (data.user_id) CONFIG.userId = data.user_id;
+            if (data.username) CONFIG.username = data.username;
+            if (data.collection_id) CONFIG.collectionId = data.collection_id;
+            if (data.website_id) CONFIG.websiteId = data.website_id;
+            return true;
+        }
+
+        return false;
+    } catch (error) {
+        console.error('Token verification error:', error);
+        return false;
+    }
+}
+
+// Refresh token by re-calling the widget lookup endpoint
+async function refreshToken() {
+    const widgetToken = getWidgetToken();
+    if (!widgetToken) {
+        console.error('Cannot refresh: no widget token in URL');
+        return false;
+    }
+
+    try {
+        const baseUrl = window.location.origin;
+        const response = await fetch(`${baseUrl}/plugins/widget/lookup/${widgetToken}`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+
+        if (!response.ok) {
+            console.error('Token refresh failed:', response.status);
+            return false;
+        }
+
+        const data = await response.json();
+
+        // Update access token
+        CONFIG.accessToken = data.access_token;
+
+        // Re-verify the new token
+        const verified = await verifyToken(CONFIG.accessToken);
+        if (verified) {
+            console.log('Token refreshed successfully');
+            return true;
+        }
+
+        return false;
+    } catch (error) {
+        console.error('Token refresh error:', error);
         return false;
     }
 }
@@ -476,22 +565,40 @@ async function sendMessage(content) {
             timestamp: msg.timestamp,
         }));
 
+        const payload = {
+            question: content,
+            session_id: state.sessionId,
+            conversation_history: conversationHistory,
+            maintain_context: conversationHistory.length > 0,
+            collection_id: CONFIG.collectionId,
+        };
+
+        // Include website_id if available (same as plugin)
+        if (CONFIG.websiteId) {
+            payload.website_id = CONFIG.websiteId;
+        }
+
         const response = await fetch(`${CONFIG.apiBaseUrl}/chat/ask`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${CONFIG.accessToken}`,
             },
-            body: JSON.stringify({
-                question: content,
-                session_id: state.sessionId,
-                conversation_history: conversationHistory,
-                maintain_context: conversationHistory.length > 0,
-                collection_id: CONFIG.collectionId,
-            }),
+            body: JSON.stringify(payload),
         });
 
         removeTypingIndicator();
+
+        // Handle 401 - token expired, try to refresh
+        if (response.status === 401) {
+            const refreshed = await refreshToken();
+            if (refreshed) {
+                // Retry the request with new token
+                return sendMessage(content);
+            } else {
+                throw new Error('Session expired. Please refresh the page.');
+            }
+        }
 
         if (!response.ok) {
             throw new Error(`API error: ${response.status}`);

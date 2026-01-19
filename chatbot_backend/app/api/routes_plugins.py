@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import secrets
 import re
+import uuid
 from typing import List, Optional
 from urllib.parse import urlparse
 
@@ -35,6 +36,7 @@ class PluginIntegrationUpdate(BaseModel):
     website_url: Optional[str] = None
     display_name: Optional[str] = None
     is_active: Optional[bool] = None
+    is_widget_active: Optional[bool] = None
 
 
 class PluginIntegrationResponse(BaseModel):
@@ -45,11 +47,13 @@ class PluginIntegrationResponse(BaseModel):
     normalized_url: str
     display_name: Optional[str]
     is_active: bool
+    is_widget_active: bool
     created_at: Optional[str]
     created_by: Optional[str]
     plugin_username: Optional[str] = None
     plugin_password: Optional[str] = None
     plugin_token: Optional[str] = None
+    widget_token: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -118,11 +122,13 @@ def _to_response(plugin: PluginIntegration) -> PluginIntegrationResponse:
         normalized_url=plugin.normalized_url,
         display_name=plugin.display_name,
         is_active=plugin.is_active,
+        is_widget_active=plugin.is_widget_active,
         created_at=plugin.created_at.isoformat() if plugin.created_at else None,
         created_by=plugin.created_by,
         plugin_username=None,
         plugin_password=None,
         plugin_token=None,
+        widget_token=plugin.widget_token,
     )
 
 
@@ -335,6 +341,8 @@ async def create_plugin_integration(
         normalized_url=normalized,
         display_name=payload.display_name.strip() if payload.display_name else None,
         is_active=True,
+        is_widget_active=True,
+        widget_token=str(uuid.uuid4()),
         created_by=current_user.user_id,
     )
 
@@ -493,6 +501,9 @@ async def update_plugin(
 
     if payload.is_active is not None:
         plugin.is_active = payload.is_active
+
+    if payload.is_widget_active is not None:
+        plugin.is_widget_active = payload.is_widget_active
 
     plugin_user, generated_password, plugin_token_value = _ensure_plugin_user_for_collection(
         db,
@@ -1120,8 +1131,6 @@ async def get_synced_sessions(
 
 # --- Chat Widget URL Generation and Lookup ---
 
-import uuid
-
 class GenerateWidgetUrlRequest(BaseModel):
     collection_id: str
 
@@ -1207,9 +1216,9 @@ async def generate_widget_url(
         db.commit()
         db.refresh(plugin)
     
-    # Construct widget URL
+    # Construct widget URL - base URL already contains the full path (e.g., /chat-widget)
     base_url = settings.CHAT_WIDGET_HOST_URL.rstrip('/')
-    widget_url = f"{base_url}/widget/{plugin.widget_token}"
+    widget_url = f"{base_url}/{plugin.widget_token}"
     
     logger.info(
         "Widget URL generated for collection: %s, token: %s",
@@ -1239,7 +1248,7 @@ async def widget_lookup(
     # Find plugin by widget token
     plugin = db.query(PluginIntegration).filter(
         PluginIntegration.widget_token == widget_token,
-        PluginIntegration.is_active == True
+        PluginIntegration.is_widget_active == True
     ).first()
     
     if not plugin:
