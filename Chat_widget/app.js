@@ -178,7 +178,7 @@ async function verifyToken(token) {
     if (!token) return false;
 
     try {
-        const response = await fetch(`${CONFIG.apiBaseUrl}/auth/plugin-token/verify`, {
+        const response = await fetch(`${CONFIG.apiBaseUrl}/rag/auth/plugin-token/verify`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -578,7 +578,7 @@ async function sendMessage(content) {
             payload.website_id = CONFIG.websiteId;
         }
 
-        const response = await fetch(`${CONFIG.apiBaseUrl}/chat/ask`, {
+        const response = await fetch(`${CONFIG.apiBaseUrl}/rag/chat/ask`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
