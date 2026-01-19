@@ -332,8 +332,21 @@ function deleteSession(sessionId) {
 
 function updateSessionTitle(sessionId, firstMessage) {
     const session = state.sessions.find(s => s.id === sessionId);
+    // Only auto-update if it's still "New Chat" or we track manual renames (simplified here)
     if (session && session.title === 'New Chat') {
         session.title = firstMessage.slice(0, 40) + (firstMessage.length > 40 ? '...' : '');
+        saveSessions();
+        renderHistory();
+    }
+}
+
+function renameSession(sessionId) {
+    const session = state.sessions.find(s => s.id === sessionId);
+    if (!session) return;
+
+    const newTitle = prompt('Enter a new name for this chat:', session.title);
+    if (newTitle && newTitle.trim()) {
+        session.title = newTitle.trim();
         saveSessions();
         renderHistory();
     }
@@ -407,6 +420,12 @@ function renderHistory() {
         // Click to load session
         item.querySelector('.history-item-content').addEventListener('click', () => {
             loadSession(session.id);
+        });
+
+        // Edit button
+        item.querySelector('.history-action-btn.edit').addEventListener('click', (e) => {
+            e.stopPropagation();
+            renameSession(session.id);
         });
 
         // Delete button

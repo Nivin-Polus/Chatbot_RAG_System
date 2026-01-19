@@ -199,9 +199,28 @@ body {
 }
 
 .sidebar.collapsed {
-    width: 0;
-    overflow: hidden;
-    border-right: none;
+    width: 60px;
+    border-right: 1px solid var(--border-color);
+}
+
+.sidebar.collapsed .logo-container,
+.sidebar.collapsed .new-chat-btn span,
+.sidebar.collapsed .history-section {
+    display: none !important;
+}
+
+.sidebar.collapsed .sidebar-header {
+    justify-content: center;
+    padding: 16px 0;
+}
+
+.sidebar.collapsed .new-chat-btn {
+    justify-content: center;
+    padding: 10px;
+}
+
+.sidebar.collapsed .new-chat-btn svg {
+    margin-right: 0;
 }
 
 .sidebar-header {
@@ -411,32 +430,26 @@ body {
 
 /* Show header toggle when sidebar is collapsed */
 .sidebar.collapsed+.chat-main .mobile-menu-btn {
-    display: flex;
+    display: none;
+    /* Hidden on desktop because we have the rail */
+}
+
+@media (max-width: 768px) {
+    .sidebar.collapsed {
+        width: 0;
+        /* Fully hide on mobile */
+        border-right: none;
+    }
+
+    .sidebar.collapsed+.chat-main .mobile-menu-btn {
+        display: flex;
+        /* Show hamburger on mobile */
+    }
 }
 
 .header-new-chat-btn {
-    display: none;
-    width: 36px;
-    height: 36px;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    color: var(--text-secondary);
-    margin-right: 8px;
-    /* Spacing */
-}
-
-/* Show header new chat button when sidebar is collapsed */
-.sidebar.collapsed+.chat-main .header-new-chat-btn {
-    display: flex;
-}
-
-.header-new-chat-btn svg {
-    width: 20px;
-    height: 20px;
+    display: none !important;
+    /* Always hide, replaced by rail */
 }
 
 .mobile-menu-btn svg {
