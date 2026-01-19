@@ -1116,3 +1116,189 @@ async def get_synced_sessions(
         collection_id=sync_data["collection_id"],
         last_synced=last_synced
     )
+
+
+# --- Chat Widget URL Generation and Lookup ---
+
+import uuid
+
+class GenerateWidgetUrlRequest(BaseModel):
+    collection_id: str
+
+
+class GenerateWidgetUrlResponse(BaseModel):
+    widget_url: str
+    widget_token: str
+
+
+class WidgetLookupResponse(BaseModel):
+    access_token: str
+    collection_id: str
+    collection_name: str
+    api_base_url: str
+    user_id: str
+    username: str
+
+
+@router.post("/generate-widget-url", response_model=GenerateWidgetUrlResponse)
+async def generate_widget_url(
+    payload: GenerateWidgetUrlRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Generate a unique widget URL for a collection.
+    
+    This endpoint creates or retrieves a unique widget token for a collection's
+    plugin integration. The widget URL can be shared to provide direct access
+    to the chat widget without embedding the plugin.
+    """
+    from app.config import settings
+    
+    # Verify collection exists and user has access
+    collection = db.query(Collection).filter(
+        Collection.collection_id == payload.collection_id
+    ).first()
+    
+    if not collection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Collection not found"
+        )
+    
+    # Check user permissions
+    if not current_user.is_super_admin():
+        if not current_user.is_user_admin() or collection.admin_user_id != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+    
+    # Find or create plugin integration
+    plugin = db.query(PluginIntegration).filter(
+        PluginIntegration.collection_id == payload.collection_id
+    ).first()
+    
+    if not plugin:
+        # Create a default plugin integration for widget access
+        plugin = PluginIntegration(
+            collection_id=payload.collection_id,
+            website_url=f"widget://{payload.collection_id}",
+            normalized_url=f"widget.{payload.collection_id}",
+            display_name=f"{collection.name} Widget",
+            is_active=True,
+            created_by=current_user.user_id,
+            widget_token=str(uuid.uuid4()),
+        )
+        db.add(plugin)
+        db.commit()
+        db.refresh(plugin)
+        
+        # Ensure plugin user exists for this collection
+        _ensure_plugin_user_for_collection(
+            db,
+            collection=collection,
+            plugin=plugin,
+            creator_user_id=current_user.user_id,
+        )
+        db.commit()
+    elif not plugin.widget_token:
+        # Generate widget token if it doesn't exist
+        plugin.widget_token = str(uuid.uuid4())
+        db.commit()
+        db.refresh(plugin)
+    
+    # Construct widget URL
+    base_url = settings.CHAT_WIDGET_HOST_URL.rstrip('/')
+    widget_url = f"{base_url}/widget/{plugin.widget_token}"
+    
+    logger.info(
+        "Widget URL generated for collection: %s, token: %s",
+        payload.collection_id,
+        plugin.widget_token
+    )
+    
+    return GenerateWidgetUrlResponse(
+        widget_url=widget_url,
+        widget_token=plugin.widget_token,
+    )
+
+
+@router.get("/widget/lookup/{widget_token}", response_model=WidgetLookupResponse)
+async def widget_lookup(
+    widget_token: str,
+    db: Session = Depends(get_db),
+):
+    """Look up widget configuration by widget token.
+    
+    This endpoint is called by the standalone chat widget when loading.
+    It validates the widget token and returns authentication credentials
+    and configuration for the chat widget to function.
+    """
+    from app.config import settings
+    
+    # Find plugin by widget token
+    plugin = db.query(PluginIntegration).filter(
+        PluginIntegration.widget_token == widget_token,
+        PluginIntegration.is_active == True
+    ).first()
+    
+    if not plugin:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Widget not found or inactive"
+        )
+    
+    collection = plugin.collection
+    if not collection or not collection.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Collection is inactive"
+        )
+    
+    # Get or create plugin user
+    plugin_user, _, plugin_token_value = _ensure_plugin_user_for_collection(
+        db,
+        collection=collection,
+        plugin=plugin,
+        creator_user_id=None,
+    )
+    db.commit()
+    
+    if not plugin_user or not plugin_user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Widget user not found or inactive"
+        )
+    
+    # If no token was generated, use existing
+    if not plugin_token_value:
+        plugin_token_value = plugin_user.plugin_token
+    
+    if not plugin_token_value:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate authentication token"
+        )
+    
+    # Get API base URL from request or settings
+    api_base_url = f"{settings.effective_host}:{settings.effective_port}"
+    if settings.effective_host == "0.0.0.0":
+        # Use the configured frontend URL domain as a fallback
+        from urllib.parse import urlparse
+        parsed = urlparse(settings.FRONTEND_URL)
+        api_base_url = f"{parsed.scheme}://{parsed.netloc}"
+    
+    logger.info(
+        "Widget lookup successful for token: %s, collection: %s",
+        widget_token,
+        plugin.collection_id
+    )
+    
+    return WidgetLookupResponse(
+        access_token=plugin_token_value,
+        collection_id=plugin.collection_id,
+        collection_name=collection.name if collection else "",
+        api_base_url=api_base_url,
+        user_id=plugin_user.user_id,
+        username=plugin_user.username,
+    )

@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Link as ExternalLinkIcon, Loader2, Pencil, Plus, Plug, Trash2 } from 'lucide-react';
+import { Link as ExternalLinkIcon, Loader2, Pencil, Plus, Plug, Trash2, Copy, Link2 } from 'lucide-react';
 import { Collection, PluginIntegration } from '@/types/auth';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { toast } from 'sonner';
@@ -28,6 +28,8 @@ export default function SuperadminPlugins() {
   const [pluginFormData, setPluginFormData] = useState({ website_url: '', display_name: '' });
   const [editingPlugin, setEditingPlugin] = useState<PluginIntegration | null>(null);
   const [isPluginSaving, setIsPluginSaving] = useState(false);
+  const [widgetUrls, setWidgetUrls] = useState<Record<string, string>>({});
+  const [generatingWidgetUrl, setGeneratingWidgetUrl] = useState<string | null>(null);
   const { confirm: confirmAction, dialog: confirmDialog } = useConfirmAction();
 
   const refreshCollections = useCallback(async () => {
@@ -205,6 +207,40 @@ export default function SuperadminPlugins() {
     }
   };
 
+  const handleGenerateWidgetUrl = async (plugin: PluginIntegration) => {
+    if (!user?.access_token) return;
+
+    setGeneratingWidgetUrl(plugin.collection_id);
+    try {
+      const response = await apiPost(
+        `${import.meta.env.VITE_API_BASE_URL}/plugins/generate-widget-url`,
+        { collection_id: plugin.collection_id },
+        user.access_token
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to generate widget URL');
+      }
+
+      const data = await response.json();
+      setWidgetUrls(prev => ({ ...prev, [plugin.collection_id]: data.widget_url }));
+      toast.success('Widget URL generated!');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to generate widget URL');
+    } finally {
+      setGeneratingWidgetUrl(null);
+    }
+  };
+
+  const handleCopyWidgetUrl = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success('Widget URL copied to clipboard!');
+    } catch {
+      toast.error('Failed to copy URL');
+    }
+  };
+
   return (
     <DashboardLayout>
       {confirmDialog}
@@ -272,6 +308,7 @@ export default function SuperadminPlugins() {
                       <TableHead>Display Name</TableHead>
                       <TableHead>Knowledge Base</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Widget URL</TableHead>
                       <TableHead>Created</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
@@ -304,6 +341,43 @@ export default function SuperadminPlugins() {
                               {plugin.is_active ? 'Active' : 'Paused'}
                             </span>
                           </div>
+                        </TableCell>
+                        <TableCell>
+                          {widgetUrls[plugin.collection_id] ? (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-muted-foreground max-w-[200px] truncate">
+                                {widgetUrls[plugin.collection_id]}
+                              </span>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleCopyWidgetUrl(widgetUrls[plugin.collection_id])}
+                                    className="h-7 w-7"
+                                  >
+                                    <Copy className="h-3.5 w-3.5" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Copy URL</TooltipContent>
+                              </Tooltip>
+                            </div>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleGenerateWidgetUrl(plugin)}
+                              disabled={generatingWidgetUrl === plugin.collection_id || !plugin.is_active}
+                              className="text-xs"
+                            >
+                              {generatingWidgetUrl === plugin.collection_id ? (
+                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                              ) : (
+                                <Link2 className="h-3 w-3 mr-1" />
+                              )}
+                              Generate
+                            </Button>
+                          )}
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {plugin.created_at ? new Date(plugin.created_at).toLocaleString() : '—'}

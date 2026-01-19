@@ -109,9 +109,13 @@ function setupEventListeners() {
 
 // ===== Widget Lookup =====
 function getWidgetToken() {
-    // Extract token from URL path: /widget/{token}
+    // Extract token from URL path: /chat-widget/{token}
     const path = window.location.pathname;
-    const match = path.match(/\/widget\/([a-zA-Z0-9-]+)/);
+    // Try /chat-widget/ first (primary), then /widget/ as fallback
+    let match = path.match(/\/chat-widget\/([a-zA-Z0-9-]+)/i);
+    if (!match) {
+        match = path.match(/\/widget\/([a-zA-Z0-9-]+)/i);
+    }
     return match ? match[1] : null;
 }
 

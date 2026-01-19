@@ -143,6 +143,27 @@ def _perform_schema_migrations(engine) -> None:
                     conn.execute(text(f"ALTER TABLE system_prompts ADD COLUMN {name} {ddl}"))
                 LOGGER.info("Added column '%s' to system_prompts", name)
 
+    # Ensure plugin_integrations table has widget_token column for Chat Widget feature
+    if inspector.has_table("plugin_integrations"):
+        plugin_columns = {col["name"] for col in inspector.get_columns("plugin_integrations")}
+        if "widget_token" not in plugin_columns:
+            LOGGER.info("Adding 'widget_token' column to 'plugin_integrations'")
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE plugin_integrations ADD COLUMN widget_token VARCHAR(36) NULL UNIQUE"))
+                conn.commit()
+            LOGGER.info("✅ Added 'widget_token' column to 'plugin_integrations' for Chat Widget feature")
+        
+        # Add index on widget_token if not exists
+        try:
+            existing_indexes = {idx["name"] for idx in inspector.get_indexes("plugin_integrations")}
+            if "idx_plugin_integrations_widget_token" not in existing_indexes:
+                with engine.connect() as conn:
+                    conn.execute(text("CREATE INDEX idx_plugin_integrations_widget_token ON plugin_integrations(widget_token)"))
+                    conn.commit()
+                LOGGER.info("Added index 'idx_plugin_integrations_widget_token'")
+        except Exception as e:
+            LOGGER.warning(f"Could not create widget_token index (may already exist): {e}")
+
     # Ensure plugin integrations table exists (created via ORM metadata). Nothing else yet.
 
     # Add crawler_jobs table if missing

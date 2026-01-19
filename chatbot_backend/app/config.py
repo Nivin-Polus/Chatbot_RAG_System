@@ -117,6 +117,9 @@ class Settings(BaseSettings):
     HYBRID_KEYWORD_WEIGHT: float = Field(0.20, validation_alias="HYBRID_KEYWORD_WEIGHT")  # Weight for keyword matching
     HYBRID_FUZZY_WEIGHT: float = Field(0.10, validation_alias="HYBRID_FUZZY_WEIGHT")  # Weight for fuzzy matching
 
+    # Chat Widget Configuration
+    CHAT_WIDGET_HOST_URL: str = Field("https://dev-chatbot.polussolutions.com/chat-widget", validation_alias="CHAT_WIDGET_HOST_URL")
+
     # API credentials
     API_USERNAME: str = Field("your_username", validation_alias="API_USERNAME")
     API_PASSWORD_HASH: str = Field("your_hashed_password", validation_alias="API_PASSWORD_HASH")
