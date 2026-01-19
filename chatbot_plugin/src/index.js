@@ -596,7 +596,7 @@ import "./styles.css";
 
     // Abort any ongoing fetch request
     if (abortController) {
-      // abortController.abort();
+      abortController.abort();
       abortController = null;
     }
 
