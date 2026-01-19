@@ -412,6 +412,20 @@ function renderHistory() {
 }
 
 function renderMessages() {
+    if (state.messages.length === 0) {
+        elements.messagesList.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-content">
+                    <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                    </svg>
+                    <p class="empty-state-text">You can start the conversation by sending a message below.</p>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
     elements.messagesList.innerHTML = '';
 
     state.messages.forEach(msg => {
@@ -424,11 +438,11 @@ function renderMessages() {
 
 function createMessageElement(msg) {
     const div = document.createElement('div');
-    div.className = `message ${msg.role}`;
+    div.className = `message-row ${msg.role}`;
     div.dataset.id = msg.id;
 
-    const avatar = msg.role === 'user' ? 'U' : 'AI';
     const time = formatTime(msg.timestamp);
+    let sourcesHtml = '';
 
     if (msg.sources && msg.sources.length > 0) {
         const sourceItems = msg.sources.map(source => {
