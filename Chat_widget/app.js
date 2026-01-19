@@ -126,7 +126,7 @@ async function lookupWidget(token) {
         // Determine API base URL from current location
         const baseUrl = window.location.origin;
 
-        const response = await fetch(`${baseUrl}/rag/widget/lookup/${token}`, {
+        const response = await fetch(`${baseUrl}/rag/plugins/widget/lookup/${token}`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -222,7 +222,7 @@ async function refreshToken() {
 
     try {
         const baseUrl = window.location.origin;
-        const response = await fetch(`${baseUrl}/rag/widget/lookup/${widgetToken}`, {
+        const response = await fetch(`${baseUrl}/rag/plugins/widget/lookup/${widgetToken}`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
