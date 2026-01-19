@@ -25,8 +25,8 @@ const state = {
     messages: [],
     isLoading: false,
     isStreaming: false,
-    theme: 'light',
     sidebarOpen: true,
+    typingInterval: null,
 };
 
 // ===== DOM Elements =====
@@ -430,42 +430,40 @@ function createMessageElement(msg) {
     const avatar = msg.role === 'user' ? 'U' : 'AI';
     const time = formatTime(msg.timestamp);
 
-    let sourcesHtml = '';
     if (msg.sources && msg.sources.length > 0) {
         const sourceItems = msg.sources.map(source => {
-            if (source.url) {
-                return `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener" class="source-item">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                        <polyline points="15 3 21 3 21 9"/>
-                        <line x1="10" y1="14" x2="21" y2="3"/>
-                    </svg>
-                    ${escapeHtml(source.file_name)}
+            const isWeb = source.url || source.source_type === 'web_crawl';
+            const icon = isWeb ?
+                `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>` :
+                `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>`;
+
+            if (isWeb && source.url) {
+                return `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener" class="source-item web">
+                    ${icon}
+                    <span>${escapeHtml(source.file_name || 'Link')}</span>
                 </a>`;
             } else {
-                return `<span class="source-item">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
-                        <polyline points="13 2 13 9 20 9"/>
-                    </svg>
-                    ${escapeHtml(source.file_name)}
-                </span>`;
+                return `<div class="source-item file">
+                    ${icon}
+                    <span>${escapeHtml(source.file_name)}</span>
+                </div>`;
             }
         }).join('');
 
         sourcesHtml = `
             <div class="message-sources">
                 <div class="sources-label">Sources</div>
-                ${sourceItems}
+                <div class="sources-list">${sourceItems}</div>
             </div>
         `;
     }
 
     div.innerHTML = `
-        <div class="message-avatar">${avatar}</div>
         <div class="message-content">
-            ${formatMessageContent(msg.content)}
-            ${sourcesHtml}
+            <div class="message-text-wrapper">
+                ${formatMessageContent(msg.content)}
+                ${sourcesHtml}
+            </div>
             <div class="message-time">${time}</div>
         </div>
     `;
@@ -475,14 +473,17 @@ function createMessageElement(msg) {
 
 function addTypingIndicator() {
     const div = document.createElement('div');
-    div.className = 'message assistant';
+    div.className = 'message-row assistant';
     div.id = 'typing-indicator';
     div.innerHTML = `
-        <div class="message-avatar">AI</div>
-        <div class="message-content typing-indicator">
-            <span class="typing-dot"></span>
-            <span class="typing-dot"></span>
-            <span class="typing-dot"></span>
+        <div class="message-content">
+            <div class="thinking-container">
+                <img src="leto.svg" alt="Leto logo" class="thinking-logo">
+                <div class="thinking-container">
+                    <span class="loading-spinner-small"></span>
+                    <span class="thinking-text">Leto is thinking...</span>
+                </div>
+            </div>
         </div>
     `;
     elements.messagesList.appendChild(div);
@@ -629,18 +630,20 @@ async function sendMessage(content) {
                 .slice(0, 4);
         }
 
-        // Add assistant message
+        // Add assistant message and start streaming
         const assistantMessage = {
             id: `assistant_${Date.now()}`,
             role: 'assistant',
             content: assistantContent,
             timestamp: new Date().toISOString(),
             sources: sources.length > 0 ? sources : undefined,
+            streaming: true,
         };
 
         state.messages.push(assistantMessage);
+        await streamAssistantResponse(assistantMessage.id, assistantContent);
+
         saveSessions();
-        renderMessages();
 
     } catch (error) {
         console.error('Chat error:', error);
@@ -660,6 +663,49 @@ async function sendMessage(content) {
         state.isLoading = false;
         elements.sendBtn.disabled = elements.messageInput.value.trim().length === 0;
     }
+}
+
+async function streamAssistantResponse(messageId, fullContent) {
+    return new Promise((resolve) => {
+        state.isStreaming = true;
+        let currentIndex = 0;
+        const msgIndex = state.messages.findIndex(m => m.id === messageId);
+        if (msgIndex === -1) {
+            resolve();
+            return;
+        }
+
+        // Create the element in UI first
+        renderMessages();
+        const messageEl = elements.messagesList.querySelector(`[data-id="${messageId}"] .message-content`);
+        const sourcesEl = elements.messagesList.querySelector(`[data-id="${messageId}"] .message-sources`);
+
+        if (sourcesEl) sourcesEl.style.display = 'none'; // Hide sources while streaming
+
+        if (state.typingInterval) clearInterval(state.typingInterval);
+
+        state.typingInterval = setInterval(() => {
+            currentIndex += 1;
+            const partialContent = fullContent.slice(0, currentIndex);
+
+            // Update the message content in state and UI
+            state.messages[msgIndex].content = partialContent;
+            if (messageEl) {
+                messageEl.innerHTML = formatMessageContent(partialContent);
+            }
+
+            scrollToBottom();
+
+            if (currentIndex >= fullContent.length) {
+                clearInterval(state.typingInterval);
+                state.isStreaming = false;
+                state.messages[msgIndex].streaming = false;
+                if (sourcesEl) sourcesEl.style.display = 'block'; // Show sources when done
+                scrollToBottom();
+                resolve();
+            }
+        }, 10); // Match the snappiness
+    });
 }
 
 // ===== Sidebar =====
