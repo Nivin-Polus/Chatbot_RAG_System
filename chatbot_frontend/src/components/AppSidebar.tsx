@@ -13,7 +13,6 @@ import {
   SidebarFooter,
   useSidebar,
   SidebarMenuAction,
-  SidebarTrigger,
 } from '@/components/ui/sidebar';
 import {
   Database,
@@ -239,11 +238,6 @@ export function AppSidebar() {
                 </div>
               )}
             </div>
-            {open && (
-              <div className="flex items-center gap-1">
-                <SidebarTrigger />
-              </div>
-            )}
           </div>
           {open && (
             <Button

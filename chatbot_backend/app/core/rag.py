@@ -37,268 +37,14 @@ MAX_VERBATIM_MESSAGES = 20   # Keep last 10 Q&A pairs (20 messages) verbatim
 SUMMARY_TRIGGER_THRESHOLD = 20  # Start summarizing when history exceeds this count
 
 
+# ============================================
+# RAG SEARCH HELPERS
+# ============================================
+
 def _estimate_tokens(text: str) -> int:
     """Estimate token count (~4 chars per token for English)."""
     return len(text) // 4 if text else 0
 
-
-# ============================================
-# HYBRID SEARCH HELPER FUNCTIONS
-# ============================================
-
-# Hybrid scoring weights - now configurable via settings
-# Defaults: 70% vector, 20% keyword, 10% fuzzy (must sum to 1.0)
-def _get_hybrid_weights():
-    """Get hybrid search weights from settings."""
-    vector_weight = getattr(settings, "HYBRID_VECTOR_WEIGHT", 0.70)
-    keyword_weight = getattr(settings, "HYBRID_KEYWORD_WEIGHT", 0.20)
-    fuzzy_weight = getattr(settings, "HYBRID_FUZZY_WEIGHT", 0.10)
-    return vector_weight, keyword_weight, fuzzy_weight
-
-# Legacy constants for backward compatibility (used by helper functions)
-VECTOR_WEIGHT = 0.70
-KEYWORD_WEIGHT = 0.20
-FUZZY_WEIGHT = 0.10
-
-# Fuzzy search constraints
-FUZZY_SCORE_CAP = 0.55  # Hard cap on fuzzy contribution
-FUZZY_MAX_TEXT_LENGTH = 300  # Only apply fuzzy to short chunks
-
-# Field weights for keyword scoring
-KEYWORD_FIELD_WEIGHTS = {
-    "page_title": 1.0,      # chunk_title equivalent for web crawl
-    "section_header": 0.8,  # section_title equivalent for web crawl
-    "file_name": 0.6,
-    "first_sentence": 0.5,
-}
-
-
-def _tokenize(text: str) -> Set[str]:
-    """Lowercase tokenization with basic normalization.
-    
-    Removes punctuation and splits on whitespace.
-    Returns empty set for None/empty input.
-    """
-    if not text:
-        return set()
-    # Remove punctuation and normalize
-    normalized = re.sub(r'[^\w\s]', ' ', text.lower())
-    # Split and filter empty strings
-    return {token for token in normalized.split() if token and len(token) > 1}
-
-
-def _get_first_sentence(text: str) -> str:
-    """Extract first sentence from chunk text for keyword matching."""
-    if not text:
-        return ""
-    # Find first sentence ending
-    match = re.search(r'^[^.!?\n]+[.!?]?', text.strip())
-    return match.group(0) if match else text[:150]
-
-
-def _compute_keyword_score(query_tokens: Set[str], payload: Dict, chunk_text: str) -> float:
-    """Compute weighted Jaccard similarity across target fields.
-    
-    Target fields (with weights):
-    - page_title (1.0) - for web crawl chunks
-    - section_header (0.8) - for web crawl chunks
-    - file_name (0.6) - for all chunks
-    - first_sentence (0.5) - first sentence of chunk_text
-    
-    Returns normalized score in [0.0, 1.0].
-    """
-    if not query_tokens:
-        return 0.0
-    
-    total_weighted_score = 0.0
-    total_weight = 0.0
-    
-    # page_title (for web crawl)
-    page_title = payload.get("page_title", "")
-    if page_title:
-        field_tokens = _tokenize(page_title)
-        if field_tokens:
-            overlap = len(query_tokens & field_tokens)
-            union = len(query_tokens | field_tokens)
-            jaccard = overlap / union if union > 0 else 0.0
-            total_weighted_score += jaccard * KEYWORD_FIELD_WEIGHTS["page_title"]
-            total_weight += KEYWORD_FIELD_WEIGHTS["page_title"]
-    
-    # section_header (for web crawl)
-    section_header = payload.get("section_header", "")
-    if section_header:
-        field_tokens = _tokenize(section_header)
-        if field_tokens:
-            overlap = len(query_tokens & field_tokens)
-            union = len(query_tokens | field_tokens)
-            jaccard = overlap / union if union > 0 else 0.0
-            total_weighted_score += jaccard * KEYWORD_FIELD_WEIGHTS["section_header"]
-            total_weight += KEYWORD_FIELD_WEIGHTS["section_header"]
-    
-    # file_name (for all chunks)
-    file_name = payload.get("file_name", "")
-    if file_name:
-        # Clean file extensions for matching
-        clean_name = re.sub(r'\.(pdf|docx|pptx|xlsx|txt|csv|html?)$', '', file_name, flags=re.IGNORECASE)
-        field_tokens = _tokenize(clean_name)
-        if field_tokens:
-            overlap = len(query_tokens & field_tokens)
-            union = len(query_tokens | field_tokens)
-            jaccard = overlap / union if union > 0 else 0.0
-            total_weighted_score += jaccard * KEYWORD_FIELD_WEIGHTS["file_name"]
-            total_weight += KEYWORD_FIELD_WEIGHTS["file_name"]
-    
-    # first_sentence of chunk_text
-    first_sentence = _get_first_sentence(chunk_text)
-    if first_sentence:
-        field_tokens = _tokenize(first_sentence)
-        if field_tokens:
-            overlap = len(query_tokens & field_tokens)
-            union = len(query_tokens | field_tokens)
-            jaccard = overlap / union if union > 0 else 0.0
-            total_weighted_score += jaccard * KEYWORD_FIELD_WEIGHTS["first_sentence"]
-            total_weight += KEYWORD_FIELD_WEIGHTS["first_sentence"]
-    
-    # Normalize by total weight to get score in [0, 1]
-    if total_weight > 0:
-        return total_weighted_score / total_weight
-    return 0.0
-
-
-def _is_structured_content(text: str) -> bool:
-    """Detect structured content that should skip fuzzy matching.
-    
-    Detects:
-    - Tables (| or tab characters in patterns)
-    - Code blocks (triple backticks)
-    - Log lines (timestamp patterns)
-    """
-    if not text:
-        return False
-    
-    # Code blocks
-    if '```' in text:
-        return True
-    
-    # Tables (multiple | characters suggesting table structure)
-    if text.count('|') >= 3:
-        return True
-    
-    # Tab-separated data (likely table)
-    if text.count('\t') >= 2:
-        return True
-    
-    # Log line patterns (timestamp at start)
-    log_pattern = r'^\d{4}[-/]\d{2}[-/]\d{2}[\sT]\d{2}:\d{2}'
-    if re.search(log_pattern, text[:50]):
-        return True
-    
-    return False
-
-
-def _compute_fuzzy_score(query: str, payload: Dict, chunk_text: str) -> float:
-    """Compute fuzzy matching score with safety controls.
-    
-    Only applies fuzzy to:
-    - page_title
-    - section_header
-    - chunk_text IF len < 300 chars AND not structured content
-    
-    Returns score in [0.0, FUZZY_SCORE_CAP] (hard capped at 0.55).
-    """
-    if not RAPIDFUZZ_AVAILABLE:
-        return 0.0
-    
-    if not query:
-        return 0.0
-    
-    max_fuzzy = 0.0
-    
-    # Fuzzy on page_title
-    page_title = payload.get("page_title", "")
-    if page_title:
-        ratio = fuzz.partial_ratio(query.lower(), page_title.lower())
-        max_fuzzy = max(max_fuzzy, ratio / 100.0)
-    
-    # Fuzzy on section_header
-    section_header = payload.get("section_header", "")
-    if section_header:
-        ratio = fuzz.partial_ratio(query.lower(), section_header.lower())
-        max_fuzzy = max(max_fuzzy, ratio / 100.0)
-    
-    # Fuzzy on chunk_text (only if short and not structured)
-    if chunk_text and len(chunk_text) < FUZZY_MAX_TEXT_LENGTH:
-        if not _is_structured_content(chunk_text):
-            ratio = fuzz.partial_ratio(query.lower(), chunk_text.lower())
-            max_fuzzy = max(max_fuzzy, ratio / 100.0)
-    
-    # Apply hard cap
-    return min(max_fuzzy, FUZZY_SCORE_CAP)
-
-
-def _should_use_fuzzy(query: str, vector_results: List[Dict]) -> bool:
-    """Determine if fuzzy scoring should be activated.
-    
-    Fuzzy is enabled when ANY of these conditions are true:
-    - Query has 8 or fewer words
-    - No vector results returned
-    - Top vector score is below 0.55
-    """
-    # Short queries benefit from fuzzy
-    if len(query.split()) <= 8:
-        return True
-    
-    # No results - fuzzy might help
-    if not vector_results:
-        return True
-    
-    # Low confidence results - fuzzy might help
-    top_score = max((r.get("score", 0) for r in vector_results), default=0)
-    if top_score < 0.55:
-        return True
-    
-    return False
-
-
-def _compute_hybrid_score(
-    vector_score: float,
-    keyword_score: float,
-    fuzzy_score: float
-) -> float:
-    """Apply the hybrid fusion formula with dynamic weight normalization.
-    
-    Uses dynamic weight normalization to ensure scores are NEVER reduced by signals
-    that don't contribute. When keyword_score=0 or fuzzy_score=0, their weight is
-    redistributed to active signals proportionally.
-    
-    This prevents the common issue where a good vector score (e.g., 0.4455) gets
-    penalized down to a lower score (e.g., 0.3573) just because keyword matching
-    didn't find any matches.
-    
-    Weights are configurable via settings (default: 0.70, 0.20, 0.10)
-    """
-    vector_weight, keyword_weight, fuzzy_weight = _get_hybrid_weights()
-    
-    # Calculate active weights (only for non-zero scores)
-    # Vector is always considered active since it's the primary signal
-    active_weights = vector_weight
-    active_score = vector_weight * vector_score
-    
-    if keyword_score > 0:
-        active_weights += keyword_weight
-        active_score += keyword_weight * keyword_score
-    
-    if fuzzy_score > 0:
-        active_weights += fuzzy_weight
-        active_score += fuzzy_weight * fuzzy_score
-    
-    # Normalize by active weights to maintain score scale
-    # This ensures the final score is never lower than the vector score alone
-    if active_weights > 0:
-        return active_score / active_weights
-    
-    # Fallback (shouldn't happen since vector_weight > 0)
-    return vector_score
 
 
 # AI Classification instruction - appended to every prompt independently of user-configurable system prompts
@@ -557,10 +303,10 @@ class RAG:
         logger.info(f"[RAG RETRIEVE] Total unique results: {len(all_results)}")
         
         # ============================================
-        # [PURE VECTOR SEARCH - Hybrid scoring removed]
+        # [PURE VECTOR SEARCH - Enhanced Name Boosting]
         # ============================================
         
-        # Use pure vector scores from Qdrant
+        # Use pure vector scores from Qdrant as baseline
         for r in all_results:
             payload = r.get("payload", {})
             text = payload.get("text", "")
@@ -569,40 +315,47 @@ class RAG:
             # Start with pure vector score
             final_score = vector_score
             
-            # Apply legacy boosting for "who is X" queries only
-            # This helps specific name/title searches get priority
+            # Apply enhanced boosting for name/title queries
             if search_term:
                 text_lower = text.lower()
-                search_parts = search_term.split()
-                excluded_words = ["staff", "directory", "contact", "the", "and", "for", "with", "from", "about"]
+                term_lower = search_term.lower()
+                
+                # 1. Exact Full Match (Highest Priority)
+                # Matches "John Doe" in "John Doe is the CEO..."
+                if term_lower in text_lower:
+                    # Give a significant boost for exact matches
+                    # But don't exceed 1.0
+                    final_score = max(final_score, 0.90)
+                
+                # 2. Key Term Presence (High Priority)
+                search_parts = term_lower.split()
+                excluded_words = {"who", "is", "about", "the", "and", "for", "with", "from", "staff", "directory", "contact"}
                 meaningful_parts = [p for p in search_parts if len(p) > 2 and p not in excluded_words]
                 
-                # Exact sequence match gets highest priority
-                if search_term in text_lower:
-                    final_score = max(final_score, 0.85)
-                elif meaningful_parts:
+                if meaningful_parts:
                     matches = [p for p in meaningful_parts if p in text_lower]
                     match_ratio = len(matches) / len(meaningful_parts) if meaningful_parts else 0
                     
                     if match_ratio >= 1.0:
-                        final_score = max(final_score, 0.80)
-                    elif match_ratio >= 0.75:
-                        final_score = max(final_score, 0.75)
+                        # Mentioned all words (e.g., both "John" and "Doe") but not necessarily together
+                        final_score = max(final_score, 0.82)
                     elif match_ratio >= 0.5:
-                        final_score = max(final_score, 0.65)
+                        # Mentioned most words
+                        final_score = max(final_score, 0.70)
                     elif matches:
+                        # Mentioned at least one word
                         final_score = max(final_score, 0.60)
             
-            # Store final score
+            # Store final score and metadata
             r["score"] = final_score
             r["keyword_score"] = 0.0
             r["fuzzy_score"] = 0.0
-            r["fusion_method"] = "vector_only"
+            r["fusion_method"] = "vector_only_with_name_boost"
         
         # Log scoring summary
         if all_results:
             top_result = max(all_results, key=lambda x: x.get("score", 0))
-            logger.info(f"[VECTOR SEARCH] Top result: score={top_result.get('score', 0):.4f}")
+            logger.info(f"[VECTOR SEARCH] Top result: score={top_result.get('score', 0):.4f}, Boosted: {search_term is not None}")
         
         # ============================================
         # [END VECTOR SEARCH]
@@ -731,8 +484,8 @@ class RAG:
                 return True, "vague_pronoun"
         
         # 4. Ambiguous phrases that genuinely need clarification
-        #    BUT only if we have SOME relevant chunks (score > 0.3)
-        if top_score >= 0.3:
+        #    BUT only if we have SOME context to clarify against
+        if top_score >= 0.25:
             ambiguous_phrases = [
                 "tell me more",
                 "explain this",
@@ -745,13 +498,23 @@ class RAG:
             ]
             for phrase in ambiguous_phrases:
                 if phrase in normalized:
-                    logger.info(f"[FOLLOWUP] Triggered: ambiguous_phrasing ('{phrase}') for query: {question[:50]}")
-                    return True, "ambiguous_phrasing"
+                    # Check if it's JUST the phrase
+                    if normalized == phrase or normalized == phrase + "?":
+                        logger.info(f"[FOLLOWUP] Triggered: ambiguous_phrasing ('{phrase}') for query: {question[:50]}")
+                        return True, "ambiguous_phrasing"
         
-        # 5. Missing critical domain context (only if chunks exist)
-        if top_score >= 0.3 and self._missing_critical_context(question):
+        # 5. Missing critical domain context (only if chunks exist and logic suggests it)
+        if top_score >= 0.30 and self._missing_critical_context(question):
             logger.info(f"[FOLLOWUP] Triggered: missing_context for query: {question[:50]}")
             return True, "missing_context"
+        
+        # 6. Low score with SOME potential (Top score is low but query isn't generic)
+        if 0.15 <= top_score < threshold and not self._is_small_talk(question):
+             # If it's not small talk but score is very low, maybe a clarify would help
+             # BUT only if query is reasonably long (meaning user is trying to say something)
+             if len(normalized.split()) >= 3:
+                 logger.info(f"[FOLLOWUP] Triggered: low_relevance_score ({top_score:.4f}) for query: {question[:50]}")
+                 return True, "low_relevance_score"
         
         # All checks passed - confident to answer
         return False, "confident"
@@ -896,7 +659,7 @@ class RAG:
         hint = reason_hints.get(reason, "The user's question needs clarification.")
         
         prompt = f"""You are a helpful assistant. A user asked a question that needs clarification before you can provide a good answer.
-
+        
 User's question: "{question}"
 
 Situation: {hint}
@@ -905,11 +668,12 @@ Situation: {hint}
 Your task: Generate 1-2 SHORT, SPECIFIC clarifying questions to ask the user. 
 
 Rules:
-1. Keep each question to ONE sentence
-2. Offer specific options when possible (e.g., "Are you asking about X or Y?")
-3. Be friendly and helpful
-4. Do NOT try to answer the original question
-5. Do NOT apologize excessively
+1. Keep each question to ONE sentence.
+2. Offer specific options based on the available topics if possible (e.g., "Are you asking about [Topic A] or [Topic B]?").
+3. Be professional yet friendly.
+4. Do NOT try to answer the original question.
+5. Do NOT provide an empty response.
+6. The questions should help you narrow down which part of the knowledge base to search.
 
 Respond with ONLY the clarifying question(s), nothing else."""
 
@@ -1251,7 +1015,7 @@ Answer:"""
         logger.info(f"[RAG DEBUG] After sources strip length: {len(answer)} chars")
         
         # Build and append formatted sources ONLY if not a generic response
-        if not is_generic:
+        if True:  # Always show sources
             source_list = []
             for file_name, info in sorted(source_files.items()):
                 source_type = info.get('source_type', 'file')
@@ -1414,7 +1178,7 @@ Answer:"""
         answer = re.sub(r'(?:^|\n)\s*\**\s*\bSources?\b:?\s*\**\s*(?:\n[\s\S]*)?$', '', answer, flags=re.IGNORECASE).strip()
         
         # Build and append formatted sources ONLY if not a generic response
-        if not is_generic:
+        if True:  # Always show sources
             source_list = []
             for file_name, info in sorted(source_files.items()):
                 source_type = info.get('source_type', 'file')

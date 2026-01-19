@@ -555,12 +555,12 @@ body {
 
 .sources-list {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+    flex-direction: column;
+    gap: 6px;
 }
 
 .source-item {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 6px;
     padding: 6px 12px;

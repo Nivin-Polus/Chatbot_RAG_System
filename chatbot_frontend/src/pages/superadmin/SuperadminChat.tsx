@@ -1064,17 +1064,17 @@ export default function SuperadminChat() {
           );
         } else {
           // Empty line
-          nodes.push(<div key={`${messageId}-line-${i}`} className="h-4" />);
+          nodes.push(<div key={`${messageId}-line-${i}`} className="h-1" />);
         }
       }
 
       if (sourcesNodes.length > 0) {
         nodes.push(
-          <div key={`${messageId}-sources-container`} className="mt-4 pt-3 border-t border-border/40 bg-muted/30 rounded-lg p-3 space-y-2">
-            <span className="block text-xs font-bold uppercase text-muted-foreground/80 mb-2">
+          <div key={`${messageId}-sources-container`} className="mt-2 pt-2 border-t border-border/40 bg-muted/30 rounded-lg p-2 space-y-1">
+            <span className="block text-xs font-bold uppercase text-muted-foreground/80 mb-1">
               Sources:
             </span>
-            <div className="flex flex-col gap-2 w-full">
+            <div className="flex flex-col gap-1 w-full">
               {sourcesNodes}
             </div>
           </div>
@@ -1213,7 +1213,7 @@ export default function SuperadminChat() {
                                 {formatTime(message.timestamp)}
                               </p>
                             </div>
-                            <div className="flex flex-col gap-1 text-sm leading-relaxed">
+                            <div className="flex flex-col gap-0.5 text-sm leading-snug">
                               {renderMessageContent(message.content, message.id, message.sources)}
                             </div>
                           </div>

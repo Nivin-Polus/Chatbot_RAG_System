@@ -111,11 +111,6 @@ class Settings(BaseSettings):
     RAG_MIN_SCORE: float = Field(0.25, validation_alias="RAG_MIN_SCORE")  # Minimum similarity threshold to filter low-confidence chunks (lowered due to hybrid scoring)
     SOURCE_MIN_SCORE: float = Field(0.40, validation_alias="SOURCE_MIN_SCORE")  # Minimum confidence score to show a source to users
     MAX_CONTEXT_TOKENS: int = Field(4000, validation_alias="MAX_CONTEXT_TOKENS")  # Token cap for context chunks sent to LLM
-    
-    # Hybrid Search Weights (must sum to 1.0)
-    HYBRID_VECTOR_WEIGHT: float = Field(0.70, validation_alias="HYBRID_VECTOR_WEIGHT")  # Weight for vector/semantic similarity
-    HYBRID_KEYWORD_WEIGHT: float = Field(0.20, validation_alias="HYBRID_KEYWORD_WEIGHT")  # Weight for keyword matching
-    HYBRID_FUZZY_WEIGHT: float = Field(0.10, validation_alias="HYBRID_FUZZY_WEIGHT")  # Weight for fuzzy matching
 
     # Chat Widget Configuration
     CHAT_WIDGET_HOST_URL: str = Field("https://dev-chatbot.polussolutions.com/chat-widget", validation_alias="CHAT_WIDGET_HOST_URL")
