@@ -226,10 +226,10 @@ body {
     left: calc(100% + 10px);
     top: 50%;
     transform: translateY(-50%);
-    background-color: var(--text-primary);
-    color: var(--bg-primary);
-    padding: 6px 10px;
-    border-radius: 6px;
+    background-color: #ffffff;
+    color: #000000;
+    padding: 6px 12px;
+    border-radius: 4px;
     font-size: 12px;
     font-weight: 500;
     white-space: nowrap;
@@ -238,6 +238,7 @@ body {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     opacity: 0;
     animation: fadeInTooltip 0.2s forwards;
+    border: 1px solid var(--border-light);
 }
 
 @keyframes fadeInTooltip {
