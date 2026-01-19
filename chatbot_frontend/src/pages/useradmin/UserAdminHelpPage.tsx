@@ -8,7 +8,7 @@ import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Copy, Loader2, LifeBuoy, CheckCircle2, XCircle, AlertCircle, RefreshCw } from 'lucide-react';
+import { Copy, Loader2, HelpCircle, CheckCircle2, XCircle, AlertCircle, RefreshCw } from 'lucide-react';
 import { Collection, PluginIntegration } from '@/types/auth';
 import { apiGet, apiPut } from '@/utils/api';
 import { toast } from 'sonner';
@@ -144,7 +144,7 @@ export default function UserAdminHelpPage() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle className="flex items-center gap-2 text-2xl">
-                  <LifeBuoy className="h-5 w-5" /> Help Page URLs
+                  <HelpCircle className="h-5 w-5" /> Help Page URLs
                 </CardTitle>
                 <CardDescription>
                   View and manage standalone help pages for your knowledge base.
@@ -177,7 +177,7 @@ export default function UserAdminHelpPage() {
               </div>
             ) : plugins.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
-                <LifeBuoy className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <HelpCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>No help pages configured yet for {currentCollection.name}.</p>
                 <p className="text-sm">Add a plugin integration first to enable help pages.</p>
               </div>
@@ -281,7 +281,7 @@ export default function UserAdminHelpPage() {
         <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
           <CardContent className="pt-6">
             <div className="flex gap-3">
-              <LifeBuoy className="h-5 w-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+              <HelpCircle className="h-5 w-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
                   About Help Pages
