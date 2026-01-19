@@ -1311,3 +1311,32 @@ async def widget_lookup(
         user_id=plugin_user.user_id,
         username=plugin_user.username,
     )
+
+
+# --- Plugin Embed Code Configuration ---
+
+class PluginEmbedConfigResponse(BaseModel):
+    """Response with plugin embed code configuration."""
+    base_url: str
+    css_filename: str
+    js_filename: str
+
+
+@router.get("/embed-config", response_model=PluginEmbedConfigResponse)
+async def get_embed_config(
+    current_user: User = Depends(get_current_user),
+):
+    """Get the configuration for plugin embed code snippets.
+    
+    Returns the base URL and filenames for the CSS and JS assets
+    that need to be added to embed the chat plugin on a website.
+    """
+    from app.config import settings
+    
+    base_url = settings.PLUGIN_EMBED_BASE_URL.rstrip('/')
+    
+    return PluginEmbedConfigResponse(
+        base_url=base_url,
+        css_filename="chatbot.css",
+        js_filename="chatbot.min.js",
+    )

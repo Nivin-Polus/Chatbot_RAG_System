@@ -114,6 +114,9 @@ class Settings(BaseSettings):
 
     # Chat Widget Configuration
     CHAT_WIDGET_HOST_URL: str = Field("https://dev-chatbot.polussolutions.com/chat-widget", validation_alias="CHAT_WIDGET_HOST_URL")
+    
+    # Plugin Embed Code Configuration (base URL for CSS/JS assets)
+    PLUGIN_EMBED_BASE_URL: str = Field("https://keyword-search.mit.edu/dist/", validation_alias="PLUGIN_EMBED_BASE_URL")
 
     # API credentials
     API_USERNAME: str = Field("your_username", validation_alias="API_USERNAME")

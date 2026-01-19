@@ -17,7 +17,7 @@ import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Link as ExternalLinkIcon, Loader2, Pencil, Plus, Plug, Trash2 } from 'lucide-react';
+import { Check, Code, Copy, Link as ExternalLinkIcon, Loader2, Pencil, Plus, Plug, Trash2 } from 'lucide-react';
 import { Collection, PluginIntegration } from '@/types/auth';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { toast } from 'sonner';
@@ -36,6 +36,11 @@ export default function UserAdminPlugins() {
   const [isPluginSaving, setIsPluginSaving] = useState(false);
   const [widgetUrls, setWidgetUrls] = useState<Record<string, string>>({});
   const { confirm: confirmAction, dialog: confirmDialog } = useConfirmAction();
+
+  // Embed code configuration
+  const [embedBaseUrl, setEmbedBaseUrl] = useState<string>('');
+  const [copiedCss, setCopiedCss] = useState(false);
+  const [copiedJs, setCopiedJs] = useState(false);
 
   const refreshCollections = useCallback(async () => {
     if (!user?.access_token) {
@@ -106,6 +111,54 @@ export default function UserAdminPlugins() {
       void refreshPlugins();
     }
   }, [selectedCollectionId, refreshPlugins]);
+
+  // Fetch embed code configuration
+  const fetchEmbedConfig = useCallback(async () => {
+    if (!user?.access_token) return;
+
+    try {
+      const response = await apiGet(
+        `${import.meta.env.VITE_API_BASE_URL}/plugins/embed-config`,
+        user.access_token,
+        false,
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setEmbedBaseUrl(data.base_url);
+      }
+    } catch (error) {
+      console.debug('Failed to fetch embed config', error);
+    }
+  }, [user?.access_token]);
+
+  useEffect(() => {
+    void fetchEmbedConfig();
+  }, [fetchEmbedConfig]);
+
+  // Copy handlers for embed code
+  const copyToClipboard = async (text: string, type: 'css' | 'js') => {
+    try {
+      await navigator.clipboard.writeText(text);
+      if (type === 'css') {
+        setCopiedCss(true);
+        setTimeout(() => setCopiedCss(false), 2000);
+      } else {
+        setCopiedJs(true);
+        setTimeout(() => setCopiedJs(false), 2000);
+      }
+      toast.success('Copied to clipboard!');
+    } catch {
+      toast.error('Failed to copy to clipboard');
+    }
+  };
+
+  // Generate embed code snippets
+  const cssSnippet = embedBaseUrl
+    ? `<link rel="stylesheet" href="${embedBaseUrl}/chatbot.css">`
+    : '';
+  const jsSnippet = embedBaseUrl
+    ? `<script src="${embedBaseUrl}/chatbot.min.js"></script>`
+    : '';
 
   const handleOpenPluginDialog = (plugin?: PluginIntegration) => {
     setPluginDialogOpen(true);
@@ -350,6 +403,95 @@ export default function UserAdminPlugins() {
             )}
           </CardContent>
         </Card>
+
+        {/* Embed Code Section */}
+        {embedBaseUrl && (
+          <Card>
+            <CardHeader>
+              <div>
+                <CardTitle className="flex items-center gap-2 text-2xl">
+                  <Code className="h-5 w-5" /> Embed Code
+                </CardTitle>
+                <CardDescription>
+                  Add these code snippets to your website to embed the chatbot plugin.
+                </CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* CSS Snippet */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">
+                  Add this inside the <code className="bg-muted px-1.5 py-0.5 rounded text-xs">&lt;head&gt;</code> tag:
+                </Label>
+                <div className="relative">
+                  <div className="flex items-center gap-2 p-3 pr-12 rounded-md bg-muted/50 border font-mono text-sm break-all">
+                    <code className="flex-1 text-foreground">{cssSnippet}</code>
+                  </div>
+                  <TooltipProvider delayDuration={150}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8"
+                          onClick={() => copyToClipboard(cssSnippet, 'css')}
+                        >
+                          {copiedCss ? (
+                            <Check className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">
+                        {copiedCss ? 'Copied!' : 'Copy to clipboard'}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+              </div>
+
+              {/* JS Snippet */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">
+                  Add this just before the closing <code className="bg-muted px-1.5 py-0.5 rounded text-xs">&lt;/body&gt;</code> tag:
+                </Label>
+                <div className="relative">
+                  <div className="flex items-center gap-2 p-3 pr-12 rounded-md bg-muted/50 border font-mono text-sm break-all">
+                    <code className="flex-1 text-foreground">{jsSnippet}</code>
+                  </div>
+                  <TooltipProvider delayDuration={150}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8"
+                          onClick={() => copyToClipboard(jsSnippet, 'js')}
+                        >
+                          {copiedJs ? (
+                            <Check className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">
+                        {copiedJs ? 'Copied!' : 'Copy to clipboard'}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+              </div>
+
+              {/* Base URL Info */}
+              <div className="text-xs text-muted-foreground pt-2 border-t">
+                <span className="font-medium">Base URL:</span>{' '}
+                <code className="bg-muted px-1.5 py-0.5 rounded">{embedBaseUrl}</code>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <Dialog
