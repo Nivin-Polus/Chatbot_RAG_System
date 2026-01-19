@@ -461,7 +461,7 @@ function renderHistory() {
         `;
 
         // Click to load session
-        item.querySelector('.history-item-content').addEventListener('click', () => {
+        item.addEventListener('click', () => {
             loadSession(session.id);
         });
 

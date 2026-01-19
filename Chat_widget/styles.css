@@ -363,6 +363,8 @@ body {
     cursor: pointer;
     transition: background var(--transition-fast);
     margin-bottom: 2px;
+    position: relative;
+    /* Ensure content doesn't overlap with absolute buttons */
 }
 
 .history-item:hover {
@@ -399,12 +401,24 @@ body {
 }
 
 .history-item-actions {
-    display: none;
+    display: flex;
     gap: 4px;
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--bg-sidebar);
+    /* optional: cover items behind if needed, or transparent */
+    padding-left: 8px;
+    /* gradient masking could be nice */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition-fast);
 }
 
 .history-item:hover .history-item-actions {
-    display: flex;
+    opacity: 1;
+    pointer-events: auto;
 }
 
 .history-action-btn {
