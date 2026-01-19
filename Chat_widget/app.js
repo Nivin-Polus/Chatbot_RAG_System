@@ -344,12 +344,55 @@ function renameSession(sessionId) {
     const session = state.sessions.find(s => s.id === sessionId);
     if (!session) return;
 
-    const newTitle = prompt('Enter a new name for this chat:', session.title);
-    if (newTitle && newTitle.trim()) {
-        session.title = newTitle.trim();
-        saveSessions();
-        renderHistory();
-    }
+    // Find the DOM element
+    const historyItem = document.querySelector(`.history-item-content[data-id="${sessionId}"]`);
+    if (!historyItem) return;
+
+    const titleEl = historyItem.querySelector('.history-item-title');
+    const currentTitle = session.title;
+
+    // Create input element
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = currentTitle;
+    input.className = 'history-item-input';
+
+    // Replace title with input
+    titleEl.style.display = 'none';
+    historyItem.insertBefore(input, titleEl);
+    input.focus();
+    input.select();
+
+    // Handle save/cancel
+    const save = () => {
+        const newTitle = input.value.trim();
+        if (newTitle && newTitle !== currentTitle) {
+            session.title = newTitle;
+            saveSessions();
+        }
+        renderHistory(); // Re-render to show text again
+    };
+
+    const cancel = () => {
+        renderHistory(); // Revert to original
+    };
+
+    input.addEventListener('keydown', (e) => {
+        e.stopPropagation(); // Prevent triggering other listeners
+        if (e.key === 'Enter') {
+            save();
+        } else if (e.key === 'Escape') {
+            cancel();
+        }
+    });
+
+    input.addEventListener('click', (e) => e.stopPropagation());
+
+    // Save on blur (click away)
+    input.addEventListener('blur', () => {
+        // slight delay to allow click events on other buttons to register if needed
+        setTimeout(save, 100);
+    });
 }
 
 function saveSessions() {

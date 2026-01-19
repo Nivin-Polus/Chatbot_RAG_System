@@ -199,7 +199,7 @@ body {
 }
 
 .sidebar.collapsed {
-    width: 60px;
+    width: 72px;
     border-right: 1px solid var(--border-color);
 }
 
@@ -249,6 +249,8 @@ body {
 
 .sidebar.collapsed .new-chat-btn svg {
     margin-right: 0;
+    width: 28px;
+    height: 28px;
 }
 
 .sidebar-header {
@@ -377,12 +379,23 @@ body {
 }
 
 .history-item-title {
-    font-size: 13px;
-    font-weight: 500;
+    font-size: 14px;
     color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.history-item-input {
+    width: 100%;
+    background: transparent;
+    border: 1px solid var(--accent-primary);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 14px;
+    padding: 2px 4px;
+    border-radius: 4px;
+    outline: none;
 }
 
 .history-item-actions {
