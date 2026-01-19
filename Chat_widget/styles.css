@@ -414,6 +414,31 @@ body {
     display: flex;
 }
 
+.header-new-chat-btn {
+    display: none;
+    width: 36px;
+    height: 36px;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    margin-right: 8px;
+    /* Spacing */
+}
+
+/* Show header new chat button when sidebar is collapsed */
+.sidebar.collapsed+.chat-main .header-new-chat-btn {
+    display: flex;
+}
+
+.header-new-chat-btn svg {
+    width: 20px;
+    height: 20px;
+}
+
 .mobile-menu-btn svg {
     width: 20px;
     height: 20px;
@@ -516,7 +541,7 @@ body {
 
 .message-content {
     max-width: 80%;
-    padding: 12px 16px;
+    padding: 8px 12px;
     border-radius: 0.75rem;
     line-height: 1.5;
     word-wrap: break-word;
@@ -537,7 +562,9 @@ body {
     max-width: 80%;
 }
 
+/* Message Time - Hidden per request */
 .message-time {
+    display: none;
     font-size: 11px;
     color: var(--text-muted);
     margin-top: 4px;

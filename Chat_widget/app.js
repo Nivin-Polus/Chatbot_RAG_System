@@ -81,7 +81,9 @@ function cacheElements() {
         chatForm: document.getElementById('chat-form'),
         messageInput: document.getElementById('message-input'),
         sendBtn: document.getElementById('send-btn'),
+        sendBtn: document.getElementById('send-btn'),
         themeToggle: document.getElementById('theme-toggle'),
+        headerNewChatBtn: document.getElementById('header-new-chat-btn'),
     };
 }
 
@@ -101,6 +103,7 @@ function setupEventListeners() {
 
     // New chat
     elements.newChatBtn.addEventListener('click', startNewSession);
+    elements.headerNewChatBtn.addEventListener('click', startNewSession);
 
     // Chat form
     elements.chatForm.addEventListener('submit', handleSubmit);
@@ -287,20 +290,15 @@ function startNewSession() {
     state.sessionId = newId;
     state.messages = [];
 
-    // Add to sessions list
-    const newSession = {
-        id: newId,
-        title: 'New Chat',
-        timestamp: Date.now(),
-        messages: [],
-    };
-    state.sessions.unshift(newSession);
-
-    // Save and render
-    saveSessions();
-    renderHistory();
+    // Clear UI but don't save or add to history list yet
+    // The session will be created and saved only when the first message is sent
     renderMessages();
     elements.messageInput.focus();
+
+    // Remove active class from history items
+    document.querySelectorAll('.history-item').forEach(item => {
+        item.classList.remove('active');
+    });
 }
 
 function loadSession(sessionId) {
@@ -568,10 +566,24 @@ async function handleSubmit(e) {
     // Add user message
     const userMessage = {
         id: `user_${Date.now()}`,
+        id: `user_${Date.now()}`,
         role: 'user',
         content: content,
         timestamp: new Date().toISOString(),
     };
+
+    // If this is a new session and not in history yet, add it now
+    let session = state.sessions.find(s => s.id === state.sessionId);
+    if (!session) {
+        session = {
+            id: state.sessionId,
+            title: 'New Chat',
+            timestamp: Date.now(),
+            messages: [],
+        };
+        state.sessions.unshift(session);
+        renderHistory();
+    }
 
     state.messages.push(userMessage);
     renderMessages();
