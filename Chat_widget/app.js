@@ -156,7 +156,8 @@ async function lookupWidget(token) {
 
         // Update UI with collection name
         elements.collectionName.textContent = data.collection_name || 'Chat Assistant';
-        document.title = `${data.collection_name || 'Chat'} - Widget`;
+        // Use "Help Page" instead of "Widget" in the browser tab title
+        document.title = `${data.collection_name || 'Chat'} - Help Page`;
 
         // Verify the token is valid
         const tokenValid = await verifyToken(CONFIG.accessToken);

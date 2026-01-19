@@ -1,16 +1,16 @@
 :root {
-    /* React Theme Colors (HSL) */
-    --background: 220 18% 97%;
-    --foreground: 222 47% 11%;
-    --card: 0 0% 100%;
-    --primary: 239 84% 67%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 220 14% 96%;
-    --muted: 220 14% 92%;
-    --muted-foreground: 215 16% 47%;
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
-    --ring: 239 84% 67%;
+    /* Light theme based on MIT help page color scheme */
+    --background: 0 0% 98%;           /* very light grey page background */
+    --foreground: 222 47% 11%;        /* dark text */
+    --card: 0 0% 100%;                /* white cards / bubbles */
+    --primary: 213 79% 46%;           /* MIT-style blue for links/buttons */
+    --primary-foreground: 0 0% 100%;  /* white text on primary */
+    --secondary: 0 0% 97%;            /* subtle grey section background */
+    --muted: 210 16% 93%;             /* light grey for assistant bubbles */
+    --muted-foreground: 215 16% 35%;  /* muted text */
+    --border: 210 14% 90%;            /* light grey borders */
+    --input: 210 14% 90%;
+    --ring: 213 79% 46%;              /* focus ring in primary blue */
     --radius: 0.5rem;
 
     /* Legacy compatibility / UI specific */
@@ -25,8 +25,8 @@
     --border-light: hsl(var(--muted));
 
     --accent-primary: hsl(var(--primary));
-    --accent-secondary: hsl(var(--primary) / 0.8);
-    --accent-gradient: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(239 84% 77%) 100%);
+    --accent-secondary: hsl(var(--primary) / 0.85);
+    --accent-gradient: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(213 79% 60%) 100%);
 
     --user-bubble-bg: hsl(var(--primary));
     --user-bubble-text: hsl(var(--primary-foreground));
@@ -582,7 +582,8 @@ body {
 }
 
 .source-item.web {
-    background: rgba(99, 102, 241, 0.05);
+    /* subtle blue-tinted background for web sources */
+    background: rgba(25, 118, 210, 0.06);
 }
 
 .source-item svg {
