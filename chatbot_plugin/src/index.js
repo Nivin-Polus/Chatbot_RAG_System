@@ -675,17 +675,7 @@ import "./styles.css";
       }
     }
 
-    // Clear all session data from localStorage
-    // Remove all session messages
-    sessions.forEach(session => {
-      localStorage.removeItem(CHAT_MESSAGES_PREFIX + session.id);
-    });
-    // Clear sessions index
-    localStorage.removeItem(CHAT_SESSIONS_INDEX_KEY);
-    // Reset sessions array
-    sessions = [];
-
-    // Clear context and messages
+    // Clear context and messages (do NOT delete existing sessions)
     chatService.clearContext();
     currentSessionId = chatService.sessionId; // Update tracker
 
@@ -963,13 +953,6 @@ import "./styles.css";
           sources: normalizeSourcesForStorage(msg.sources || [])
         }));
 
-      // Clear all old sessions from localStorage to maintain only one session
-      sessions.forEach(oldSession => {
-        if (oldSession.id !== chatService.sessionId) {
-          localStorage.removeItem(CHAT_MESSAGES_PREFIX + oldSession.id);
-        }
-      });
-
       // Save current session messages
       localStorage.setItem(CHAT_MESSAGES_PREFIX + chatService.sessionId, JSON.stringify(messagesToSave));
 
@@ -979,12 +962,21 @@ import "./styles.css";
         title = firstUserMsg.text.slice(0, 30) + (firstUserMsg.text.length > 30 ? "..." : "");
       }
 
-      // Replace sessions array with only the current session
-      sessions = [{
+      const now = Date.now();
+      const existingIndex = sessions.findIndex(s => s.id === chatService.sessionId);
+      const nextSession = {
         id: chatService.sessionId,
-        timestamp: Date.now(),
+        timestamp: now,
         title: title
-      }];
+      };
+
+      if (existingIndex >= 0) {
+        sessions[existingIndex] = { ...sessions[existingIndex], ...nextSession };
+      } else {
+        sessions.push(nextSession);
+      }
+
+      sessions.sort((a, b) => b.timestamp - a.timestamp);
 
       localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
       chatService.restoreHistory(messagesToSave);

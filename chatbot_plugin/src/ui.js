@@ -271,7 +271,7 @@ export class ChatbotUI {
 
   async toggleExpand(forceMode) {
     // If already expanded and clicking expand again, redirect to full React frontend
-    if (!forceMode) {
+    if (this.isExpanded && !forceMode) {
       try {
         // Import dependencies dynamically to avoid circular dependency
         const { AuthService } = await import('./auth.js');
