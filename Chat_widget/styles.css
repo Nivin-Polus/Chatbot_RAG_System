@@ -1,16 +1,26 @@
 :root {
     /* Light theme based on MIT help page color scheme */
-    --background: 0 0% 98%;           /* very light grey page background */
-    --foreground: 222 47% 11%;        /* dark text */
-    --card: 0 0% 100%;                /* white cards / bubbles */
-    --primary: 213 79% 46%;           /* MIT-style blue for links/buttons */
-    --primary-foreground: 0 0% 100%;  /* white text on primary */
-    --secondary: 0 0% 97%;            /* subtle grey section background */
-    --muted: 210 16% 93%;             /* light grey for assistant bubbles */
-    --muted-foreground: 215 16% 35%;  /* muted text */
-    --border: 210 14% 90%;            /* light grey borders */
+    --background: 0 0% 98%;
+    /* very light grey page background */
+    --foreground: 222 47% 11%;
+    /* dark text */
+    --card: 0 0% 100%;
+    /* white cards / bubbles */
+    --primary: 213 79% 46%;
+    /* MIT-style blue for links/buttons */
+    --primary-foreground: 0 0% 100%;
+    /* white text on primary */
+    --secondary: 0 0% 97%;
+    /* subtle grey section background */
+    --muted: 210 16% 93%;
+    /* light grey for assistant bubbles */
+    --muted-foreground: 215 16% 35%;
+    /* muted text */
+    --border: 210 14% 90%;
+    /* light grey borders */
     --input: 210 14% 90%;
-    --ring: 213 79% 46%;              /* focus ring in primary blue */
+    --ring: 213 79% 46%;
+    /* focus ring in primary blue */
     --radius: 0.5rem;
 
     /* Legacy compatibility / UI specific */
@@ -387,7 +397,7 @@ body {
 }
 
 .mobile-menu-btn {
-    display: flex;
+    display: none;
     width: 36px;
     height: 36px;
     align-items: center;
@@ -397,6 +407,11 @@ body {
     border-radius: 6px;
     cursor: pointer;
     color: var(--text-secondary);
+}
+
+/* Show header toggle when sidebar is collapsed */
+.sidebar.collapsed+.chat-main .mobile-menu-btn {
+    display: flex;
 }
 
 .mobile-menu-btn svg {
@@ -529,7 +544,7 @@ body {
     text-align: right;
 }
 
-.message.user .message-time {
+.message-row.user .message-time {
     color: rgba(255, 255, 255, 0.7);
 }
 

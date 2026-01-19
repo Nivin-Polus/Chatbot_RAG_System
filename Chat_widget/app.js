@@ -730,8 +730,9 @@ async function streamAssistantResponse(messageId, fullContent) {
                 clearInterval(state.typingInterval);
                 state.isStreaming = false;
                 state.messages[msgIndex].streaming = false;
-                if (sourcesEl) sourcesEl.style.display = 'block'; // Show sources when done
-                scrollToBottom();
+
+                // Force a full re-render to ensure sources and final content are displayed correctly
+                renderMessages();
                 resolve();
             }
         }, 10); // Match the snappiness
