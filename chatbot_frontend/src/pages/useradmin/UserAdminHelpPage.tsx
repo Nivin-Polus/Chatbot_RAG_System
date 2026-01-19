@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Copy, Loader2, HelpCircle, CheckCircle2, XCircle, AlertCircle, RefreshCw } from 'lucide-react';
 import { Collection, PluginIntegration } from '@/types/auth';
-import { apiGet, apiPut } from '@/utils/api';
+import { apiGet, apiPost, apiPut } from '@/utils/api';
 import { toast } from 'sonner';
 
 export default function UserAdminHelpPage() {
@@ -20,6 +20,7 @@ export default function UserAdminHelpPage() {
   const [selectedCollectionId, setSelectedCollectionId] = useState<string>('');
   const [plugins, setPlugins] = useState<PluginIntegration[]>([]);
   const [isPluginLoading, setIsPluginLoading] = useState(false);
+  const [generatingWidgetUrl, setGeneratingWidgetUrl] = useState<string | null>(null);
 
   const refreshCollections = useCallback(async () => {
     if (!user?.access_token) {
@@ -94,10 +95,56 @@ export default function UserAdminHelpPage() {
 
   const handleCopyWidgetUrl = async (url: string) => {
     try {
-      await navigator.clipboard.writeText(url);
-      toast.success('Help Page URL copied to clipboard!');
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        toast.success('Help Page URL copied to clipboard!');
+        return;
+      }
+      throw new Error('Clipboard API not available');
     } catch {
-      toast.error('Failed to copy URL');
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = url;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textarea);
+
+        if (successful) {
+          toast.success('Help Page URL copied to clipboard!');
+        } else {
+          throw new Error('execCommand failed');
+        }
+      } catch {
+        toast.error('Failed to copy URL');
+      }
+    }
+  };
+
+  const handleGenerateWidgetUrl = async (collectionId: string) => {
+    if (!user?.access_token) return;
+
+    setGeneratingWidgetUrl(collectionId);
+    try {
+      const response = await apiPost(
+        `${import.meta.env.VITE_API_BASE_URL}/plugins/generate-widget-url`,
+        { collection_id: collectionId },
+        user.access_token
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to generate help page URL');
+      }
+
+      await response.json();
+      await refreshPlugins();
+      toast.success('Help Page URL generated!');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to generate help page URL');
+    } finally {
+      setGeneratingWidgetUrl(null);
     }
   };
 
@@ -179,14 +226,28 @@ export default function UserAdminHelpPage() {
               <div className="text-center py-8 text-muted-foreground">
                 <HelpCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>No help pages configured yet for {currentCollection.name}.</p>
-                <p className="text-sm">Add a plugin integration first to enable help pages.</p>
+                <p className="text-sm">
+                  Generate a help page URL for this knowledge base using the button below.
+                </p>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="mt-4"
+                  onClick={() => handleGenerateWidgetUrl(currentCollection.collection_id)}
+                  disabled={generatingWidgetUrl === currentCollection.collection_id}
+                >
+                  {generatingWidgetUrl === currentCollection.collection_id ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : null}
+                  Generate Help Page URL
+                </Button>
               </div>
             ) : (
               <TooltipProvider delayDuration={150}>
                 <div className="space-y-6">
                   {plugins.map((plugin) => {
                     const widgetUrl = `${import.meta.env.VITE_CHAT_WIDGET_BASE_URL || 'https://dev-chatbot.polussolutions.com/chat-widget'}/${plugin.widget_token}`;
-                    
+
                     return (
                       <Card key={plugin.id} className="border-2">
                         <CardHeader>

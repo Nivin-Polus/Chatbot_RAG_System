@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Copy, Loader2, HelpCircle, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
 import { Collection, PluginIntegration } from '@/types/auth';
-import { apiGet, apiPut } from '@/utils/api';
+import { apiGet, apiPost, apiPut } from '@/utils/api';
 import { toast } from 'sonner';
 
 export default function SuperadminHelpPage() {
@@ -22,6 +22,7 @@ export default function SuperadminHelpPage() {
   const [plugins, setPlugins] = useState<PluginIntegration[]>([]);
   const [pluginFilterCollection, setPluginFilterCollection] = useState<string>('all');
   const [isPluginLoading, setIsPluginLoading] = useState(false);
+  const [generatingWidgetUrl, setGeneratingWidgetUrl] = useState<string | null>(null);
 
   const refreshCollections = useCallback(async () => {
     if (!user?.access_token) {
@@ -90,10 +91,60 @@ export default function SuperadminHelpPage() {
 
   const handleCopyWidgetUrl = async (url: string) => {
     try {
-      await navigator.clipboard.writeText(url);
-      toast.success('Help Page URL copied to clipboard!');
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        toast.success('Help Page URL copied to clipboard!');
+        return;
+      }
+      throw new Error('Clipboard API not available');
     } catch {
-      toast.error('Failed to copy URL');
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = url;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textarea);
+
+        if (successful) {
+          toast.success('Help Page URL copied to clipboard!');
+        } else {
+          throw new Error('execCommand failed');
+        }
+      } catch {
+        toast.error('Failed to copy URL');
+      }
+    }
+  };
+
+  const handleGenerateWidgetUrl = async (collection: Collection) => {
+    if (!user?.access_token) return;
+
+    setGeneratingWidgetUrl(collection.collection_id);
+    try {
+      const response = await apiPost(
+        `${import.meta.env.VITE_API_BASE_URL}/plugins/generate-widget-url`,
+        { collection_id: collection.collection_id },
+        user.access_token
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to generate help page URL');
+      }
+
+      await response.json();
+
+      // Refresh plugins so the new widget_token appears
+      const targetCollection = pluginFilterCollection === 'all' ? undefined : pluginFilterCollection;
+      await refreshPlugins(targetCollection);
+
+      toast.success('Help Page URL generated!');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to generate help page URL');
+    } finally {
+      setGeneratingWidgetUrl(null);
     }
   };
 
@@ -120,9 +171,13 @@ export default function SuperadminHelpPage() {
     }
   };
 
-  const filteredPlugins = pluginFilterCollection === 'all'
-    ? plugins
-    : plugins.filter((plugin) => plugin.collection_id === pluginFilterCollection);
+  const visibleCollections = useMemo(
+    () =>
+      pluginFilterCollection === 'all'
+        ? collections
+        : collections.filter((collection) => collection.collection_id === pluginFilterCollection),
+    [collections, pluginFilterCollection]
+  );
 
   return (
     <DashboardLayout>
@@ -177,11 +232,11 @@ export default function SuperadminHelpPage() {
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
               </div>
-            ) : filteredPlugins.length === 0 ? (
+            ) : visibleCollections.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 {collections.length === 0
                   ? 'Create a knowledge base before setting up help pages.'
-                  : 'No help pages configured yet. Add a plugin integration first.'}
+                  : 'No knowledge bases available for help pages.'}
               </div>
             ) : (
               <TooltipProvider delayDuration={150}>
@@ -189,73 +244,105 @@ export default function SuperadminHelpPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Knowledge Base</TableHead>
-                      <TableHead>Display Name</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Help Page URL</TableHead>
                       <TableHead>Created</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredPlugins.map((plugin) => {
-                      const widgetUrl = `${import.meta.env.VITE_CHAT_WIDGET_BASE_URL || 'https://dev-chatbot.polussolutions.com/chat-widget'}/${plugin.widget_token}`;
-                      
+                    {visibleCollections.map((collection) => {
+                      const plugin = plugins.find(
+                        (p) => p.collection_id === collection.collection_id && p.widget_token
+                      );
+                      const widgetUrl = plugin?.widget_token
+                        ? `${import.meta.env.VITE_CHAT_WIDGET_BASE_URL || 'https://dev-chatbot.polussolutions.com/chat-widget'}/${plugin.widget_token}`
+                        : '';
+
                       return (
-                        <TableRow key={plugin.id}>
-                          <TableCell className="font-medium">{plugin.collection_name}</TableCell>
-                          <TableCell>{plugin.display_name || '—'}</TableCell>
+                        <TableRow key={collection.collection_id}>
+                          <TableCell className="font-medium">{collection.name}</TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
-                              <Switch 
-                                checked={plugin.is_widget_active} 
-                                onCheckedChange={() => handleToggleWidgetStatus(plugin)} 
-                              />
-                              <Badge 
-                                variant="outline" 
-                                className={plugin.is_widget_active 
-                                  ? "bg-green-50 text-green-700 border-green-200" 
-                                  : "bg-gray-50 text-gray-700 border-gray-200"
-                                }
-                              >
-                                {plugin.is_widget_active ? (
-                                  <>
-                                    <CheckCircle2 className="h-3 w-3 mr-1" />
-                                    Active
-                                  </>
-                                ) : (
-                                  <>
-                                    <XCircle className="h-3 w-3 mr-1" />
-                                    Inactive
-                                  </>
-                                )}
-                              </Badge>
+                              {plugin ? (
+                                <>
+                                  <Switch
+                                    checked={plugin.is_widget_active}
+                                    onCheckedChange={() => handleToggleWidgetStatus(plugin)}
+                                  />
+                                  <Badge
+                                    variant="outline"
+                                    className={
+                                      plugin.is_widget_active
+                                        ? 'bg-green-50 text-green-700 border-green-200'
+                                        : 'bg-gray-50 text-gray-700 border-gray-200'
+                                    }
+                                  >
+                                    {plugin.is_widget_active ? (
+                                      <>
+                                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                                        Active
+                                      </>
+                                    ) : (
+                                      <>
+                                        <XCircle className="h-3 w-3 mr-1" />
+                                        Inactive
+                                      </>
+                                    )}
+                                  </Badge>
+                                </>
+                              ) : (
+                                <Badge
+                                  variant="outline"
+                                  className="bg-gray-50 text-gray-700 border-gray-200"
+                                >
+                                  Not configured
+                                </Badge>
+                              )}
                             </div>
                           </TableCell>
                           <TableCell>
-                            <div className="flex items-center gap-2 max-w-md">
-                              <Input
-                                readOnly
-                                value={widgetUrl}
-                                className="bg-muted font-mono text-xs"
-                              />
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    size="icon"
-                                    variant="outline"
-                                    onClick={() => handleCopyWidgetUrl(widgetUrl)}
-                                  >
-                                    <Copy className="h-4 w-4" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent side="top">Copy URL</TooltipContent>
-                              </Tooltip>
-                            </div>
-                            <p className="text-[10px] text-muted-foreground italic mt-1">
-                              * This URL is permanent and does not expire
-                            </p>
+                            {plugin ? (
+                              <>
+                                <div className="flex items-center gap-2 max-w-md">
+                                  <Input
+                                    readOnly
+                                    value={widgetUrl}
+                                    className="bg-muted font-mono text-xs"
+                                  />
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        size="icon"
+                                        variant="outline"
+                                        onClick={() => handleCopyWidgetUrl(widgetUrl)}
+                                      >
+                                        <Copy className="h-4 w-4" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top">Copy URL</TooltipContent>
+                                  </Tooltip>
+                                </div>
+                                <p className="text-[10px] text-muted-foreground italic mt-1">
+                                  * This URL is permanent and does not expire
+                                </p>
+                              </>
+                            ) : (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                className="w-fit"
+                                onClick={() => handleGenerateWidgetUrl(collection)}
+                                disabled={generatingWidgetUrl === collection.collection_id}
+                              >
+                                {generatingWidgetUrl === collection.collection_id ? (
+                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                ) : null}
+                                Generate Help Page URL
+                              </Button>
+                            )}
                           </TableCell>
                           <TableCell className="text-muted-foreground">
-                            {plugin.created_at ? new Date(plugin.created_at).toLocaleString() : '—'}
+                            {plugin?.created_at ? new Date(plugin.created_at).toLocaleString() : '—'}
                           </TableCell>
                         </TableRow>
                       );

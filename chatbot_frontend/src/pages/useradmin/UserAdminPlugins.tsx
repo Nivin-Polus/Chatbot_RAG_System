@@ -17,7 +17,7 @@ import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Link as ExternalLinkIcon, Loader2, Pencil, Plus, Plug, Trash2, Copy, Link2, Settings } from 'lucide-react';
+import { Link as ExternalLinkIcon, Loader2, Pencil, Plus, Plug, Trash2 } from 'lucide-react';
 import { Collection, PluginIntegration } from '@/types/auth';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { toast } from 'sonner';
@@ -35,9 +35,6 @@ export default function UserAdminPlugins() {
   const [editingPlugin, setEditingPlugin] = useState<PluginIntegration | null>(null);
   const [isPluginSaving, setIsPluginSaving] = useState(false);
   const [widgetUrls, setWidgetUrls] = useState<Record<string, string>>({});
-  const [generatingWidgetUrl, setGeneratingWidgetUrl] = useState<string | null>(null);
-  const [helpPageDialogOpen, setHelpPageDialogOpen] = useState(false);
-  const [configuringPlugin, setConfiguringPlugin] = useState<PluginIntegration | null>(null);
   const { confirm: confirmAction, dialog: confirmDialog } = useConfirmAction();
 
   const refreshCollections = useCallback(async () => {
@@ -207,78 +204,6 @@ export default function UserAdminPlugins() {
     }
   };
 
-  const handleGenerateWidgetUrl = async (plugin: PluginIntegration) => {
-    if (!user?.access_token) return;
-
-    setGeneratingWidgetUrl(plugin.collection_id);
-    try {
-      const response = await apiPost(
-        `${import.meta.env.VITE_API_BASE_URL}/plugins/generate-widget-url`,
-        { collection_id: plugin.collection_id },
-        user.access_token
-      );
-
-      if (!response.ok) {
-        throw new Error('Failed to generate widget URL');
-      }
-
-      const data = await response.json();
-      setWidgetUrls(prev => ({ ...prev, [plugin.collection_id]: data.widget_url }));
-      
-      // Update local state
-      setPlugins(prev => prev.map(p => p.id === plugin.id ? { ...p, widget_token: data.widget_token } : p));
-      if (configuringPlugin && configuringPlugin.id === plugin.id) {
-        setConfiguringPlugin({ ...configuringPlugin, widget_token: data.widget_token });
-      }
-
-      toast.success('Help Page URL generated!');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to generate widget URL');
-    } finally {
-      setGeneratingWidgetUrl(null);
-    }
-  };
-
-  const handleCopyWidgetUrl = async (url: string) => {
-    try {
-      await navigator.clipboard.writeText(url);
-      toast.success('Help Page URL copied to clipboard!');
-    } catch {
-      toast.error('Failed to copy URL');
-    }
-  };
-
-  const handleToggleWidgetStatus = async (plugin: PluginIntegration) => {
-    try {
-      const response = await apiPut(
-        `${import.meta.env.VITE_API_BASE_URL}/plugins/${plugin.id}`,
-        {
-          is_widget_active: !plugin.is_widget_active,
-        },
-        user?.access_token,
-      );
-
-      if (!response.ok) {
-        throw new Error('Failed to update help page status');
-      }
-
-      toast.success(!plugin.is_widget_active ? 'Help page enabled' : 'Help page disabled');
-      
-      // Update local state
-      setPlugins(prev => prev.map(p => p.id === plugin.id ? { ...p, is_widget_active: !p.is_widget_active } : p));
-      if (configuringPlugin && configuringPlugin.id === plugin.id) {
-        setConfiguringPlugin({ ...configuringPlugin, is_widget_active: !configuringPlugin.is_widget_active });
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to update help page');
-    }
-  };
-
-  const openHelpPageConfig = (plugin: PluginIntegration) => {
-    setConfiguringPlugin(plugin);
-    setHelpPageDialogOpen(true);
-  };
-
   const currentCollection = useMemo(
     () => collections.find((collection) => collection.collection_id === selectedCollectionId) ?? null,
     [collections, selectedCollectionId],
@@ -357,7 +282,6 @@ export default function UserAdminPlugins() {
                       <TableHead>Website</TableHead>
                       <TableHead>Display Name</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead>Help Page</TableHead>
                       <TableHead>Created</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
@@ -389,17 +313,6 @@ export default function UserAdminPlugins() {
                               {plugin.is_active ? 'Active' : 'Paused'}
                             </span>
                           </div>
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => openHelpPageConfig(plugin)}
-                            className="text-xs"
-                          >
-                            <Settings className="h-3 w-3 mr-1" />
-                            Configure
-                          </Button>
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {plugin.created_at ? new Date(plugin.created_at).toLocaleString() : '—'}
@@ -486,83 +399,6 @@ export default function UserAdminPlugins() {
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        open={helpPageDialogOpen}
-        onOpenChange={(open) => {
-          if (!open) setHelpPageDialogOpen(false);
-        }}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Configure Help Page</DialogTitle>
-            <DialogDescription>
-              A standalone page where users can interact with the chatbot directly.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-6 py-4">
-            <div className="flex items-center justify-between space-x-2">
-              <div className="space-y-0.5">
-                <Label>Enable Help Page</Label>
-                <p className="text-sm text-muted-foreground">
-                  Allow access via the standalone URL.
-                </p>
-              </div>
-              <Switch
-                checked={configuringPlugin?.is_widget_active ?? false}
-                onCheckedChange={() => configuringPlugin && handleToggleWidgetStatus(configuringPlugin)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Shareable URL</Label>
-              {configuringPlugin?.widget_token ? (
-                <div className="flex items-center gap-2">
-                  <Input
-                    readOnly
-                    value={`${import.meta.env.VITE_CHAT_WIDGET_BASE_URL || 'https://dev-chatbot.polussolutions.com/chat-widget'}/${configuringPlugin.widget_token}`}
-                    className="bg-muted font-mono text-xs"
-                  />
-                  <Button
-                    size="icon"
-                    variant="outline"
-                    onClick={() =>
-                      handleCopyWidgetUrl(
-                        `${import.meta.env.VITE_CHAT_WIDGET_BASE_URL || 'https://dev-chatbot.polussolutions.com/chat-widget'}/${configuringPlugin.widget_token}`
-                      )
-                    }
-                  >
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  <p className="text-sm text-muted-foreground">No URL generated yet.</p>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="w-fit"
-                    onClick={() => configuringPlugin && handleGenerateWidgetUrl(configuringPlugin)}
-                    disabled={generatingWidgetUrl === configuringPlugin?.collection_id}
-                  >
-                    {generatingWidgetUrl === configuringPlugin?.collection_id ? (
-                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                    ) : (
-                      <Link2 className="h-3 w-3 mr-1" />
-                    )}
-                    Generate Help Page URL
-                  </Button>
-                </div>
-              )}
-              <p className="text-[10px] text-muted-foreground italic">
-                * This URL is generated once and does not expire.
-              </p>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button onClick={() => setHelpPageDialogOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </DashboardLayout>
   );
 }
