@@ -28,8 +28,8 @@ class CrawlConfig:
     concurrent_requests: int = 5     # Increased from 3 for faster crawling
     
     # Content settings
-    chunk_size: int = 800  # tokens per chunk for RAG
-    chunk_overlap: int = 100  # overlap between chunks
+    chunk_size: int = 1000  # tokens per chunk for RAG
+    chunk_overlap: int = 500  # overlap between chunks
     
     # Filtering
     # NOTE:

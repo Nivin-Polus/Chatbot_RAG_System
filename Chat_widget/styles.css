@@ -387,7 +387,7 @@ body {
 }
 
 .mobile-menu-btn {
-    display: none;
+    display: flex;
     width: 36px;
     height: 36px;
     align-items: center;
