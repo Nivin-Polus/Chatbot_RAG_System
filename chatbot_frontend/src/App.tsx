@@ -19,6 +19,7 @@ import SuperadminChat from "./pages/superadmin/SuperadminChat";
 import SuperadminActivity from "./pages/superadmin/SuperadminActivity";
 import SuperadminSettings from "./pages/superadmin/SuperadminSettings";
 import SuperadminPlugins from "./pages/superadmin/SuperadminPlugins";
+import SuperadminHelpPage from "./pages/superadmin/SuperadminHelpPage";
 import SuperadminCrawler from "./pages/superadmin/SuperadminCrawler";
 import KnowledgeBaseDetails from "./pages/superadmin/KnowledgeBaseDetails";
 import UserDashboard from "./pages/user/UserDashboard";
@@ -28,6 +29,7 @@ import UserAdminChat from "./pages/useradmin/UserAdminChat";
 import UserAdminSettings from "./pages/useradmin/UserAdminSettings";
 import UserAdminUsers from "./pages/useradmin/UserAdminUsers";
 import UserAdminPlugins from "./pages/useradmin/UserAdminPlugins";
+import UserAdminHelpPage from "./pages/useradmin/UserAdminHelpPage";
 import UserAdminCrawler from "./pages/useradmin/UserAdminCrawler";
 import PluginUserChat from "./pages/pluginuser/PluginUserChat";
 import AutoLoginPage from "./pages/AutoLoginPage";
@@ -63,6 +65,7 @@ const App = () => (
                       <Route path="prompts" element={<SuperadminPrompts />} />
                       <Route path="users" element={<SuperadminUsers />} />
                       <Route path="plugins" element={<SuperadminPlugins />} />
+                      <Route path="help-page" element={<SuperadminHelpPage />} />
                       <Route path="crawler" element={<SuperadminCrawler />} />
                       <Route path="chat" element={<SuperadminChat />} />
                       <Route path="activity" element={<SuperadminActivity />} />
@@ -84,6 +87,7 @@ const App = () => (
                       />
                       <Route path="users" element={<UserAdminUsers />} />
                       <Route path="plugins" element={<UserAdminPlugins />} />
+                      <Route path="help-page" element={<UserAdminHelpPage />} />
                       <Route path="crawler" element={<UserAdminCrawler />} />
                       <Route path="knowledge-base" element={<UserAdminDashboard />} />
                       <Route path="chat" element={<UserAdminChat />} />

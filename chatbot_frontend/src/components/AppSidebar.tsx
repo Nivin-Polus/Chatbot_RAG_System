@@ -30,7 +30,8 @@ import {
   Plus,
   Pencil,
   Check,
-  X
+  X,
+  HelpCircle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,6 +44,7 @@ const superadminNav = [
   { title: 'Knowledge Base', url: '/superadmin', icon: Layers },
   { title: 'Users', url: '/superadmin/users', icon: Users },
   { title: 'Plugins', url: '/superadmin/plugins', icon: Link2 },
+  { title: 'Help Page', url: '/superadmin/help-page', icon: HelpCircle },
   { title: 'Chat', url: '/superadmin/chat', icon: MessageSquare },
   { title: 'Activity', url: '/superadmin/activity', icon: Activity },
   { title: 'Settings', url: '/superadmin/settings', icon: Settings },
@@ -60,6 +62,7 @@ const userAdminNav = () => [
   { title: 'Knowledge Base', url: `/useradmin/knowledge-base`, icon: Layers },
   { title: 'Users', url: `/useradmin/users`, icon: Users },
   { title: 'Plugins', url: `/useradmin/plugins`, icon: Link2 },
+  { title: 'Help Page', url: `/useradmin/help-page`, icon: HelpCircle },
   { title: 'Chat', url: `/useradmin/chat`, icon: MessageSquare },
   { title: 'Settings', url: `/useradmin/settings`, icon: Settings },
 ];
@@ -249,7 +252,7 @@ export function AppSidebar() {
               onClick={() => navigate(getChatBaseUrl())}
             >
               <Plus className="h-4 w-4" />
-              New Chat
+              <span>New Chat</span>
             </Button>
           )}
         </div>
