@@ -86,9 +86,18 @@ function cacheElements() {
 }
 
 function setupEventListeners() {
-    // Sidebar toggle
+    // Sidebar toggle (desktop + mobile)
+    // Left sidebar header button
     elements.toggleSidebarBtn.addEventListener('click', toggleSidebar);
-    elements.mobileMenuBtn.addEventListener('click', toggleMobileSidebar);
+    // Top header button: on small screens use slide-in mobile sidebar,
+    // on larger screens collapse/expand the sidebar
+    elements.mobileMenuBtn.addEventListener('click', () => {
+        if (window.innerWidth <= 768) {
+            toggleMobileSidebar();
+        } else {
+            toggleSidebar();
+        }
+    });
 
     // New chat
     elements.newChatBtn.addEventListener('click', startNewSession);
@@ -476,7 +485,9 @@ function createMessageElement(msg) {
     div.innerHTML = `
         <div class="message-content">
             <div class="message-text-wrapper">
-                ${formatMessageContent(msg.content)}
+                <div class="message-body">
+                    ${formatMessageContent(msg.content)}
+                </div>
                 ${sourcesHtml}
             </div>
             <div class="message-time">${time}</div>
@@ -692,8 +703,12 @@ async function streamAssistantResponse(messageId, fullContent) {
 
         // Create the element in UI first
         renderMessages();
-        const messageEl = elements.messagesList.querySelector(`[data-id="${messageId}"] .message-content`);
-        const sourcesEl = elements.messagesList.querySelector(`[data-id="${messageId}"] .message-sources`);
+        const messageBodyEl = elements.messagesList.querySelector(
+            `[data-id="${messageId}"] .message-body`
+        );
+        const sourcesEl = elements.messagesList.querySelector(
+            `[data-id="${messageId}"] .message-sources`
+        );
 
         if (sourcesEl) sourcesEl.style.display = 'none'; // Hide sources while streaming
 
@@ -705,8 +720,8 @@ async function streamAssistantResponse(messageId, fullContent) {
 
             // Update the message content in state and UI
             state.messages[msgIndex].content = partialContent;
-            if (messageEl) {
-                messageEl.innerHTML = formatMessageContent(partialContent);
+            if (messageBodyEl) {
+                messageBodyEl.innerHTML = formatMessageContent(partialContent);
             }
 
             scrollToBottom();
