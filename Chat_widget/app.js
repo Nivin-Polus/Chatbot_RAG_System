@@ -6,10 +6,17 @@
  * session management, chat history, and theme switching.
  */
 
-// ===== Configuration =====
+// ===== Get Widget Config (from config.js) =====
+const WCFG = window.WIDGET_CONFIG || {};
+
+// ===== Runtime Configuration (populated from widget lookup) =====
 const CONFIG = {
+    // API settings from config.js
+    apiBaseUrl: WCFG.api?.baseUrl || '',
+    widgetLookupPath: WCFG.api?.widgetLookupPath || '/rag/plugins/widget/lookup',
+    tokenVerifyPath: WCFG.api?.tokenVerifyPath || '/rag/auth/plugin-token/verify',
+    chatEndpoint: WCFG.api?.chatEndpoint || '/rag/chat/ask',
     // Will be populated from widget lookup response
-    apiBaseUrl: '',
     accessToken: '',
     collectionId: '',
     collectionName: '',
@@ -44,7 +51,7 @@ async function init() {
     // Extract widget token from URL
     const widgetToken = getWidgetToken();
     if (!widgetToken) {
-        showError('Invalid widget URL. Please check the link and try again.');
+        showError(WCFG.errors?.invalidWidgetUrl || 'Invalid widget URL. Please check the link and try again.');
         return;
     }
 
@@ -137,9 +144,9 @@ function getWidgetToken() {
 async function lookupWidget(token) {
     try {
         // Determine API base URL from current location
-        const baseUrl = window.location.origin;
+        const baseUrl = CONFIG.apiBaseUrl || window.location.origin;
 
-        const response = await fetch(`${baseUrl}/rag/plugins/widget/lookup/${token}`, {
+        const response = await fetch(`${baseUrl}${CONFIG.widgetLookupPath}/${token}`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -148,11 +155,11 @@ async function lookupWidget(token) {
 
         if (!response.ok) {
             if (response.status === 404) {
-                showError('This chat widget link is invalid or has expired.');
+                showError(WCFG.errors?.widgetNotFound || 'This chat widget link is invalid or has expired.');
             } else if (response.status === 403) {
-                showError('This chat widget is currently inactive.');
+                showError(WCFG.errors?.widgetInactive || 'This chat widget is currently inactive.');
             } else {
-                showError('Failed to initialize chat widget. Please try again.');
+                showError(WCFG.errors?.initFailed || 'Failed to initialize chat widget. Please try again.');
             }
             return false;
         }
@@ -168,21 +175,21 @@ async function lookupWidget(token) {
         CONFIG.username = data.username;
 
         // Update UI with collection name
-        elements.collectionName.textContent = data.collection_name || 'Chat Assistant';
+        elements.collectionName.textContent = data.collection_name || WCFG.branding?.appName || 'Chat Assistant';
         // Use "Help Page" instead of "Widget" in the browser tab title
-        document.title = `${data.collection_name || 'Chat'} - Help Page`;
+        document.title = `${data.collection_name || 'Chat'} - ${WCFG.branding?.pageTitleSuffix || 'Help Page'}`;
 
         // Verify the token is valid
         const tokenValid = await verifyToken(CONFIG.accessToken);
         if (!tokenValid) {
-            showError('Authentication failed. Please try refreshing the page.');
+            showError(WCFG.errors?.authFailed || 'Authentication failed. Please try refreshing the page.');
             return false;
         }
 
         return true;
     } catch (error) {
         console.error('Widget lookup error:', error);
-        showError('Unable to connect to the chat service. Please check your connection.');
+        showError(WCFG.errors?.connectionError || 'Unable to connect to the chat service. Please check your connection.');
         return false;
     }
 }
@@ -192,7 +199,7 @@ async function verifyToken(token) {
     if (!token) return false;
 
     try {
-        const response = await fetch(`${CONFIG.apiBaseUrl}/rag/auth/plugin-token/verify`, {
+        const response = await fetch(`${CONFIG.apiBaseUrl}${CONFIG.tokenVerifyPath}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -235,8 +242,8 @@ async function refreshToken() {
     }
 
     try {
-        const baseUrl = window.location.origin;
-        const response = await fetch(`${baseUrl}/rag/plugins/widget/lookup/${widgetToken}`, {
+        const baseUrl = CONFIG.apiBaseUrl || window.location.origin;
+        const response = await fetch(`${baseUrl}${CONFIG.widgetLookupPath}/${widgetToken}`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -405,7 +412,7 @@ function saveSessions() {
     }
 
     // Save to localStorage with widget-specific key
-    const storageKey = `widget_sessions_${CONFIG.collectionId}`;
+    const storageKey = `${WCFG.behavior?.storageKeyPrefix || 'widget_sessions_'}${CONFIG.collectionId}`;
     try {
         localStorage.setItem(storageKey, JSON.stringify(state.sessions));
     } catch (e) {
@@ -429,7 +436,7 @@ function saveBackgroundSession(sessionId, assistantMessage) {
     session.timestamp = Date.now();
 
     // Save to localStorage
-    const storageKey = `widget_sessions_${CONFIG.collectionId}`;
+    const storageKey = `${WCFG.behavior?.storageKeyPrefix || 'widget_sessions_'}${CONFIG.collectionId}`;
     try {
         localStorage.setItem(storageKey, JSON.stringify(state.sessions));
         console.log('Background response saved to session:', sessionId);
@@ -445,7 +452,7 @@ function saveBackgroundSession(sessionId, assistantMessage) {
 }
 
 function loadSessions() {
-    const storageKey = `widget_sessions_${CONFIG.collectionId}`;
+    const storageKey = `${WCFG.behavior?.storageKeyPrefix || 'widget_sessions_'}${CONFIG.collectionId}`;
     try {
         const saved = localStorage.getItem(storageKey);
         if (saved) {
@@ -521,7 +528,7 @@ function renderMessages() {
                     <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                     </svg>
-                    <p class="empty-state-text">You can start the conversation by sending a message below.</p>
+                    <p class="empty-state-text">${WCFG.branding?.emptyStateMessage || 'You can start the conversation by sending a message below.'}</p>
                 </div>
             </div>
         `;
@@ -596,10 +603,10 @@ function addTypingIndicator() {
     div.innerHTML = `
         <div class="message-content">
             <div class="thinking-container">
-                <img src="leto.svg" alt="Leto logo" class="thinking-logo">
+                <img src="${WCFG.branding?.logoPath || 'leto.svg'}" alt="Logo" class="thinking-logo">
                 <div class="thinking-container">
                     <span class="loading-spinner-small"></span>
-                    <span class="thinking-text">Leto is thinking...</span>
+                    <span class="thinking-text">${WCFG.branding?.thinkingText || 'Leto is thinking...'}</span>
                 </div>
             </div>
         </div>
@@ -697,7 +704,7 @@ async function sendMessage(content) {
     state.currentRequestId = requestId;
 
     try {
-        const conversationHistory = state.messages.slice(-20).map(msg => ({
+        const conversationHistory = state.messages.slice(-(WCFG.behavior?.conversationHistoryLimit || 20)).map(msg => ({
             role: msg.role,
             content: msg.content,
             timestamp: msg.timestamp,
@@ -716,7 +723,7 @@ async function sendMessage(content) {
             payload.website_id = CONFIG.websiteId;
         }
 
-        const response = await fetch(`${CONFIG.apiBaseUrl}/rag/chat/ask`, {
+        const response = await fetch(`${CONFIG.apiBaseUrl}${CONFIG.chatEndpoint}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -734,7 +741,7 @@ async function sendMessage(content) {
                 // Retry the request with new token
                 return sendMessage(content);
             } else {
-                throw new Error('Session expired. Please refresh the page.');
+                throw new Error(WCFG.errors?.sessionExpired || 'Session expired. Please refresh the page.');
             }
         }
 
@@ -764,7 +771,7 @@ async function sendMessage(content) {
                     source_type: item.source_type,
                     url: item.url,
                 }))
-                .slice(0, 4);
+                .slice(0, WCFG.behavior?.maxSourcesDisplay || 4);
         }
 
         // Add assistant message
@@ -801,7 +808,7 @@ async function sendMessage(content) {
             const errorMessage = {
                 id: `assistant_error_${Date.now()}`,
                 role: 'assistant',
-                content: 'Sorry, I encountered an error. Please try again.',
+                content: WCFG.errors?.genericError || 'Sorry, I encountered an error. Please try again.',
                 timestamp: new Date().toISOString(),
             };
 
@@ -861,7 +868,7 @@ async function streamAssistantResponse(messageId, fullContent) {
                 renderMessages();
                 resolve();
             }
-        }, 10); // Match the snappiness
+        }, WCFG.behavior?.typingSpeed || 10); // Typing speed from config
     });
 }
 
@@ -903,14 +910,14 @@ function closeMobileSidebar() {
 
 // ===== Theme =====
 function loadTheme() {
-    const savedTheme = localStorage.getItem('widget_theme') || 'light';
+    const savedTheme = localStorage.getItem(WCFG.behavior?.themeStorageKey || 'widget_theme') || WCFG.theme?.defaultTheme || 'light';
     setTheme(savedTheme);
 }
 
 function toggleTheme() {
     const newTheme = state.theme === 'light' ? 'dark' : 'light';
     setTheme(newTheme);
-    localStorage.setItem('widget_theme', newTheme);
+    localStorage.setItem(WCFG.behavior?.themeStorageKey || 'widget_theme', newTheme);
 }
 
 function setTheme(theme) {

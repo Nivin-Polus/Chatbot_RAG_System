@@ -368,16 +368,20 @@ button {
   mask-size: contain;
 }
 
-.new-chat-btn.is-cooldown {
+.new-chat-btn.is-cooldown,
+.plugin-new-chat-btn.is-cooldown {
   cursor: not-allowed;
-  opacity: 0.6;
-  background: rgba(17, 24, 39, 0.08);
-  border-color: rgba(17, 24, 39, 0.2);
+  opacity: 0.5;
+  background: #f3f4f6;
+  border-color: #d1d5db;
   transform: none;
+  pointer-events: none;
 }
 
-.new-chat-btn.is-cooldown .icon {
-  opacity: 0.5;
+.new-chat-btn.is-cooldown .icon,
+.plugin-new-chat-btn.is-cooldown .icon {
+  opacity: 0.4;
+  filter: grayscale(100%);
 }
 
 .chat-header-right button:hover:not(:disabled),

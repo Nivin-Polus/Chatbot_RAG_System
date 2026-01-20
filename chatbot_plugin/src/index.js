@@ -73,6 +73,8 @@ import "./styles.css";
   let inFlight = false;
   let abortController = null;
   let currentTypingFinish = null;
+  let currentTypingMessage = null; // Store reference to current typing message
+  let currentTypingFullText = null; // Store full text for current typing message
   let currentRequestId = null; // Track current request to prevent old responses from updating UI
   let originalSendBtnHTML = null; // Store original send button HTML
   let userMessageCount = 0; // Track how many user messages have been sent in this session
@@ -403,6 +405,10 @@ import "./styles.css";
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
+      // Prevent click if button is in cooldown (even though pointer-events should handle this)
+      if (!ui.canTriggerNewChat()) {
+        return false;
+      }
       handleNewChat();
       return false;
     }
@@ -585,9 +591,6 @@ import "./styles.css";
       abortController = null;
     }
 
-    // Invalidate current request ID so old responses won't update UI
-    currentRequestId = null;
-
     // Reset state flags
     inFlight = false;
 
@@ -595,7 +598,25 @@ import "./styles.css";
     if (typeof currentTypingFinish === 'function') {
       clearInterval(typingInterval);
       typingInterval = null;
-      currentTypingFinish();
+      currentTypingFinish = null;
+    } else {
+      clearInterval(typingInterval);
+      typingInterval = null;
+    }
+
+    // Finalize any messages that are still in typing state with full text
+    if (currentTypingMessage && currentTypingFullText) {
+      currentTypingMessage.text = currentTypingFullText;
+      currentTypingMessage.isTyping = false;
+      currentTypingMessage = null;
+      currentTypingFullText = null;
+    } else {
+      // Fallback: find any typing messages and finalize with current text
+      messages.forEach(msg => {
+        if (msg.isTyping) {
+          msg.isTyping = false;
+        }
+      });
     }
 
     // Remove any typing indicators (thinking spinner)
@@ -607,6 +628,9 @@ import "./styles.css";
       }
     });
 
+    // Invalidate current request ID after finalizing messages
+    currentRequestId = null;
+
     renderMessages();
 
     // Re-enable UI elements
@@ -615,12 +639,9 @@ import "./styles.css";
     }
     showSendButton();
 
+    // Scroll to bottom to show the finalized response
     if (chatBox) {
-      if (userMessageCount <= 1) {
-        chatBox.scrollTop = chatBox.scrollHeight;
-      } else {
-        scrollLastUserMessageToTop();
-      }
+      scrollChatToBottom(true); // Force scroll
     }
   }
 
@@ -633,23 +654,44 @@ import "./styles.css";
     // Just detach the controller so we can start a new one for the new session
     abortController = null;
 
-    // Stop any typing animation (UI only, doesn't affect background request)
+    // Stop any typing animation
     if (typeof currentTypingFinish === 'function') {
       clearInterval(typingInterval);
       typingInterval = null;
-      // Don't call currentTypingFinish() as it may interfere with background save
       currentTypingFinish = null;
     } else {
       clearInterval(typingInterval);
       typingInterval = null;
     }
 
+    // Finalize any streaming messages with full text before switching sessions
+    if (currentTypingMessage && currentTypingFullText) {
+      currentTypingMessage.text = currentTypingFullText;
+      currentTypingMessage.isTyping = false;
+      // Save the finalized message to chat history
+      saveChatHistory();
+    } else {
+      // Fallback: finalize any typing messages with current text
+      messages.forEach(msg => {
+        if (msg.isTyping) {
+          msg.isTyping = false;
+        }
+      });
+      // Save any finalized messages
+      if (messages.some(msg => msg.isTyping === false && !msg.user && msg.text)) {
+        saveChatHistory();
+      }
+    }
+    
+    currentTypingMessage = null;
+    currentTypingFullText = null;
+
     // Invalidate current request ID so old responses won't update THIS UI
     // but they'll still save to their original session via saveBackgroundResponse()
     currentRequestId = null;
 
-    // Remove any typing indicators from current view
-    const typingIndicators = messages.filter(msg => msg.isTypingIndicator || msg.isTyping);
+    // Remove only typing indicators (thinking spinner), not typing messages
+    const typingIndicators = messages.filter(msg => msg.isTypingIndicator);
     typingIndicators.forEach(indicator => {
       const index = messages.indexOf(indicator);
       if (index !== -1) {
@@ -881,6 +923,9 @@ import "./styles.css";
         sources: preservedSources,
         isFollowup: isFollowup  // NEW: Track follow-up status for styling
       });
+      // Store reference to current typing message and full text for stop button handling
+      currentTypingMessage = typingMessage;
+      currentTypingFullText = enhancedText;
       if (userMessageCount <= 1) {
         scrollChatToBottom();
       } else {
@@ -912,6 +957,8 @@ import "./styles.css";
         inFlight = false;
         abortController = null;
         currentTypingFinish = null;
+        currentTypingMessage = null;
+        currentTypingFullText = null;
         input.focus();
         if (chatBox) {
           if (userMessageCount <= 1) {
@@ -1235,23 +1282,37 @@ import "./styles.css";
       abortController = null;
     }
 
-    // Stop any typing animation and finalize the streaming message
+    // Stop any typing animation
     if (typeof currentTypingFinish === 'function') {
       clearInterval(typingInterval);
       typingInterval = null;
-      // Don't call currentTypingFinish() as it may try to update UI
       currentTypingFinish = null;
     } else {
       clearInterval(typingInterval);
       typingInterval = null;
     }
 
-    // Finalize any messages that are still in typing state (preserve their current text)
-    messages.forEach(msg => {
-      if (msg.isTyping) {
-        msg.isTyping = false;
+    // Finalize any streaming messages with full text before switching sessions
+    if (currentTypingMessage && currentTypingFullText) {
+      currentTypingMessage.text = currentTypingFullText;
+      currentTypingMessage.isTyping = false;
+      // Save the finalized message to chat history before switching
+      saveChatHistory();
+    } else {
+      // Fallback: finalize any typing messages with current text
+      messages.forEach(msg => {
+        if (msg.isTyping) {
+          msg.isTyping = false;
+        }
+      });
+      // Save any finalized messages before switching
+      if (messages.some(msg => msg.isTyping === false && !msg.user && msg.text)) {
+        saveChatHistory();
       }
-    });
+    }
+    
+    currentTypingMessage = null;
+    currentTypingFullText = null;
 
     // Remove typing indicators (the "thinking..." bubbles)
     const typingIndicators = messages.filter(msg => msg.isTypingIndicator);
