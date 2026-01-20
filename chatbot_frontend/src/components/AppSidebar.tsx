@@ -43,7 +43,7 @@ const superadminNav = [
   { title: 'Knowledge Base', url: '/superadmin', icon: Layers },
   { title: 'Users', url: '/superadmin/users', icon: Users },
   { title: 'Plugins', url: '/superadmin/plugins', icon: Link2 },
-  { title: 'Help Page', url: '/superadmin/help-page', icon: HelpCircle },
+  { title: 'Help Pages', url: '/superadmin/help-page', icon: HelpCircle },
   { title: 'Chat', url: '/superadmin/chat', icon: MessageSquare },
   { title: 'Activity', url: '/superadmin/activity', icon: Activity },
   { title: 'Settings', url: '/superadmin/settings', icon: Settings },
