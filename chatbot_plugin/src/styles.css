@@ -917,11 +917,11 @@ button {
 }
 
 .typing-dots .dot {
+  display: block;
+  /* Ensure width/height take effect */
   width: 5px;
-  /* Increased size slightly */
   height: 5px;
   background-color: #6b7280;
-  /* Explicit gray color */
   border-radius: 50%;
   opacity: 0.3;
   animation: dot-pulse 1.4s infinite ease-in-out both;
