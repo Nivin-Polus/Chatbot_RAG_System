@@ -915,18 +915,16 @@ button {
 }
 
 .typing-dots .dot {
+  display: inline-block;
+  /* Required for transform animation */
   font-size: 1.5rem;
   line-height: 1;
   color: #6b7280;
   animation: typingPulse 1s infinite ease-in-out both;
   background-color: transparent;
-  /* Reset background */
   width: auto;
-  /* Reset width */
   height: auto;
-  /* Reset height */
   opacity: 1;
-  /* Reset start opacity as keyframe handles it */
 }
 
 .typing-dots .dot:nth-child(1) {
