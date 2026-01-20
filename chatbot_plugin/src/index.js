@@ -1439,7 +1439,7 @@ import "./styles.css";
     }
     if (message.isTypingIndicator) {
       const logoUrl = CONFIG.ui.placeholderLogoUrl || CONFIG.ui.logoUrl || `${CONFIG.ui.iconsBaseUrl}/logo1.svg`;
-      return `<div class="plugin-msg msg bot typing thinking-indicator"><div class="plugin-thinking-content thinking-content"><div class="plugin-thinking-inner thinking-inner"><img src="${logoUrl}" alt="Leto logo" class="plugin-thinking-logo thinking-logo" /><div class="plugin-thinking-status thinking-status"><span class="plugin-thinking-text thinking-text">Leto is thinking</span><span class="typing-dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span></div></div></div></div>`;
+      return `<div class="plugin-msg msg bot typing thinking-indicator"><div class="plugin-thinking-content thinking-content"><div class="plugin-thinking-inner thinking-inner"><img src="${logoUrl}" alt="Leto logo" class="plugin-thinking-logo thinking-logo" /><div class="plugin-thinking-status thinking-status"><span class="plugin-thinking-text thinking-text">Leto is thinking</span><span class="typing-dots"><span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></span></div></div></div></div>`;
     }
     const classes = ["msg", "bot"];
     if (message.isError) classes.push("error");
