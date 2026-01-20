@@ -878,7 +878,10 @@ button {
 .thinking-indicator,
 .plugin-thinking-indicator {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
+  /* Changed from flex-start to center */
+  white-space: normal;
+  /* Override pre-wrap from .msg.bot */
 }
 
 .thinking-content,
@@ -944,6 +947,9 @@ button {
   align-items: center;
   gap: 2px;
   margin-left: 4px;
+  height: 14px;
+  /* Ensure consistent height */
+  vertical-align: middle;
 }
 
 .typing-dots .dot {
