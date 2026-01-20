@@ -27,6 +27,7 @@ const state = {
     isStreaming: false,
     sidebarOpen: true,
     typingInterval: null,
+    currentRequestId: null, // Track ongoing requests for background completion
 };
 
 // ===== DOM Elements =====
@@ -412,6 +413,37 @@ function saveSessions() {
     }
 }
 
+// Save a response to a session that is NOT the current session (background request completion)
+function saveBackgroundSession(sessionId, assistantMessage) {
+    if (!sessionId || !assistantMessage) return;
+
+    const session = state.sessions.find(s => s.id === sessionId);
+    if (!session) {
+        console.warn('Background save: session not found:', sessionId);
+        return;
+    }
+
+    // Add the assistant message to that session's messages
+    session.messages = session.messages || [];
+    session.messages.push(assistantMessage);
+    session.timestamp = Date.now();
+
+    // Save to localStorage
+    const storageKey = `widget_sessions_${CONFIG.collectionId}`;
+    try {
+        localStorage.setItem(storageKey, JSON.stringify(state.sessions));
+        console.log('Background response saved to session:', sessionId);
+    } catch (e) {
+        console.warn('Failed to save background session:', e);
+    }
+
+    // If user navigated back to this session, update the UI
+    if (state.sessionId === sessionId) {
+        state.messages = session.messages;
+        renderMessages();
+    }
+}
+
 function loadSessions() {
     const storageKey = `widget_sessions_${CONFIG.collectionId}`;
     try {
@@ -659,6 +691,11 @@ async function sendMessage(content) {
     state.isLoading = true;
     addTypingIndicator();
 
+    // Capture session ID and generate unique request ID at the start
+    const requestSessionId = state.sessionId;
+    const requestId = Date.now() + Math.random();
+    state.currentRequestId = requestId;
+
     try {
         const conversationHistory = state.messages.slice(-20).map(msg => ({
             role: msg.role,
@@ -668,7 +705,7 @@ async function sendMessage(content) {
 
         const payload = {
             question: content,
-            session_id: state.sessionId,
+            session_id: requestSessionId, // Use captured session ID
             conversation_history: conversationHistory,
             maintain_context: conversationHistory.length > 0,
             collection_id: CONFIG.collectionId,
@@ -730,7 +767,7 @@ async function sendMessage(content) {
                 .slice(0, 4);
         }
 
-        // Add assistant message and start streaming
+        // Add assistant message
         const assistantMessage = {
             id: `assistant_${Date.now()}`,
             role: 'assistant',
@@ -740,6 +777,15 @@ async function sendMessage(content) {
             streaming: true,
         };
 
+        // Check if session changed during the request
+        if (state.currentRequestId !== requestId || state.sessionId !== requestSessionId) {
+            // Session changed - save to the original session in background
+            console.log('Session changed during request, saving to background session:', requestSessionId);
+            saveBackgroundSession(requestSessionId, assistantMessage);
+            return;
+        }
+
+        // Session is still the same - update UI normally
         state.messages.push(assistantMessage);
         await streamAssistantResponse(assistantMessage.id, assistantContent);
 
@@ -749,19 +795,25 @@ async function sendMessage(content) {
         console.error('Chat error:', error);
         removeTypingIndicator();
 
-        // Add error message
-        const errorMessage = {
-            id: `assistant_error_${Date.now()}`,
-            role: 'assistant',
-            content: 'Sorry, I encountered an error. Please try again.',
-            timestamp: new Date().toISOString(),
-        };
+        // Only show error in current session if we're still in the same session
+        if (state.sessionId === requestSessionId && state.currentRequestId === requestId) {
+            // Add error message
+            const errorMessage = {
+                id: `assistant_error_${Date.now()}`,
+                role: 'assistant',
+                content: 'Sorry, I encountered an error. Please try again.',
+                timestamp: new Date().toISOString(),
+            };
 
-        state.messages.push(errorMessage);
-        renderMessages();
+            state.messages.push(errorMessage);
+            renderMessages();
+        }
     } finally {
-        state.isLoading = false;
-        elements.sendBtn.disabled = elements.messageInput.value.trim().length === 0;
+        // Only update loading state if this is still the active request
+        if (state.currentRequestId === requestId) {
+            state.isLoading = false;
+            elements.sendBtn.disabled = elements.messageInput.value.trim().length === 0;
+        }
     }
 }
 

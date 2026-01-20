@@ -628,27 +628,27 @@ import "./styles.css";
     if (!ui.canTriggerNewChat()) return;
     ui.startNewChatCooldown();
 
-    // Abort any ongoing fetch request
-    if (abortController) {
-      abortController.abort();
-      abortController = null;
-    }
+    // Don't abort ongoing fetch requests - let them complete in background
+    // The response will be saved via saveBackgroundResponse() when it completes
+    // Just detach the controller so we can start a new one for the new session
+    abortController = null;
 
-    // Stop any typing animation
+    // Stop any typing animation (UI only, doesn't affect background request)
     if (typeof currentTypingFinish === 'function') {
       clearInterval(typingInterval);
       typingInterval = null;
-      currentTypingFinish();
+      // Don't call currentTypingFinish() as it may interfere with background save
       currentTypingFinish = null;
     } else {
       clearInterval(typingInterval);
       typingInterval = null;
     }
 
-    // Invalidate current request ID so old responses won't update UI
+    // Invalidate current request ID so old responses won't update THIS UI
+    // but they'll still save to their original session via saveBackgroundResponse()
     currentRequestId = null;
 
-    // Remove any typing indicators
+    // Remove any typing indicators from current view
     const typingIndicators = messages.filter(msg => msg.isTypingIndicator || msg.isTyping);
     typingIndicators.forEach(indicator => {
       const index = messages.indexOf(indicator);
@@ -657,7 +657,7 @@ import "./styles.css";
       }
     });
 
-    // Reset state flags
+    // Reset UI state flags (background requests still tracked by their own requestId)
     inFlight = false;
 
     // Re-enable UI elements
@@ -1228,10 +1228,10 @@ import "./styles.css";
   function switchSession(sessionId) {
     if (currentSessionId === sessionId && messages.length > 0) return;
 
-    // Abort any ongoing fetch request
-    // MODIFIED: Do not abort the request itself, just detach from UI
+    // Don't abort ongoing requests - let them complete in background
+    // The response will be saved to the original session via saveBackgroundResponse()
+    // when handleSendMessage() detects currentRequestId has changed
     if (abortController) {
-      // abortController.abort(); // Don't abort so it completes in background
       abortController = null;
     }
 
