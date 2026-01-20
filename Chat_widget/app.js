@@ -48,6 +48,31 @@ async function init() {
     setupEventListeners();
     loadTheme();
 
+    // ===== Design/Mock Mode - Skip API calls =====
+    if (WCFG.mockMode) {
+        console.log('🎨 Design Mode: Using mock data (no backend required)');
+
+        // Set mock config data
+        CONFIG.collectionId = 'mock-collection';
+        CONFIG.collectionName = WCFG.branding?.appName || 'Chat Assistant';
+        CONFIG.userId = 'mock-user';
+        CONFIG.username = 'Designer';
+
+        // Update UI with mock data
+        elements.collectionName.textContent = CONFIG.collectionName;
+        document.title = `${CONFIG.collectionName} - ${WCFG.branding?.pageTitleSuffix || 'Help Page'}`;
+
+        // Show interface immediately
+        loadSessions();
+        showChatInterface();
+
+        if (!state.sessionId) {
+            startNewSession();
+        }
+        return;
+    }
+
+    // ===== Normal Mode - API calls =====
     // Extract widget token from URL
     const widgetToken = getWidgetToken();
     if (!widgetToken) {
@@ -703,6 +728,41 @@ async function sendMessage(content) {
     const requestId = Date.now() + Math.random();
     state.currentRequestId = requestId;
 
+    // ===== Design/Mock Mode - Return mock response =====
+    if (WCFG.mockMode) {
+        // Simulate network delay
+        await new Promise(resolve => setTimeout(resolve, 800));
+        removeTypingIndicator();
+
+        // Mock response with sample data
+        const mockResponses = [
+            "This is a **mock response** for design mode. The chat interface is working correctly!",
+            "I'm running in design mode, so no backend is connected. You can test the UI and styling here.",
+            "Welcome to design mode! Feel free to test the chat layout and interactions.",
+            "This is sample text to help you design the chat interface. *Italic* and **bold** formatting works too!",
+        ];
+        const mockContent = mockResponses[Math.floor(Math.random() * mockResponses.length)];
+
+        const assistantMessage = {
+            id: `assistant_${Date.now()}`,
+            role: 'assistant',
+            content: mockContent,
+            timestamp: new Date().toISOString(),
+            sources: [
+                { file_name: 'Sample Document.pdf', source_type: 'file' },
+                { file_name: 'Example Page', url: 'https://example.com', source_type: 'web_crawl' },
+            ],
+        };
+
+        state.messages.push(assistantMessage);
+        await streamAssistantResponse(assistantMessage.id, mockContent);
+        saveSessions();
+        state.isLoading = false;
+        elements.sendBtn.disabled = elements.messageInput.value.trim().length === 0;
+        return;
+    }
+
+    // ===== Normal Mode - API call =====
     try {
         const conversationHistory = state.messages.slice(-(WCFG.behavior?.conversationHistoryLimit || 20)).map(msg => ({
             role: msg.role,

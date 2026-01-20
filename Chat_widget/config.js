@@ -2,14 +2,24 @@
 
 const WIDGET_CONFIG = {
     // ===== Environment Mode =====
-    // Set to 'local' for local development, 'dev' for dev server, 'prod' for production
+    // 'design' = Frontend only (no backend needed, uses mock data)
+    // 'local'  = Local backend (localhost:8000)
+    // 'dev'    = Dev server
+    // 'prod'   = Production
     environment: 'dev',
+
+    // ===== Mock Mode (auto-enabled in 'design' environment) =====
+    // When true, bypasses API calls and uses mock data for UI development
+    get mockMode() {
+        return WIDGET_CONFIG.environment === 'design';
+    },
 
     // ===== API & Backend URLs =====
     api: {
         // URL configurations per environment (for BACKEND API, not widget hosting)
         // The widget can be hosted anywhere; these URLs are where API calls go
         urls: {
+            design: '',  // Not used in design mode
             local: 'http://localhost:8000',      // Local backend (FastAPI/Python)
             dev: 'https://dev-chatbot.polussolutions.com',
             prod: 'https://chatbot.polussolutions.com',
