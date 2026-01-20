@@ -22,7 +22,7 @@ const WIDGET_CONFIG = {
             design: '',  // Not used in design mode
             local: 'http://localhost:8000',      // Local backend (FastAPI/Python)
             dev: 'https://dev-chatbot.polussolutions.com',
-            prod: 'https://chatbot.polussolutions.com',
+            prod: 'https://keyword-search.mit.edu',
         },
 
         // Base URL for API calls (auto-selected based on environment above)
