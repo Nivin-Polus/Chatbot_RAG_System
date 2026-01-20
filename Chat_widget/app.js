@@ -37,6 +37,7 @@ const state = {
     currentRequestId: null, // Track ongoing requests for background completion
     currentTypingMessage: null, // Track current typing message for session switch
     currentTypingFullText: null, // Store full text for current typing message
+    abortController: null, // Added for stopping requests
 };
 
 // ===== DOM Elements =====
@@ -120,6 +121,7 @@ function cacheElements() {
         themeToggle: document.getElementById('theme-toggle'),
         headerNewChatBtn: document.getElementById('header-new-chat-btn'),
     };
+    console.log('⏹️ Stop button element:', elements.stopBtn);
 }
 
 function setupEventListeners() {
@@ -703,18 +705,27 @@ function handleInputChange() {
 
 // ===== Button State Helpers =====
 function showProcessingState() {
-    elements.sendBtn.style.display = 'none';
-    elements.stopBtn.style.display = 'flex';
+    if (elements.sendBtn) elements.sendBtn.style.display = 'none';
+    if (elements.stopBtn) elements.stopBtn.style.display = 'inline-flex';
+    console.log('🛑 Stop button shown');
 }
 
 function showSendButton() {
-    elements.sendBtn.style.display = 'flex';
-    elements.stopBtn.style.display = 'none';
-    elements.sendBtn.disabled = elements.messageInput.value.trim().length === 0;
+    if (elements.sendBtn) {
+        elements.sendBtn.style.display = '';  // Reset to CSS default
+        elements.sendBtn.disabled = elements.messageInput.value.trim().length === 0;
+    }
+    if (elements.stopBtn) elements.stopBtn.style.display = 'none';
 }
 
 // ===== Stop Button Handler =====
 function handleStop() {
+    // Abort any ongoing fetch request
+    if (state.abortController) {
+        state.abortController.abort();
+        state.abortController = null;
+    }
+
     // Stop any typing animation immediately
     if (state.typingInterval) {
         clearInterval(state.typingInterval);
@@ -775,7 +786,6 @@ async function handleSubmit(e) {
     // Add user message
     const userMessage = {
         id: `user_${Date.now()}`,
-        id: `user_${Date.now()}`,
         role: 'user',
         content: content,
         timestamp: new Date().toISOString(),
@@ -811,6 +821,7 @@ async function sendMessage(content) {
     const requestSessionId = state.sessionId;
     const requestId = Date.now() + Math.random();
     state.currentRequestId = requestId;
+    state.abortController = new AbortController(); // Added for stopping requests
 
     // ===== Design/Mock Mode - Return mock response =====
     if (WCFG.mockMode) {
@@ -874,6 +885,7 @@ async function sendMessage(content) {
                 'Authorization': `Bearer ${CONFIG.accessToken}`,
             },
             body: JSON.stringify(payload),
+            signal: state.abortController.signal, // Added for stopping requests
         });
 
         removeTypingIndicator();
@@ -943,6 +955,12 @@ async function sendMessage(content) {
         saveSessions();
 
     } catch (error) {
+        // Don't show error if request was aborted by user
+        if (error.name === 'AbortError') {
+            console.log('Request aborted by user');
+            return;
+        }
+
         console.error('Chat error:', error);
         removeTypingIndicator();
 
@@ -963,6 +981,7 @@ async function sendMessage(content) {
         // Only update loading state if this is still the active request
         if (state.currentRequestId === requestId) {
             state.isLoading = false;
+            state.abortController = null;
             showSendButton();
         }
     }
