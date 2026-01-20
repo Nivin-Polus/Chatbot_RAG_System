@@ -38,6 +38,8 @@ const state = {
     currentTypingMessage: null, // Track current typing message for session switch
     currentTypingFullText: null, // Store full text for current typing message
     abortController: null, // Added for stopping requests
+    userScrolledDuringStream: false, // Track if user manually scrolled during streaming
+    isAutoScrolling: false, // Flag to distinguish programmed scroll from user scroll
 };
 
 // ===== DOM Elements =====
@@ -158,6 +160,20 @@ function setupEventListeners() {
             closeMobileSidebar();
         }
     });
+
+    // Track user scroll during streaming to allow manual scrolling
+    if (elements.messagesContainer) {
+        elements.messagesContainer.addEventListener('scroll', () => {
+            // Only track user scrolls during active streaming or loading
+            if ((state.isStreaming || state.isLoading) && !state.isAutoScrolling) {
+                const container = elements.messagesContainer;
+                const isNearBottom = container.scrollHeight - container.clientHeight - container.scrollTop <= 80;
+                if (!isNearBottom) {
+                    state.userScrolledDuringStream = true;
+                }
+            }
+        }, { passive: true });
+    }
 }
 
 // ===== Widget Lookup =====
@@ -653,15 +669,19 @@ function addTypingIndicator() {
         <div class="message-content">
             <div class="thinking-container">
                 <img src="${WCFG.branding?.logoPath || 'leto.svg'}" alt="Logo" class="thinking-logo">
-                <div class="thinking-container">
-                    <span class="loading-spinner-small"></span>
-                    <span class="thinking-text">${WCFG.branding?.thinkingText || 'Leto is thinking...'}</span>
+                <div class="thinking-wrapper">
+                    <span class="thinking-text">${WCFG.branding?.thinkingText || 'Leto is thinking'}</span>
+                    <span class="typing-dots">
+                        <span class="dot">.</span>
+                        <span class="dot">.</span>
+                        <span class="dot">.</span>
+                    </span>
                 </div>
             </div>
         </div>
     `;
     elements.messagesList.appendChild(div);
-    scrollToBottom();
+    scrollToBottom(true); // Force scroll for first indicator
 }
 
 function removeTypingIndicator() {
@@ -693,8 +713,21 @@ function formatTime(timestamp) {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function scrollToBottom() {
-    elements.messagesEnd.scrollIntoView({ behavior: 'smooth' });
+function scrollToBottom(force = false) {
+    if (!elements.messagesContainer || !elements.messagesEnd) return;
+
+    // Don't auto-scroll if user has manually scrolled during streaming (unless forced)
+    if (!force && state.userScrolledDuringStream) {
+        return;
+    }
+
+    state.isAutoScrolling = true;
+    elements.messagesEnd.scrollIntoView({ behavior: 'smooth', block: 'end' });
+
+    // Reset auto-scrolling flag after a short delay
+    setTimeout(() => {
+        state.isAutoScrolling = false;
+    }, 150);
 }
 
 // ===== Chat Functionality =====
@@ -706,7 +739,7 @@ function handleInputChange() {
 // ===== Button State Helpers =====
 function showProcessingState() {
     if (elements.sendBtn) elements.sendBtn.style.display = 'none';
-    if (elements.stopBtn) elements.stopBtn.style.display = 'inline-flex';
+    if (elements.stopBtn) elements.stopBtn.style.display = 'flex';
     console.log('🛑 Stop button shown');
 }
 
@@ -814,6 +847,7 @@ async function handleSubmit(e) {
 
 async function sendMessage(content) {
     state.isLoading = true;
+    state.userScrolledDuringStream = false; // Reset scroll flag for new message
     showProcessingState(); // Show stop button, hide send
     addTypingIndicator();
 
@@ -853,7 +887,7 @@ async function sendMessage(content) {
         await streamAssistantResponse(assistantMessage.id, mockContent);
         saveSessions();
         state.isLoading = false;
-        elements.sendBtn.disabled = elements.messageInput.value.trim().length === 0;
+        showSendButton(); // Reset button states
         return;
     }
 

@@ -714,17 +714,61 @@ body {
 .thinking-container {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 12px;
+}
+
+.thinking-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 
 .thinking-text {
     font-size: 0.875rem;
     color: hsl(var(--muted-foreground));
+    font-weight: 500;
 }
 
 .thinking-logo {
-    height: 1rem;
-    width: 1rem;
+    height: 1.25rem;
+    width: 1.25rem;
+    opacity: 0.9;
+}
+
+.typing-dots {
+    display: flex;
+    gap: 2px;
+    align-items: center;
+}
+
+.typing-dots .dot {
+    font-size: 1.25rem;
+    line-height: 1;
+    color: hsl(var(--muted-foreground));
+    animation: bounce 1.4s infinite ease-in-out both;
+}
+
+.typing-dots .dot:nth-child(1) {
+    animation-delay: -0.32s;
+}
+
+.typing-dots .dot:nth-child(2) {
+    animation-delay: -0.16s;
+}
+
+@keyframes bounce {
+
+    0%,
+    80%,
+    100% {
+        transform: translateY(0);
+        opacity: 0.4;
+    }
+
+    40% {
+        transform: translateY(-4px);
+        opacity: 1;
+    }
 }
 
 /* Empty State */
