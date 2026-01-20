@@ -163,7 +163,7 @@ export default function SuperadminHelpPage() {
       }
 
       toast.success(!plugin.is_widget_active ? 'Help page enabled' : 'Help page disabled');
-      
+
       // Update local state to reflect the change immediately
       setPlugins(prev => prev.map(p => p.id === plugin.id ? { ...p, is_widget_active: !p.is_widget_active } : p));
     } catch (error) {
@@ -255,7 +255,7 @@ export default function SuperadminHelpPage() {
                         (p) => p.collection_id === collection.collection_id && p.widget_token
                       );
                       const widgetUrl = plugin?.widget_token
-                        ? `${import.meta.env.VITE_CHAT_WIDGET_BASE_URL || 'https://dev-chatbot.polussolutions.com/chat-widget'}/${plugin.widget_token}`
+                        ? `${import.meta.env.VITE_CHAT_WIDGET_BASE_URL}/${plugin.widget_token}`
                         : '';
 
                       return (

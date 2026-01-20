@@ -113,7 +113,7 @@ class Settings(BaseSettings):
     MAX_CONTEXT_TOKENS: int = Field(4000, validation_alias="MAX_CONTEXT_TOKENS")  # Token cap for context chunks sent to LLM
 
     # Chat Widget Configuration
-    CHAT_WIDGET_HOST_URL: str = Field("https://dev-chatbot.polussolutions.com/chat-widget", validation_alias="CHAT_WIDGET_HOST_URL")
+    CHAT_WIDGET_HOST_URL: str = Field("", validation_alias="CHAT_WIDGET_HOST_URL")
     
     # Plugin Embed Code Configuration (base URL for CSS/JS assets)
     PLUGIN_EMBED_BASE_URL: str = Field("https://keyword-search.mit.edu/dist/", validation_alias="PLUGIN_EMBED_BASE_URL")
