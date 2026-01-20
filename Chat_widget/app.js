@@ -35,6 +35,8 @@ const state = {
     sidebarOpen: true,
     typingInterval: null,
     currentRequestId: null, // Track ongoing requests for background completion
+    currentTypingMessage: null, // Track current typing message for session switch
+    currentTypingFullText: null, // Store full text for current typing message
 };
 
 // ===== DOM Elements =====
@@ -114,7 +116,7 @@ function cacheElements() {
         chatForm: document.getElementById('chat-form'),
         messageInput: document.getElementById('message-input'),
         sendBtn: document.getElementById('send-btn'),
-        sendBtn: document.getElementById('send-btn'),
+        stopBtn: document.getElementById('stop-btn'),
         themeToggle: document.getElementById('theme-toggle'),
         headerNewChatBtn: document.getElementById('header-new-chat-btn'),
     };
@@ -141,6 +143,9 @@ function setupEventListeners() {
     // Chat form
     elements.chatForm.addEventListener('submit', handleSubmit);
     elements.messageInput.addEventListener('input', handleInputChange);
+
+    // Stop button
+    elements.stopBtn.addEventListener('click', handleStop);
 
     // Theme toggle
     elements.themeToggle.addEventListener('click', toggleTheme);
@@ -337,6 +342,23 @@ function startNewSession() {
 function loadSession(sessionId) {
     const session = state.sessions.find(s => s.id === sessionId);
     if (!session) return;
+
+    // Finalize any streaming message with full text before switching
+    if (state.currentTypingMessage && state.currentTypingFullText) {
+        state.currentTypingMessage.content = state.currentTypingFullText;
+        state.currentTypingMessage.streaming = false;
+        // Save the finalized message
+        saveSessions();
+    }
+
+    // Stop any typing animation
+    if (state.typingInterval) {
+        clearInterval(state.typingInterval);
+        state.typingInterval = null;
+    }
+    state.currentTypingMessage = null;
+    state.currentTypingFullText = null;
+    state.isStreaming = false;
 
     state.sessionId = sessionId;
     state.messages = session.messages || [];
@@ -679,6 +701,67 @@ function handleInputChange() {
     elements.sendBtn.disabled = !hasText || state.isLoading;
 }
 
+// ===== Button State Helpers =====
+function showProcessingState() {
+    elements.sendBtn.style.display = 'none';
+    elements.stopBtn.style.display = 'flex';
+}
+
+function showSendButton() {
+    elements.sendBtn.style.display = 'flex';
+    elements.stopBtn.style.display = 'none';
+    elements.sendBtn.disabled = elements.messageInput.value.trim().length === 0;
+}
+
+// ===== Stop Button Handler =====
+function handleStop() {
+    // Stop any typing animation immediately
+    if (state.typingInterval) {
+        clearInterval(state.typingInterval);
+        state.typingInterval = null;
+    }
+
+    // Finalize any streaming message with full text (exactly like plugin)
+    if (state.currentTypingMessage && state.currentTypingFullText) {
+        // Update the message content to full text
+        state.currentTypingMessage.content = state.currentTypingFullText;
+        state.currentTypingMessage.streaming = false;
+    } else {
+        // Fallback: find any streaming messages in the array and finalize them
+        state.messages.forEach(msg => {
+            if (msg.streaming) {
+                msg.streaming = false;
+            }
+        });
+    }
+
+    // Clear tracking variables
+    const hadTypingMessage = state.currentTypingMessage !== null;
+    state.currentTypingMessage = null;
+    state.currentTypingFullText = null;
+    state.isStreaming = false;
+    state.isLoading = false;
+    state.currentRequestId = null;
+
+    // Remove typing indicator (the "thinking..." spinner)
+    removeTypingIndicator();
+
+    // Re-render to show full text and sources
+    renderMessages();
+
+    // Save the finalized message
+    if (hadTypingMessage) {
+        saveSessions();
+    }
+
+    // Restore send button and focus input
+    showSendButton();
+    elements.messageInput.focus();
+
+    // Scroll to show the complete message
+    scrollToBottom();
+}
+
 async function handleSubmit(e) {
     e.preventDefault();
 
@@ -721,6 +804,7 @@ async function handleSubmit(e) {
 
 async function sendMessage(content) {
     state.isLoading = true;
+    showProcessingState(); // Show stop button, hide send
     addTypingIndicator();
 
     // Capture session ID and generate unique request ID at the start
@@ -879,7 +963,7 @@ async function sendMessage(content) {
         // Only update loading state if this is still the active request
         if (state.currentRequestId === requestId) {
             state.isLoading = false;
-            elements.sendBtn.disabled = elements.messageInput.value.trim().length === 0;
+            showSendButton();
         }
     }
 }
@@ -893,6 +977,10 @@ async function streamAssistantResponse(messageId, fullContent) {
             resolve();
             return;
         }
+
+        // Track current typing message and full text for session switch handling
+        state.currentTypingMessage = state.messages[msgIndex];
+        state.currentTypingFullText = fullContent;
 
         // Create the element in UI first
         renderMessages();
@@ -921,8 +1009,13 @@ async function streamAssistantResponse(messageId, fullContent) {
 
             if (currentIndex >= fullContent.length) {
                 clearInterval(state.typingInterval);
+                state.typingInterval = null;
                 state.isStreaming = false;
                 state.messages[msgIndex].streaming = false;
+
+                // Clear typing message tracking
+                state.currentTypingMessage = null;
+                state.currentTypingFullText = null;
 
                 // Force a full re-render to ensure sources and final content are displayed correctly
                 renderMessages();

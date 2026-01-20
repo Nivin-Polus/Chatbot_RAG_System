@@ -826,6 +826,31 @@ body {
     height: 20px;
 }
 
+/* Stop Button */
+.stop-btn {
+    height: 2.75rem;
+    padding: 0 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: hsl(0 84% 60%);
+    border: none;
+    border-radius: var(--radius);
+    cursor: pointer;
+    color: white;
+    transition: opacity 0.2s, transform 0.2s;
+}
+
+.stop-btn:hover {
+    opacity: 0.9;
+    transform: scale(1.02);
+}
+
+.stop-btn svg {
+    width: 20px;
+    height: 20px;
+}
+
 /* ===== Responsive Design ===== */
 @media (max-width: 768px) {
     .sidebar {
