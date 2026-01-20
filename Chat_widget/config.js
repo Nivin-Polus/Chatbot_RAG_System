@@ -53,7 +53,7 @@ const WIDGET_CONFIG = {
         pageTitleSuffix: 'Help Page',
 
         // Text shown while AI is generating response
-        thinkingText: 'Leto is thinking...',
+        thinkingText: 'Leto is thinking',
 
         // Empty chat placeholder message
         emptyStateMessage: 'You can start the conversation by sending a message below.',
