@@ -682,7 +682,7 @@ import "./styles.css";
         saveChatHistory();
       }
     }
-    
+
     currentTypingMessage = null;
     currentTypingFullText = null;
 
@@ -1310,7 +1310,7 @@ import "./styles.css";
         saveChatHistory();
       }
     }
-    
+
     currentTypingMessage = null;
     currentTypingFullText = null;
 
@@ -1444,8 +1444,12 @@ import "./styles.css";
           <div class="plugin-thinking-inner thinking-inner">
             <img src="${logoUrl}" alt="Leto logo" class="plugin-thinking-logo thinking-logo" />
             <div class="plugin-thinking-status thinking-status">
-              <svg class="plugin-thinking-spinner thinking-spinner" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
-              <span class="plugin-thinking-text thinking-text">Leto is thinking...</span>
+              <span class="plugin-thinking-text thinking-text">Leto is thinking</span>
+              <span class="typing-dots">
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="dot"></span>
+              </span>
             </div>
           </div>
         </div>

@@ -1148,11 +1148,15 @@ export default function UserChat() {
                       <div className="bg-muted border border-border/60 rounded-xl px-4 py-3 shadow-sm dark:bg-gray-800 dark:text-gray-100 max-w-[80%]">
                         <div className="flex items-center space-x-2">
                           <img src="/chatbot/leto.svg" alt="Leto logo" className="h-4 w-4" />
-                          <div className="flex items-center space-x-2">
-                            <Loader2 className="h-4 w-4 animate-spin" />
+                          <div className="flex items-center space-x-1">
                             <span className="text-sm text-muted-foreground dark:text-gray-300">
-                              Leto is thinking...
+                              Leto is thinking
                             </span>
+                            <div className="typing-dots">
+                              <span className="dot"></span>
+                              <span className="dot"></span>
+                              <span className="dot"></span>
+                            </div>
                           </div>
                         </div>
                       </div>
