@@ -428,6 +428,10 @@ function loadSession(sessionId) {
     state.currentTypingMessage = null;
     state.currentTypingFullText = null;
     state.isStreaming = false;
+    state.isLoading = false;  // Reset loading state
+
+    // Reset button states - show send button, hide stop button
+    showSendButton();
 
     state.sessionId = sessionId;
     state.messages = session.messages || [];
