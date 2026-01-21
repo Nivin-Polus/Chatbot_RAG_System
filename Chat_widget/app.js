@@ -204,6 +204,20 @@ function setupEventListeners() {
             }
         }, { passive: true });
     }
+
+    // Handle source download clicks
+    document.addEventListener('click', (e) => {
+        const downloadBtn = e.target.closest('.source-download');
+        if (downloadBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            handleDownloadSource(
+                downloadBtn.dataset.sourceRef,
+                downloadBtn.dataset.sourceName,
+                downloadBtn
+            );
+        }
+    });
 }
 
 // ===== Widget Lookup =====
@@ -710,10 +724,14 @@ function createMessageElement(msg) {
                     <span>${escapeHtml(source.file_name || 'Link')}</span>
                 </a>`;
             } else {
-                return `<div class="source-item file">
+                const dataRef = escapeAttribute(source.file_id || source.file_name);
+                const dataName = escapeAttribute(source.file_name);
+                const dataId = source.file_id ? `data-source-id="${escapeAttribute(source.file_id)}"` : '';
+
+                return `<button type="button" class="source-item file source-download" ${dataId} data-source-ref="${dataRef}" data-source-name="${dataName}">
                     ${icon}
                     <span>${escapeHtml(source.file_name)}</span>
-                </div>`;
+                </button>`;
             }
         }).join('');
 
@@ -1108,7 +1126,6 @@ async function sendMessage(content) {
 async function streamAssistantResponse(messageId, fullContent) {
     return new Promise((resolve) => {
         state.isStreaming = true;
-        let currentIndex = 0;
         const msgIndex = state.messages.findIndex(m => m.id === messageId);
         if (msgIndex === -1) {
             resolve();
@@ -1132,8 +1149,14 @@ async function streamAssistantResponse(messageId, fullContent) {
 
         if (state.typingInterval) clearInterval(state.typingInterval);
 
+        const startTime = Date.now();
+        const typingSpeed = WCFG.behavior?.typingSpeed || 10;
+
         state.typingInterval = setInterval(() => {
-            currentIndex += 1;
+            // content update based on elapsed time to handle background tab throttling
+            const elapsed = Date.now() - startTime;
+            const currentIndex = Math.floor(elapsed / typingSpeed);
+
             const partialContent = fullContent.slice(0, currentIndex);
 
             // Update the message content in state and UI
@@ -1150,6 +1173,9 @@ async function streamAssistantResponse(messageId, fullContent) {
                 state.isStreaming = false;
                 state.messages[msgIndex].streaming = false;
 
+                // Ensure full content is set at the end
+                state.messages[msgIndex].content = fullContent;
+
                 // Clear typing message tracking
                 state.currentTypingMessage = null;
                 state.currentTypingFullText = null;
@@ -1158,7 +1184,7 @@ async function streamAssistantResponse(messageId, fullContent) {
                 renderMessages();
                 resolve();
             }
-        }, WCFG.behavior?.typingSpeed || 10); // Typing speed from config
+        }, 30); // Run at 30ms interval (approx 30fps) - sufficient for smooth update but robust against throttling
     });
 }
 
@@ -1233,4 +1259,103 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function escapeAttribute(value) {
+    return `${value ?? ""}`.replace(/[&"'<>]/g, (char) => {
+        switch (char) {
+            case "&": return "&amp;";
+            case '"': return "&quot;";
+            case "'": return "&#39;";
+            case "<": return "&lt;";
+            case ">": return "&gt;";
+            default: return "";
+        }
+    });
+}
+
+// ===== Download Handlers =====
+async function handleDownloadSource(sourceRef, downloadName, button) {
+    if (!sourceRef && !downloadName) return;
+
+    const initialLabel = button?.querySelector('span')?.textContent || button?.textContent;
+
+    try {
+        if (button) {
+            button.disabled = true;
+            button.classList.add("is-loading");
+            // Optional: Update text to "Downloading..." if space permits, or just show loading state
+        }
+
+        const token = CONFIG.accessToken;
+        if (!token) {
+            // Try to refresh if possible, otherwise error
+            const refreshed = await refreshToken();
+            if (!refreshed) throw new Error("Missing authentication token");
+        }
+
+        const headers = { Authorization: `Bearer ${CONFIG.accessToken}` };
+        const normalizedName = (downloadName || "").trim();
+        const ref = (sourceRef || "").trim();
+
+        // Remove trailing slash if present
+        const base = (CONFIG.apiBaseUrl || "").replace(/\/+$/, "");
+
+        const effectiveRef = button?.dataset?.sourceId || ref || normalizedName;
+
+        if (!effectiveRef) {
+            throw new Error("Missing file reference");
+        }
+
+        const encodedRef = encodeURIComponent(effectiveRef);
+        const downloadUrl = `${base}/files/download/${encodedRef}`;
+
+        const response = await fetch(downloadUrl, { headers });
+        if (!response.ok) {
+            // Attempt token refresh on 401
+            if (response.status === 401) {
+                const refreshed = await refreshToken();
+                if (refreshed) {
+                    // Retry once
+                    const retryHeaders = { Authorization: `Bearer ${CONFIG.accessToken}` };
+                    const retryResponse = await fetch(downloadUrl, { headers: retryHeaders });
+                    if (!retryResponse.ok) throw new Error(`Download failed (${retryResponse.status})`);
+
+                    const blob = await retryResponse.blob();
+                    const filename = normalizedName || ref || "source";
+                    triggerBrowserDownload(blob, filename);
+                    return;
+                }
+            }
+            throw new Error(`Download failed (${response.status})`);
+        }
+
+        const blob = await response.blob();
+        const filename = normalizedName || ref || "source";
+        triggerBrowserDownload(blob, filename);
+
+    } catch (err) {
+        console.error("Download error:", err);
+        if (button) {
+            button.classList.add("download-error");
+        }
+        // Show a temporary error toast or alert
+        alert("Unable to download this file. Access may be restricted or the file may verify removed.");
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.classList.remove("is-loading");
+        }
+    }
+}
+
+function triggerBrowserDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename || "download";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 }
