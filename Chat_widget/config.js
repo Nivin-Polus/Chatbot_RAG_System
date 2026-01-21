@@ -168,8 +168,11 @@ const WIDGET_CONFIG = {
 
     // ===== Open Graph / SEO Metadata =====
     metadata: {
-        // OG image URL for social sharing
-        ogImageUrl: 'https://dev-chatbot.polussolutions.com/chatbot/leto.png',
+        // OG image URL for social sharing (dynamically uses current environment's URL)
+        get ogImageUrl() {
+            const baseUrl = WIDGET_CONFIG.api.baseUrl || window.location.origin;
+            return `${baseUrl}/chatbot/leto.png`;
+        },
         ogImageWidth: 200,
         ogImageHeight: 200,
         ogTitle: 'Chat Widget - AI-powered knowledge base assistant',

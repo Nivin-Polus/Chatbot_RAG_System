@@ -62,6 +62,7 @@ async function init() {
 
     setupEventListeners();
     loadTheme();
+    updateMetaTags();
 
     // ===== Design/Mock Mode - Skip API calls =====
     if (WCFG.mockMode) {
@@ -350,6 +351,25 @@ async function refreshToken() {
     } catch (error) {
         console.error('Token refresh error:', error);
         return false;
+    }
+}
+
+// ===== Update Meta Tags with Dynamic URLs =====
+function updateMetaTags() {
+    // Get the base URL from config (based on current environment)
+    const baseUrl = WCFG.api?.baseUrl || window.location.origin;
+    const ogImageUrl = `${baseUrl}/chatbot/leto.png`;
+
+    // Update Open Graph image meta tag
+    const ogImageMeta = document.querySelector('meta[property="og:image"]');
+    if (ogImageMeta) {
+        ogImageMeta.setAttribute('content', ogImageUrl);
+    }
+
+    // Update Twitter Card image meta tag
+    const twitterImageMeta = document.querySelector('meta[name="twitter:image"]');
+    if (twitterImageMeta) {
+        twitterImageMeta.setAttribute('content', ogImageUrl);
     }
 }
 
