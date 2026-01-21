@@ -130,7 +130,7 @@ export default function KnowledgeBaseDetails() {
   const [selectedCrawlFile, setSelectedCrawlFile] = useState<FileItem | null>(null);
   const [chunksData, setChunksData] = useState<{ pages: PageChunks[]; total_chunks_in_job: number } | null>(null);
   const [expandedPages, setExpandedPages] = useState<Set<string>>(new Set());
-  const [sourceType, setSourceType] = useState<'files' | 'crawl' | 'all'>('files');
+  const [sourceType, setSourceType] = useState<'files' | 'crawl'>('files');
 
   const fetchCollection = useCallback(async () => {
     if (!id) return;
@@ -654,7 +654,7 @@ export default function KnowledgeBaseDetails() {
   const filteredFiles = files.filter(file => {
     const isCrawl = file.source_type === 'crawled' || file.file_id.startsWith('crawl_');
     const matchesSearch = file.file_name?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesSource = sourceType === 'all' ? true : (sourceType === 'files' ? !isCrawl : isCrawl);
+    const matchesSource = sourceType === 'files' ? !isCrawl : isCrawl;
     return matchesSearch && matchesSource;
   });
 
@@ -885,16 +885,12 @@ export default function KnowledgeBaseDetails() {
                     </CardDescription>
                   </div>
                   <div className="flex items-center gap-4">
-                    <Select value={sourceType} onValueChange={(v: 'files' | 'crawl' | 'all') => setSourceType(v)}>
-                      <SelectTrigger className="w-[180px]">
-                        <SelectValue placeholder="Select Source Type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All</SelectItem>
-                        <SelectItem value="files">Files</SelectItem>
-                        <SelectItem value="crawl">Crawl Data</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Tabs value={sourceType} onValueChange={(v) => setSourceType(v as 'files' | 'crawl')} className="w-[400px]">
+                      <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="files">Files</TabsTrigger>
+                        <TabsTrigger value="crawl">Crawled Data</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
                     {sourceType === 'crawl' && (
                       <Button variant="outline" onClick={() => navigate(`/superadmin/crawler?collectionId=${id}`)}>
                         Go to Crawler

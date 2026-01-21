@@ -239,7 +239,7 @@ export function AppSidebar() {
               )}
             </div>
           </div>
-          {open && (
+          {open && isActive(getChatBaseUrl()) && (
             <Button
               variant="outline"
               className="w-full justify-start gap-2 mt-2"
@@ -280,7 +280,7 @@ export function AppSidebar() {
         </SidebarGroup>
 
         {/* History Section */}
-        {sessions.length > 0 && (
+        {sessions.length > 0 && isActive(getChatBaseUrl()) && (
           <SidebarGroup>
             {open && <SidebarGroupLabel>History</SidebarGroupLabel>}
             <SidebarGroupContent>
