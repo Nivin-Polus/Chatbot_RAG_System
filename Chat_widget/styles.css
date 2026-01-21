@@ -488,6 +488,7 @@ body {
 .chat-interface.chat-empty .input-wrapper {
     max-width: 720px;
 }
+
 /* ===== Chat Info Text  ===== */
 .chat-info {
     margin-top: 8px;
@@ -508,8 +509,8 @@ body {
 /* ===== Empty Chat Message with Icon ===== */
 .empty-chat-message {
     display: none;
-    margin-bottom: 28px;  
-    margin-top: -40px;  
+    margin-bottom: 28px;
+    margin-top: -40px;
     text-align: center;
     color: hsl(var(--muted-foreground));
 }
@@ -561,7 +562,7 @@ body {
     justify-content: space-between;
     padding: 0 16px;
     background: var(--foreground);
-    
+
     flex-shrink: 0;
 }
 
@@ -608,7 +609,14 @@ body {
 }
 
 .collection-name {
-    display: none !important;
+    flex: 1;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .theme-toggle-btn {
@@ -782,6 +790,7 @@ body {
     height: 20px;
 
 }
+
 /* Sources */
 .message-sources {
     margin-top: 12px;
@@ -863,9 +872,9 @@ body {
 
 
 .thinking-logo {
-        height: 1.25rem;
-        width: 1.25rem;
-        opacity: 0.9;
+    height: 1.25rem;
+    width: 1.25rem;
+    opacity: 0.9;
 }
 
 .typing-dots {
@@ -904,6 +913,7 @@ body {
 }
 
 @keyframes typingPulse {
+
     0%,
     100% {
         transform: translateY(0);
@@ -916,6 +926,7 @@ body {
     }
 
 }
+
 /* Empty State */
 .empty-state {
     display: flex;
@@ -953,7 +964,8 @@ body {
 /* ===== Chat Form ===== */
 .chat-form {
     padding: 12px;
-    background: hsl(var(--background)); /* changed the background colour */
+    background: hsl(var(--background));
+    /* changed the background colour */
     border-top: 1px solid hsl(var(--border) / 0.6);
     flex-shrink: 0;
     position: sticky;
@@ -1059,6 +1071,3 @@ body {
 .sidebar-overlay.visible {
     display: block;
 }
-
-
-

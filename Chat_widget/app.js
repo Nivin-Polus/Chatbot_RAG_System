@@ -74,7 +74,9 @@ async function init() {
         CONFIG.username = 'Designer';
 
         // Update UI with mock data
-        elements.collectionName.textContent = CONFIG.collectionName;
+        if (elements.collectionName) {
+            elements.collectionName.textContent = CONFIG.collectionName;
+        }
         document.title = `${CONFIG.collectionName} - ${WCFG.branding?.pageTitleSuffix || 'Help Page'}`;
 
         // Show interface immediately
@@ -249,7 +251,9 @@ async function lookupWidget(token) {
         CONFIG.username = data.username;
 
         // Update UI with collection name
-        elements.collectionName.textContent = data.collection_name || WCFG.branding?.appName || 'Chat Assistant';
+        if (elements.collectionName) {
+            elements.collectionName.textContent = data.collection_name || WCFG.branding?.appName || 'Chat Assistant';
+        }
         // Use "Help Page" instead of "Widget" in the browser tab title
         document.title = `${data.collection_name || 'Chat'} - ${WCFG.branding?.pageTitleSuffix || 'Help Page'}`;
 
