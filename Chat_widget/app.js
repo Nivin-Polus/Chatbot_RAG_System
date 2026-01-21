@@ -50,6 +50,16 @@ document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
     cacheElements();
+    if (elements.emptyChatMessage) {
+        const emptyTextEl = elements.emptyChatMessage?.querySelector('.empty-chat-text');
+
+        if (emptyTextEl) {
+            emptyTextEl.textContent =
+                WCFG.branding?.emptyStateMessage || '';
+        }
+
+    }
+
     setupEventListeners();
     loadTheme();
 
@@ -322,6 +332,25 @@ async function refreshToken() {
     }
 }
 
+// ===== Empty Chat State =============================================================
+function updateEmptyChatState() {
+
+    if (!elements.chatInterface) return;
+
+
+
+    if (state.messages.length === 0) {
+
+        elements.chatInterface.classList.add('chat-empty');
+
+    } else {
+
+        elements.chatInterface.classList.remove('chat-empty');
+
+    }
+
+}
+
 // ===== UI State =====
 function showError(message) {
     elements.loadingScreen.classList.add('hidden');
@@ -349,6 +378,7 @@ function startNewSession() {
     // Clear UI but don't save or add to history list yet
     // The session will be created and saved only when the first message is sent
     renderMessages();
+    updateEmptyChatState();
     elements.messageInput.focus();
 
     // Remove active class from history items
@@ -385,6 +415,7 @@ function loadSession(sessionId) {
     renderMessages();
     scrollToBottom();
     closeMobileSidebar();
+    updateEmptyChatState();
 }
 
 function deleteSession(sessionId) {
@@ -535,6 +566,7 @@ function loadSessions() {
 
     renderHistory();
     renderMessages();
+    updateEmptyChatState();
 }
 
 // ===== Rendering =====
@@ -839,6 +871,7 @@ async function handleSubmit(e) {
 
     state.messages.push(userMessage);
     renderMessages();
+    updateEmptyChatState();
     updateSessionTitle(state.sessionId, content);
 
     // Send to API
