@@ -972,7 +972,7 @@ body {
     padding: 12px;
     background: hsl(var(--background));
     /* changed the background colour */
-    border-top: 1px solid hsl(var(--border) / 0.6);
+
     flex-shrink: 0;
     position: sticky;
     bottom: 0;
