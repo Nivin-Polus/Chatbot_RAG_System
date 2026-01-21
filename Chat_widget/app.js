@@ -1279,13 +1279,23 @@ function escapeAttribute(value) {
 async function handleDownloadSource(sourceRef, downloadName, button) {
     if (!sourceRef && !downloadName) return;
 
-    const initialLabel = button?.querySelector('span')?.textContent || button?.textContent;
+    let originalHtml = '';
+    if (button) {
+        originalHtml = button.innerHTML;
+    }
 
     try {
         if (button) {
             button.disabled = true;
             button.classList.add("is-loading");
-            // Optional: Update text to "Downloading..." if space permits, or just show loading state
+            // Show loading spinner and text
+            button.innerHTML = `
+                <svg class="animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; margin-right: 6px; animation: spin 1s linear infinite;">
+                    <circle cx="12" cy="12" r="10" stroke-opacity="0.25" stroke="currentColor" stroke-width="4"></circle>
+                    <path opacity="0.75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>Downloading...</span>
+            `;
         }
 
         const token = CONFIG.accessToken;
@@ -1341,14 +1351,36 @@ async function handleDownloadSource(sourceRef, downloadName, button) {
         console.error("Download error:", err);
         if (button) {
             button.classList.add("download-error");
+            // Optionally show error state briefly
+            button.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; margin-right: 6px; color: #ef4444;">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+                <span>Failed</span>
+            `;
         }
         // Show a temporary error toast or alert
-        alert("Unable to download this file. Access may be restricted or the file may verify removed.");
-    } finally {
+        alert("Unable to download this file. Access may be restricted or the file may be removed.");
+
+        // Restore button after delay if error
         if (button) {
-            button.disabled = false;
-            button.classList.remove("is-loading");
+            setTimeout(() => {
+                button.disabled = false;
+                button.classList.remove("is-loading");
+                button.classList.remove("download-error");
+                button.innerHTML = originalHtml;
+            }, 2000);
+            return; // Exit here so finally block doesn't immediately overwrite
         }
+    }
+
+    // Success path restoration
+    if (button) {
+        button.disabled = false;
+        button.classList.remove("is-loading");
+        button.innerHTML = originalHtml;
     }
 }
 
