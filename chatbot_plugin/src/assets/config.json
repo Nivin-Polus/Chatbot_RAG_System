@@ -10,7 +10,7 @@
     "primaryGradientDegree": "135deg",
     "headerTextColor": "#ffffff",
     "headerTitle": "Leto Assistant",
-    "welcomeMessage": "Ask me about the uploaded documents!",
+    "welcomeMessage": "Please ask your question here",
     "inputPlaceholder": "I'm your Leto Assistant..",
     "placeholderHighlightText": "Leto Assistant"
 }
