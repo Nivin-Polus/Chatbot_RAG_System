@@ -609,6 +609,7 @@ body {
 }
 
 .collection-name {
+    display: none;
     flex: 1;
     font-size: 16px;
     font-weight: 600;
