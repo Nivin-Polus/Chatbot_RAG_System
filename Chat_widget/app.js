@@ -139,30 +139,46 @@ function cacheElements() {
 function setupEventListeners() {
     // Sidebar toggle (desktop + mobile)
     // Left sidebar header button
-    elements.toggleSidebarBtn.addEventListener('click', toggleSidebar);
+    if (elements.toggleSidebarBtn) {
+        elements.toggleSidebarBtn.addEventListener('click', toggleSidebar);
+    }
     // Top header button: on small screens use slide-in mobile sidebar,
     // on larger screens collapse/expand the sidebar
-    elements.mobileMenuBtn.addEventListener('click', () => {
-        if (window.innerWidth <= 768) {
-            toggleMobileSidebar();
-        } else {
-            toggleSidebar();
-        }
-    });
+    if (elements.mobileMenuBtn) {
+        elements.mobileMenuBtn.addEventListener('click', () => {
+            if (window.innerWidth <= 768) {
+                toggleMobileSidebar();
+            } else {
+                toggleSidebar();
+            }
+        });
+    }
 
     // New chat
-    elements.newChatBtn.addEventListener('click', startNewSession);
-    elements.headerNewChatBtn.addEventListener('click', startNewSession);
+    if (elements.newChatBtn) {
+        elements.newChatBtn.addEventListener('click', startNewSession);
+    }
+    if (elements.headerNewChatBtn) {
+        elements.headerNewChatBtn.addEventListener('click', startNewSession);
+    }
 
     // Chat form
-    elements.chatForm.addEventListener('submit', handleSubmit);
-    elements.messageInput.addEventListener('input', handleInputChange);
+    if (elements.chatForm) {
+        elements.chatForm.addEventListener('submit', handleSubmit);
+    }
+    if (elements.messageInput) {
+        elements.messageInput.addEventListener('input', handleInputChange);
+    }
 
     // Stop button
-    elements.stopBtn.addEventListener('click', handleStop);
+    if (elements.stopBtn) {
+        elements.stopBtn.addEventListener('click', handleStop);
+    }
 
     // Theme toggle
-    elements.themeToggle.addEventListener('click', toggleTheme);
+    if (elements.themeToggle) {
+        elements.themeToggle.addEventListener('click', toggleTheme);
+    }
 
     // Close mobile sidebar on overlay click
     document.addEventListener('click', (e) => {
