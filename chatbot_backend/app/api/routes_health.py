@@ -445,6 +445,35 @@ async def global_token_usage(
         raise HTTPException(status_code=500, detail=f"Failed to retrieve token usage statistics: {str(e)}")
 
 
+@router.delete("/stats/token-usage")
+async def reset_token_usage(
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Reset all token usage statistics by clearing the query logs.
+    Restricted to super admins.
+    """
+    if not current_user.is_super_admin():
+        raise HTTPException(status_code=403, detail="Super admin access required")
+
+    try:
+        from app.models.query_log import QueryLog
+        
+        # Delete all query logs
+        num_deleted = db.query(QueryLog).delete()
+        db.commit()
+        
+        logger.info(f"Token usage reset by {current_user.username}. Deleted {num_deleted} records.")
+        
+        return {"message": "Token usage statistics reset successfully", "deleted_count": num_deleted}
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to reset token usage: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to reset token usage: {str(e)}")
+
+
 @router.get("/stats/overview")
 async def system_overview(current_user = Depends(get_current_user), db: Session = Depends(get_db)):
     """Get complete system overview with stats - REAL DATABASE COUNTS"""
