@@ -16,6 +16,7 @@ const CONFIG = {
     widgetLookupPath: WCFG.api?.widgetLookupPath || '/rag/plugins/widget/lookup',
     tokenVerifyPath: WCFG.api?.tokenVerifyPath || '/rag/auth/plugin-token/verify',
     chatEndpoint: WCFG.api?.chatEndpoint || '/rag/chat/ask',
+    downloadEndpoint: WCFG.api?.downloadEndpoint || '/rag/files/download',
     // Will be populated from widget lookup response
     accessToken: '',
     collectionId: '',
@@ -1308,7 +1309,9 @@ async function handleDownloadSource(sourceRef, downloadName, button) {
         }
 
         const encodedRef = encodeURIComponent(effectiveRef);
-        const downloadUrl = `${base}/files/download/${encodedRef}`;
+        // Use configured download endpoint or fallback to appending /rag/... if not present
+        const endpoint = CONFIG.downloadEndpoint || '/rag/files/download';
+        const downloadUrl = `${base}${endpoint}/${encodedRef}`;
 
         const response = await fetch(downloadUrl, { headers });
         if (!response.ok) {

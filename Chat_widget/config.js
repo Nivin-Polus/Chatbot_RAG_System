@@ -39,6 +39,9 @@ const WIDGET_CONFIG = {
 
         // Chat endpoint path
         chatEndpoint: '/rag/chat/ask',
+
+        // Download endpoint path
+        downloadEndpoint: '/rag/files/download',
     },
 
     // ===== Branding =====
