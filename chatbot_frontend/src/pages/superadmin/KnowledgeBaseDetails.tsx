@@ -130,6 +130,7 @@ export default function KnowledgeBaseDetails() {
   const [selectedCrawlFile, setSelectedCrawlFile] = useState<FileItem | null>(null);
   const [chunksData, setChunksData] = useState<{ pages: PageChunks[]; total_chunks_in_job: number } | null>(null);
   const [expandedPages, setExpandedPages] = useState<Set<string>>(new Set());
+  const [sourceType, setSourceType] = useState<'files' | 'crawl' | 'all'>('files');
 
   const fetchCollection = useCallback(async () => {
     if (!id) return;
@@ -650,9 +651,12 @@ export default function KnowledgeBaseDetails() {
     });
   };
 
-  const filteredFiles = files.filter(file =>
-    file.file_name?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredFiles = files.filter(file => {
+    const isCrawl = file.source_type === 'crawled' || file.file_id.startsWith('crawl_');
+    const matchesSearch = file.file_name?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSource = sourceType === 'all' ? true : (sourceType === 'files' ? !isCrawl : isCrawl);
+    return matchesSearch && matchesSource;
+  });
 
   const filteredPrompts = prompts.filter(prompt =>
     prompt.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -828,7 +832,7 @@ export default function KnowledgeBaseDetails() {
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="files">Files</TabsTrigger>
+            <TabsTrigger value="files">Sources</TabsTrigger>
             <TabsTrigger value="prompts">Prompts</TabsTrigger>
           </TabsList>
 
@@ -874,72 +878,91 @@ export default function KnowledgeBaseDetails() {
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <Database className="h-5 w-5" />
-                      Files
+                      Sources
                     </CardTitle>
                     <CardDescription>
-                      Manage files for this knowledge base
+                      Manage sources for this knowledge base
                     </CardDescription>
                   </div>
-                  <Dialog open={isFileDialogOpen} onOpenChange={setIsFileDialogOpen}>
-                    <DialogTrigger asChild>
-                      <Button>
-                        <Upload className="mr-2 h-4 w-4" />
-                        Upload File
+                  <div className="flex items-center gap-4">
+                    <Select value={sourceType} onValueChange={(v: 'files' | 'crawl' | 'all') => setSourceType(v)}>
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="Select Source Type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All</SelectItem>
+                        <SelectItem value="files">Files</SelectItem>
+                        <SelectItem value="crawl">Crawl Data</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {sourceType === 'crawl' && (
+                      <Button variant="outline" onClick={() => navigate(`/superadmin/crawler?collectionId=${id}`)}>
+                        Go to Crawler
                       </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Upload Files</DialogTitle>
-                        <DialogDescription>
-                          Upload up to 10 files to this knowledge base (PDF, DOC, DOCX, PPTX, XLSX, TXT, CSV - Max 10MB each) 
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4">
-                        <div>
-                          <Label htmlFor="file-upload">Choose File</Label>
-                          <Input
-                            id="file-upload"
-                            type="file"
-                            multiple
-                            accept=".pdf,.doc,.docx,.pptx,.xlsx,.txt,.csv"
-                            onChange={handleFileUpload}
-                            disabled={isUploading}
-                          />
-                        </div>
-                        {isUploading && (
-                          <div className="space-y-2">
-                            <Label className="text-sm font-medium">Upload Progress</Label>
-                            <div className="space-y-1 text-sm">
-                              {Object.entries(uploadProgress).map(([fileName, status]) => (
-                                <div key={fileName} className="flex items-center justify-between">
-                                  <span className="truncate max-w-xs" title={fileName}>
-                                    {fileName}
-                                  </span>
-                                  <span
-                                    className={`text-xs font-medium ${status === 'success'
-                                      ? 'text-green-600'
-                                      : status === 'error'
-                                        ? 'text-red-600'
-                                        : 'text-muted-foreground'
-                                      }`}
-                                  >
-                                    {status === 'pending' && 'Uploading...'}
-                                    {status === 'success' && 'Uploaded'}
-                                    {status === 'error' && 'Failed'}
-                                  </span>
-                                </div>
-                              ))}
+                    )}
+                    {sourceType === 'files' && (
+                      <Dialog open={isFileDialogOpen} onOpenChange={setIsFileDialogOpen} >
+                        <DialogTrigger asChild>
+                          <Button>
+                            <Upload className="mr-2 h-4 w-4" />
+                            Upload File
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Upload Files</DialogTitle>
+                            <DialogDescription>
+                              Upload up to 10 files to this knowledge base (PDF, DOC, DOCX, PPTX, XLSX, TXT, CSV - Max 10MB each)
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="space-y-4">
+                            <div>
+                              <Label htmlFor="file-upload">Choose File</Label>
+                              <Input
+                                id="file-upload"
+                                type="file"
+                                multiple
+                                accept=".pdf,.doc,.docx,.pptx,.xlsx,.txt,.csv"
+                                onChange={handleFileUpload}
+                                disabled={isUploading}
+                              />
                             </div>
+                            {isUploading && (
+                              <div className="space-y-2">
+                                <Label className="text-sm font-medium">Upload Progress</Label>
+                                <div className="space-y-1 text-sm">
+                                  {Object.entries(uploadProgress).map(([fileName, status]) => (
+                                    <div key={fileName} className="flex items-center justify-between">
+                                      <span className="truncate max-w-xs" title={fileName}>
+                                        {fileName}
+                                      </span>
+                                      <span
+                                        className={`text-xs font-medium ${status === 'success'
+                                          ? 'text-green-600'
+                                          : status === 'error'
+                                            ? 'text-red-600'
+                                            : 'text-muted-foreground'
+                                          }`}
+                                      >
+                                        {status === 'pending' && 'Uploading...'}
+                                        {status === 'success' && 'Uploaded'}
+                                        {status === 'error' && 'Failed'}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsFileDialogOpen(false)}>
-                          Cancel
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
+                          <DialogFooter>
+                            <Button variant="outline" onClick={() => setIsFileDialogOpen(false)}>
+                              Cancel
+                            </Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
+                    )}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
@@ -977,7 +1000,11 @@ export default function KnowledgeBaseDetails() {
                     <TableBody>
                       {filteredFiles.map((file) => (
                         <TableRow key={file.file_id}>
-                          <TableCell className="font-medium">{file.file_name}</TableCell>
+                          <TableCell className="font-medium">
+                            {file.processing_status === 'processing' && (file.source_type === 'crawled' || file.file_id.startsWith('crawl_'))
+                              ? file.file_name.replace('Crawled', 'Crawling')
+                              : file.file_name}
+                          </TableCell>
                           <TableCell>{formatFileSize(file.file_size)}</TableCell>
                           <TableCell>
                             <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${file.processing_status === 'completed'
