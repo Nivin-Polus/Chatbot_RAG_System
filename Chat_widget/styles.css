@@ -870,6 +870,12 @@ body {
     color: hsl(var(--muted-foreground));
 }
 
+.thinking-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
 
 .thinking-logo {
     height: 1.25rem;

@@ -134,6 +134,7 @@ function cacheElements() {
         stopBtn: document.getElementById('stop-btn'),
         themeToggle: document.getElementById('theme-toggle'),
         headerNewChatBtn: document.getElementById('header-new-chat-btn'),
+        emptyChatMessage: document.getElementById('empty-chat-message'),
     };
     console.log('⏹️ Stop button element:', elements.stopBtn);
 }
@@ -547,6 +548,8 @@ function saveBackgroundSession(sessionId, assistantMessage) {
     }
 
     // Add the assistant message to that session's messages
+    // Mark as not streaming since we're saving the complete message
+    assistantMessage.streaming = false;
     session.messages = session.messages || [];
     session.messages.push(assistantMessage);
     session.timestamp = Date.now();
@@ -1032,6 +1035,10 @@ async function sendMessage(content) {
             // Session changed - save to the original session in background
             console.log('Session changed during request, saving to background session:', requestSessionId);
             saveBackgroundSession(requestSessionId, assistantMessage);
+            // Reset loading state for the new session so user can continue
+            state.isLoading = false;
+            state.abortController = null;
+            showSendButton();
             return;
         }
 
