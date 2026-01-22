@@ -842,44 +842,44 @@ button {
   color: #1f2937;
   margin: 0;
   padding: 0;
-  line-height: 1.4;
+  line-height: 1.3;
 }
 
 .msg.bot .chat-heading-1 {
   font-size: 20px;
-  margin-top: 16px;
-  margin-bottom: 8px;
-}
-
-.msg.bot .chat-heading-2 {
-  font-size: 18px;
-  margin-top: 12px;
-  margin-bottom: 6px;
-}
-
-.msg.bot .chat-heading-3 {
-  font-size: 16px;
-  margin-top: 10px;
-  margin-bottom: 4px;
-}
-
-.msg.bot .chat-heading-4 {
-  font-size: 15px;
   margin-top: 8px;
   margin-bottom: 4px;
 }
 
-.msg.bot .chat-heading-5 {
-  font-size: 14px;
+.msg.bot .chat-heading-2 {
+  font-size: 18px;
   margin-top: 6px;
   margin-bottom: 3px;
+}
+
+.msg.bot .chat-heading-3 {
+  font-size: 16px;
+  margin-top: 5px;
+  margin-bottom: 2px;
+}
+
+.msg.bot .chat-heading-4 {
+  font-size: 15px;
+  margin-top: 4px;
+  margin-bottom: 2px;
+}
+
+.msg.bot .chat-heading-5 {
+  font-size: 14px;
+  margin-top: 4px;
+  margin-bottom: 2px;
   font-weight: 600;
 }
 
 .msg.bot .chat-heading-6 {
   font-size: 14px;
-  margin-top: 6px;
-  margin-bottom: 3px;
+  margin-top: 4px;
+  margin-bottom: 2px;
   font-weight: 500;
 }
 

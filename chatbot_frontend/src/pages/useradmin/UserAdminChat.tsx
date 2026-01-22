@@ -1159,12 +1159,12 @@ export default function UserAdminChat() {
           const level = headingMatch[1].length;
           const headingContent = headingMatch[2];
           const headingClasses: Record<number, string> = {
-            1: 'text-2xl font-bold mt-4 mb-2',
-            2: 'text-xl font-bold mt-3 mb-2',
-            3: 'text-lg font-semibold mt-3 mb-1',
-            4: 'text-base font-semibold mt-2 mb-1',
-            5: 'text-sm font-semibold mt-2 mb-1',
-            6: 'text-sm font-medium mt-2 mb-1',
+            1: 'text-2xl font-bold mt-2 mb-1',
+            2: 'text-xl font-bold mt-1.5 mb-1',
+            3: 'text-lg font-semibold mt-1 mb-0.5',
+            4: 'text-base font-semibold mt-1 mb-0.5',
+            5: 'text-sm font-semibold mt-1 mb-0.5',
+            6: 'text-sm font-medium mt-1 mb-0.5',
           };
           const HeadingTag = `h${level}` as keyof JSX.IntrinsicElements;
           nodes.push(
