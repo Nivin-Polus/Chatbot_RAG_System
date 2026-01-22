@@ -207,6 +207,9 @@ class RAG:
                     is_generic = True
                     break
         
+        # Remove trailing horizontal rule separators (---) that sometimes appear
+        cleaned_response = re.sub(r'\s*-{3,}\s*$', '', cleaned_response).strip()
+        
         return {"answer": cleaned_response, "is_generic": is_generic}
 
     def get_prompt_for_collection(self, collection_id: str) -> Optional[SystemPrompt]:

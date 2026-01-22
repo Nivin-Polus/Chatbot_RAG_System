@@ -73,10 +73,13 @@ import "./styles.css";
   let inFlight = false;
   let abortController = null;
   let currentTypingFinish = null;
+  let currentTypingMessage = null; // Store reference to current typing message
+  let currentTypingFullText = null; // Store full text for current typing message
   let currentRequestId = null; // Track current request to prevent old responses from updating UI
   let originalSendBtnHTML = null; // Store original send button HTML
   let userMessageCount = 0; // Track how many user messages have been sent in this session
   let currentSessionId = null; // Track current session ID
+  let userScrolledDuringStream = false; // Track if user manually scrolled during streaming
 
   // LocalStorage keys for chat history
   const CHAT_HISTORY_KEY = 'chatbot_chat_history';
@@ -125,8 +128,12 @@ import "./styles.css";
     }
   };
 
-  function scrollChatToBottom() {
+  function scrollChatToBottom(force = false) {
     if (chatBox) {
+      // Don't auto-scroll if user has manually scrolled during streaming (unless forced)
+      if (!force && userScrolledDuringStream && inFlight) {
+        return;
+      }
       chatBox.scrollTop = chatBox.scrollHeight;
     }
   }
@@ -159,6 +166,34 @@ import "./styles.css";
     if (!originalSendBtnHTML || originalSendBtnHTML.trim() === '') {
       originalSendBtnHTML = `<img src="${CONFIG.ui.iconsBaseUrl}/send.svg" alt="Send" class="plugin-icon icon"/>`;
     }
+  }
+
+  // Track user scroll during streaming to allow manual scrolling
+  if (chatBox) {
+    let isAutoScrolling = false;
+
+    // Wrap scrollTop setter to detect programmatic scrolls
+    // This is a workaround as there's no direct way to distinguish user scroll from programmatic scroll
+    // We'll use a global helper to set scrollTop programmatically and temporarily disable user scroll detection
+
+    chatBox.addEventListener('scroll', () => {
+      // Only track user scrolls during active streaming
+      if (inFlight && !isAutoScrolling) {
+        // Check if user scrolled away from bottom
+        const isNearBottom = chatBox.scrollHeight - chatBox.clientHeight - chatBox.scrollTop <= 50;
+        if (!isNearBottom) {
+          userScrolledDuringStream = true;
+        }
+      }
+    }, { passive: true });
+
+    // Helper to set scroll without triggering user scroll detection
+    window.__chatboxAutoScroll = (value) => {
+      isAutoScrolling = true;
+      chatBox.scrollTop = value;
+      // Reset after a brief delay to allow scroll event to process
+      setTimeout(() => { isAutoScrolling = false; }, 50);
+    };
   }
 
   // Try to load chat history from localStorage
@@ -370,6 +405,10 @@ import "./styles.css";
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
+      // Prevent click if button is in cooldown (even though pointer-events should handle this)
+      if (!ui.canTriggerNewChat()) {
+        return false;
+      }
       handleNewChat();
       return false;
     }
@@ -446,6 +485,7 @@ import "./styles.css";
 
     // Set inFlight flag and disable UI elements
     inFlight = true;
+    userScrolledDuringStream = false; // Reset scroll flag for new message
     abortController = new AbortController();
 
     // Capture the session ID where this request started
@@ -551,9 +591,6 @@ import "./styles.css";
       abortController = null;
     }
 
-    // Invalidate current request ID so old responses won't update UI
-    currentRequestId = null;
-
     // Reset state flags
     inFlight = false;
 
@@ -561,7 +598,25 @@ import "./styles.css";
     if (typeof currentTypingFinish === 'function') {
       clearInterval(typingInterval);
       typingInterval = null;
-      currentTypingFinish();
+      currentTypingFinish = null;
+    } else {
+      clearInterval(typingInterval);
+      typingInterval = null;
+    }
+
+    // Finalize any messages that are still in typing state with full text
+    if (currentTypingMessage && currentTypingFullText) {
+      currentTypingMessage.text = currentTypingFullText;
+      currentTypingMessage.isTyping = false;
+      currentTypingMessage = null;
+      currentTypingFullText = null;
+    } else {
+      // Fallback: find any typing messages and finalize with current text
+      messages.forEach(msg => {
+        if (msg.isTyping) {
+          msg.isTyping = false;
+        }
+      });
     }
 
     // Remove any typing indicators (thinking spinner)
@@ -573,6 +628,9 @@ import "./styles.css";
       }
     });
 
+    // Invalidate current request ID after finalizing messages
+    currentRequestId = null;
+
     renderMessages();
 
     // Re-enable UI elements
@@ -581,12 +639,9 @@ import "./styles.css";
     }
     showSendButton();
 
+    // Scroll to bottom to show the finalized response
     if (chatBox) {
-      if (userMessageCount <= 1) {
-        chatBox.scrollTop = chatBox.scrollHeight;
-      } else {
-        scrollLastUserMessageToTop();
-      }
+      scrollChatToBottom(true); // Force scroll
     }
   }
 
@@ -594,28 +649,49 @@ import "./styles.css";
     if (!ui.canTriggerNewChat()) return;
     ui.startNewChatCooldown();
 
-    // Abort any ongoing fetch request
-    if (abortController) {
-      abortController.abort();
-      abortController = null;
-    }
+    // Don't abort ongoing fetch requests - let them complete in background
+    // The response will be saved via saveBackgroundResponse() when it completes
+    // Just detach the controller so we can start a new one for the new session
+    abortController = null;
 
     // Stop any typing animation
     if (typeof currentTypingFinish === 'function') {
       clearInterval(typingInterval);
       typingInterval = null;
-      currentTypingFinish();
       currentTypingFinish = null;
     } else {
       clearInterval(typingInterval);
       typingInterval = null;
     }
 
-    // Invalidate current request ID so old responses won't update UI
+    // Finalize any streaming messages with full text before switching sessions
+    if (currentTypingMessage && currentTypingFullText) {
+      currentTypingMessage.text = currentTypingFullText;
+      currentTypingMessage.isTyping = false;
+      // Save the finalized message to chat history
+      saveChatHistory();
+    } else {
+      // Fallback: finalize any typing messages with current text
+      messages.forEach(msg => {
+        if (msg.isTyping) {
+          msg.isTyping = false;
+        }
+      });
+      // Save any finalized messages
+      if (messages.some(msg => msg.isTyping === false && !msg.user && msg.text)) {
+        saveChatHistory();
+      }
+    }
+
+    currentTypingMessage = null;
+    currentTypingFullText = null;
+
+    // Invalidate current request ID so old responses won't update THIS UI
+    // but they'll still save to their original session via saveBackgroundResponse()
     currentRequestId = null;
 
-    // Remove any typing indicators
-    const typingIndicators = messages.filter(msg => msg.isTypingIndicator || msg.isTyping);
+    // Remove only typing indicators (thinking spinner), not typing messages
+    const typingIndicators = messages.filter(msg => msg.isTypingIndicator);
     typingIndicators.forEach(indicator => {
       const index = messages.indexOf(indicator);
       if (index !== -1) {
@@ -623,7 +699,7 @@ import "./styles.css";
       }
     });
 
-    // Reset state flags
+    // Reset UI state flags (background requests still tracked by their own requestId)
     inFlight = false;
 
     // Re-enable UI elements
@@ -847,6 +923,9 @@ import "./styles.css";
         sources: preservedSources,
         isFollowup: isFollowup  // NEW: Track follow-up status for styling
       });
+      // Store reference to current typing message and full text for stop button handling
+      currentTypingMessage = typingMessage;
+      currentTypingFullText = enhancedText;
       if (userMessageCount <= 1) {
         scrollChatToBottom();
       } else {
@@ -878,6 +957,8 @@ import "./styles.css";
         inFlight = false;
         abortController = null;
         currentTypingFinish = null;
+        currentTypingMessage = null;
+        currentTypingFullText = null;
         input.focus();
         if (chatBox) {
           if (userMessageCount <= 1) {
@@ -1089,7 +1170,7 @@ import "./styles.css";
       const apiBase = (CONFIG.apiBase || '').replace(/\/+$/, '');
       const websiteUrl = encodeURIComponent(CONFIG.websiteUrl);
       const vid = encodeURIComponent(visitorId);
-      
+
       const response = await fetch(`${apiBase}/plugins/sync-sessions?website_url=${websiteUrl}&visitor_id=${vid}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
@@ -1101,7 +1182,7 @@ import "./styles.css";
       }
 
       const data = await response.json();
-      
+
       if (!data.sessions || data.sessions.length === 0) {
         console.log('No synced sessions from backend');
         return false;
@@ -1134,7 +1215,7 @@ import "./styles.css";
 
         if (shouldUseBackend && syncedSession.messages && syncedSession.messages.length > 0) {
           console.log(`Importing synced session: ${syncedSession.session_id}`);
-          
+
           // Convert backend message format to plugin format
           const pluginMessages = syncedSession.messages.map(msg => ({
             user: msg.user === true,
@@ -1175,7 +1256,7 @@ import "./styles.css";
         // Save updated sessions index
         sessions.sort((a, b) => b.timestamp - a.timestamp);
         localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
-        
+
         // Load the most recent session (or the current_session_id if specified)
         const targetSessionId = data.current_session_id || sessions[0]?.id;
         if (targetSessionId) {
@@ -1194,30 +1275,44 @@ import "./styles.css";
   function switchSession(sessionId) {
     if (currentSessionId === sessionId && messages.length > 0) return;
 
-    // Abort any ongoing fetch request
-    // MODIFIED: Do not abort the request itself, just detach from UI
+    // Don't abort ongoing requests - let them complete in background
+    // The response will be saved to the original session via saveBackgroundResponse()
+    // when handleSendMessage() detects currentRequestId has changed
     if (abortController) {
-      // abortController.abort(); // Don't abort so it completes in background
       abortController = null;
     }
 
-    // Stop any typing animation and finalize the streaming message
+    // Stop any typing animation
     if (typeof currentTypingFinish === 'function') {
       clearInterval(typingInterval);
       typingInterval = null;
-      // Don't call currentTypingFinish() as it may try to update UI
       currentTypingFinish = null;
     } else {
       clearInterval(typingInterval);
       typingInterval = null;
     }
 
-    // Finalize any messages that are still in typing state (preserve their current text)
-    messages.forEach(msg => {
-      if (msg.isTyping) {
-        msg.isTyping = false;
+    // Finalize any streaming messages with full text before switching sessions
+    if (currentTypingMessage && currentTypingFullText) {
+      currentTypingMessage.text = currentTypingFullText;
+      currentTypingMessage.isTyping = false;
+      // Save the finalized message to chat history before switching
+      saveChatHistory();
+    } else {
+      // Fallback: finalize any typing messages with current text
+      messages.forEach(msg => {
+        if (msg.isTyping) {
+          msg.isTyping = false;
+        }
+      });
+      // Save any finalized messages before switching
+      if (messages.some(msg => msg.isTyping === false && !msg.user && msg.text)) {
+        saveChatHistory();
       }
-    });
+    }
+
+    currentTypingMessage = null;
+    currentTypingFullText = null;
 
     // Remove typing indicators (the "thinking..." bubbles)
     const typingIndicators = messages.filter(msg => msg.isTypingIndicator);
@@ -1324,8 +1419,14 @@ import "./styles.css";
     const html = messages.map(renderMessageHtml).join("");
     chatBox.innerHTML = html;
 
-    if (wasNearBottom) chatBox.scrollTop = chatBox.scrollHeight;
-    else chatBox.scrollTop = previousScrollTop;
+    // During streaming, respect user's manual scroll - don't auto-scroll if they scrolled up
+    if (userScrolledDuringStream && inFlight) {
+      chatBox.scrollTop = previousScrollTop;
+    } else if (wasNearBottom) {
+      chatBox.scrollTop = chatBox.scrollHeight;
+    } else {
+      chatBox.scrollTop = previousScrollTop;
+    }
 
     if (chatEmpty) chatEmpty.style.display = messages.length ? "none" : "flex";
   }
@@ -1338,17 +1439,7 @@ import "./styles.css";
     }
     if (message.isTypingIndicator) {
       const logoUrl = CONFIG.ui.placeholderLogoUrl || CONFIG.ui.logoUrl || `${CONFIG.ui.iconsBaseUrl}/logo1.svg`;
-      return `<div class="plugin-msg msg bot typing thinking-indicator">
-        <div class="plugin-thinking-content thinking-content">
-          <div class="plugin-thinking-inner thinking-inner">
-            <img src="${logoUrl}" alt="Leto logo" class="plugin-thinking-logo thinking-logo" />
-            <div class="plugin-thinking-status thinking-status">
-              <svg class="plugin-thinking-spinner thinking-spinner" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
-              <span class="plugin-thinking-text thinking-text">Leto is thinking...</span>
-            </div>
-          </div>
-        </div>
-      </div>`;
+      return `<div class="plugin-msg msg bot typing thinking-indicator"><div class="plugin-thinking-content thinking-content"><div class="plugin-thinking-inner thinking-inner"><img src="${logoUrl}" alt="Leto logo" class="plugin-thinking-logo thinking-logo" /><div class="plugin-thinking-status thinking-status"><span class="plugin-thinking-text thinking-text">Leto is thinking</span><span class="typing-dots"><span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></span></div></div></div></div>`;
     }
     const classes = ["msg", "bot"];
     if (message.isError) classes.push("error");
@@ -1724,6 +1815,13 @@ import "./styles.css";
         const buttonHtml = `<button type="button" class="source-download"${idAttribute} data-source-ref="${dataRef}" data-source-name="${dataName}">${escapeHtml(displayName)}</button>`;
         safe = safe.replace(token, buttonHtml);
       }
+    });
+
+    // Process Markdown headings (# to ######) - must be done before bold text processing
+    // Match heading at start of line: optional whitespace, 1-6 #, space, then content
+    safe = safe.replace(/^(#{1,6})\s+(.+)$/gm, (match, hashes, content) => {
+      const level = hashes.length;
+      return `<h${level} class="chat-heading chat-heading-${level}">${content}</h${level}>`;
     });
 
     safe = safe.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");

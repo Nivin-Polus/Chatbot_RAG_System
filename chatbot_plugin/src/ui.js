@@ -446,15 +446,16 @@ export class ChatbotUI {
     if (!this.newChatBtn) return;
 
     this.lastNewChatAt = Date.now();
-    this.newChatBtn.disabled = true;
+    // Don't disable the button, just add greyed out styling and prevent clicks
     this.newChatBtn.classList.add("plugin-is-cooldown");
     this.newChatBtn.classList.add("is-cooldown");
+    this.newChatBtn.style.pointerEvents = "none"; // Prevent clicks
 
     clearTimeout(this.newChatCooldownTimer);
     this.newChatCooldownTimer = setTimeout(() => {
-      this.newChatBtn.disabled = false;
       this.newChatBtn.classList.remove("plugin-is-cooldown");
       this.newChatBtn.classList.remove("is-cooldown");
+      this.newChatBtn.style.pointerEvents = ""; // Re-enable clicks
     }, this.newChatCooldownMs);
   }
 

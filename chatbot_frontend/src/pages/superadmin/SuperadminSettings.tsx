@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Settings, Key, Shield, User, Activity, ShieldCheck, Server, Cpu, FileText } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiGet, apiPost } from '@/utils/api';
+import { apiGet, apiPost, apiDelete } from '@/utils/api';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, ResponsiveContainer,
   BarChart, Bar, Cell, Legend
@@ -19,6 +19,17 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { format, subDays } from 'date-fns';
 
 type HealthComponent = {
@@ -48,6 +59,7 @@ type TokenUsage = {
   daily_usage?: Array<{ date: string; queries: number; tokens: number }>;
   collection_breakdown?: Array<{ collection_id: string; collection_name: string; queries: number; tokens: number }>;
   per_website?: Array<{ website_id: string; website_name: string; total_queries: number; total_tokens_used: number }>;
+  model_breakdown?: Array<{ model: string; queries: number; tokens: number }>;
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -223,6 +235,28 @@ export default function SuperadminSettings() {
     }
   };
 
+  const handleResetTokenUsage = async () => {
+    if (!user?.access_token) return;
+
+    try {
+      const response = await apiDelete(
+        `${import.meta.env.VITE_API_BASE_URL}/system/stats/token-usage`,
+        user.access_token
+      );
+
+      if (response.ok) {
+        toast.success('Token usage statistics reset successfully');
+        fetchTokenUsage(); // Refresh stats
+      } else {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || 'Failed to reset token usage');
+      }
+    } catch (error) {
+      console.error('Reset token usage failed', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to reset token usage');
+    }
+  };
+
   useEffect(() => {
     fetchHealth();
     fetchTokenUsage();
@@ -310,6 +344,28 @@ export default function SuperadminSettings() {
                     <SelectItem value="90">Last 90 days</SelectItem>
                   </SelectContent>
                 </Select>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" size="sm">
+                      Reset
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This action will permanently delete all token usage history and query logs.
+                        This action cannot be undone and will reset all counters to zero.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleResetTokenUsage} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                        Reset Data
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
                 <Button
                   variant="outline"
                   size="sm"
@@ -408,6 +464,55 @@ export default function SuperadminSettings() {
                       </ResponsiveContainer>
                     </div>
                   </div>
+
+                  {tokenUsage.collection_breakdown && tokenUsage.collection_breakdown.length > 0 && (
+                    <div className="space-y-4">
+                      <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Per Collection Usage</h3>
+                      <div className="overflow-hidden rounded-xl border">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-muted/50 text-left font-medium">
+                              <th className="p-3">Collection</th>
+                              <th className="p-3 text-right">Total Queries</th>
+                              <th className="p-3 text-right">Total Tokens</th>
+                              <th className="p-3 text-right">Avg. Tokens/Query</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {tokenUsage.collection_breakdown.map((collection) => (
+                              <tr key={collection.collection_id} className="hover:bg-muted/30 transition-colors">
+                                <td className="p-3 font-medium">{collection.collection_name}</td>
+                                <td className="p-3 text-right">{collection.queries.toLocaleString()}</td>
+                                <td className="p-3 text-right">{collection.tokens.toLocaleString()}</td>
+                                <td className="p-3 text-right">
+                                  {collection.queries > 0
+                                    ? Math.round(collection.tokens / collection.queries).toLocaleString()
+                                    : '0'}
+                                </td>
+                              </tr>
+                            ))}
+                            <tr className="bg-muted/70 font-semibold border-t-2">
+                              <td className="p-3">Total</td>
+                              <td className="p-3 text-right">
+                                {tokenUsage.collection_breakdown.reduce((sum, col) => sum + col.queries, 0).toLocaleString()}
+                              </td>
+                              <td className="p-3 text-right">
+                                {tokenUsage.collection_breakdown.reduce((sum, col) => sum + col.tokens, 0).toLocaleString()}
+                              </td>
+                              <td className="p-3 text-right">
+                                {(() => {
+                                  const totalQueries = tokenUsage.collection_breakdown.reduce((sum, col) => sum + col.queries, 0);
+                                  const totalTokens = tokenUsage.collection_breakdown.reduce((sum, col) => sum + col.tokens, 0);
+                                  return totalQueries > 0 ? Math.round(totalTokens / totalQueries).toLocaleString() : '0';
+                                })()}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
 
                   {tokenUsage.per_website && tokenUsage.per_website.length > 0 && (
                     <div className="space-y-4">

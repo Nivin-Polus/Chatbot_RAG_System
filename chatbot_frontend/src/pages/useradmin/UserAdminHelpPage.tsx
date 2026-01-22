@@ -163,7 +163,7 @@ export default function UserAdminHelpPage() {
       }
 
       toast.success(!plugin.is_widget_active ? 'Help page enabled' : 'Help page disabled');
-      
+
       // Update local state
       setPlugins(prev => prev.map(p => p.id === plugin.id ? { ...p, is_widget_active: !p.is_widget_active } : p));
     } catch (error) {
@@ -246,7 +246,7 @@ export default function UserAdminHelpPage() {
               <TooltipProvider delayDuration={150}>
                 <div className="space-y-6">
                   {plugins.map((plugin) => {
-                    const widgetUrl = `${import.meta.env.VITE_CHAT_WIDGET_BASE_URL || 'https://dev-chatbot.polussolutions.com/chat-widget'}/${plugin.widget_token}`;
+                    const widgetUrl = `${import.meta.env.VITE_CHAT_WIDGET_BASE_URL}/${plugin.widget_token}`;
 
                     return (
                       <Card key={plugin.id} className="border-2">
@@ -261,14 +261,14 @@ export default function UserAdminHelpPage() {
                               </CardDescription>
                             </div>
                             <div className="flex items-center gap-2">
-                              <Switch 
-                                checked={plugin.is_widget_active} 
-                                onCheckedChange={() => handleToggleWidgetStatus(plugin)} 
+                              <Switch
+                                checked={plugin.is_widget_active}
+                                onCheckedChange={() => handleToggleWidgetStatus(plugin)}
                               />
-                              <Badge 
-                                variant="outline" 
-                                className={plugin.is_widget_active 
-                                  ? "bg-green-50 text-green-700 border-green-200" 
+                              <Badge
+                                variant="outline"
+                                className={plugin.is_widget_active
+                                  ? "bg-green-50 text-green-700 border-green-200"
                                   : "bg-gray-50 text-gray-700 border-gray-200"
                                 }
                               >

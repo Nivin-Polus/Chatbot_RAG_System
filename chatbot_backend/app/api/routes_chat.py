@@ -435,6 +435,22 @@ def _process_chat_request(
                     website_id = collection_obj.website_id
             except Exception as e:
                 logger.error(f"Failed to resolve website_id from collection {effective_collection_id}: {e}")
+        
+        # Fallback: If website_id is still None, try to find a default one to ensure logging works
+        if not website_id:
+            try:
+                from app.models.website import Website
+                # Try specific default first, then any
+                fallback_site = db.query(Website).filter(Website.domain == "default.local").first()
+                if not fallback_site:
+                    fallback_site = db.query(Website).first()
+                
+                if fallback_site:
+                    website_id = fallback_site.website_id
+                    logger.info(f"Using fallback website_id {website_id} for logging")
+            except Exception as e:
+                logger.error(f"Failed to resolve fallback website_id: {e}")
+
         if website_id and user_id:
             # Build list of accessed file IDs from sources
             file_ids = [

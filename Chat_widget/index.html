@@ -13,16 +13,19 @@
     <meta property="og:title" content="Chat Widget - AI-powered knowledge base assistant">
     <meta property="og:description" content="Ask questions and get instant answers from your knowledge base.">
     <meta property="og:type" content="website">
-    <!-- Use an absolute path so social platforms can always fetch the image -->
-    <meta property="og:image" content="/chatbot/leto.png">
+    <!-- Image URLs are dynamically set by JavaScript based on environment config -->
+    <meta property="og:image" content="">
+    <meta property="og:image:width" content="200">
+    <meta property="og:image:height" content="200">
 
     <!-- Twitter Card metadata -->
-    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="Chat Widget - AI-powered knowledge base assistant">
     <meta name="twitter:description" content="Ask questions and get instant answers from your knowledge base.">
-    <meta name="twitter:image" content="/chatbot/leto.png">
+    <meta name="twitter:image" content="">
 
-    <base href="/chat-widget/">
+    <!-- Base href removed for design mode compatibility - CSS/JS use relative paths -->
+    <!-- <base href="/chat-widget/"> -->
     <link rel="stylesheet" href="styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
@@ -71,24 +74,9 @@
                     <h3 class="history-label">History</h3>
                     <div id="history-list" class="history-list"></div>
                 </div>
-            </aside>
 
-            <!-- Main Chat Area -->
-            <main id="chat-main" class="chat-main">
-                <div class="chat-header">
-                    <button id="mobile-menu-btn" class="mobile-menu-btn">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                            <line x1="9" y1="3" x2="9" y2="21" />
-                        </svg>
-                    </button>
-                    <button id="header-new-chat-btn" class="header-new-chat-btn" title="New Chat">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                        </svg>
-                    </button>
-                    <h1 id="collection-name" class="collection-name">Chat Assistant</h1>
+                <!-- Theme Toggle Footer -->
+                <div class="sidebar-footer">
                     <button id="theme-toggle" class="theme-toggle-btn" title="Toggle Theme">
                         <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <circle cx="12" cy="12" r="5" />
@@ -107,6 +95,25 @@
                         </svg>
                     </button>
                 </div>
+            </aside>
+
+            <!-- Main Chat Area -->
+            <main id="chat-main" class="chat-main">
+                <div class="chat-header">
+                    <button id="mobile-menu-btn" class="mobile-menu-btn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                            <line x1="9" y1="3" x2="9" y2="21" />
+                        </svg>
+                    </button>
+                    <span id="collection-name" class="collection-name">Chat Assistant</span>
+                    <button id="header-new-chat-btn" class="header-new-chat-btn" title="New Chat">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                        </svg>
+                    </button>
+                </div>
 
                 <div id="messages-container" class="messages-container">
                     <div id="messages-list" class="messages-list"></div>
@@ -114,6 +121,17 @@
                 </div>
 
                 <form id="chat-form" class="chat-form">
+                    <div class="empty-chat-message" id="empty-chat-message">
+                        <div class="empty-chat-icon">
+                            <!-- Chat bubble icon (SVG) -->
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                            </svg>
+                        </div>
+
+                        <div class="empty-chat-text"></div>
+                    </div>
+
                     <div class="input-wrapper">
                         <input type="text" id="message-input" class="message-input" placeholder="Type your message..."
                             autocomplete="off" />
@@ -123,13 +141,22 @@
                                 <polygon points="22 2 15 22 11 13 2 9 22 2" />
                             </svg>
                         </button>
+                        <button type="button" id="stop-btn" class="stop-btn" style="display: none;">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="6" y="6" width="12" height="12" rx="1" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="chat-info">
+                        Generated with AI assistance. Always check for accuracy and completeness.
                     </div>
                 </form>
             </main>
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="config.js?v=20260121_v2"></script>
+    <script src="app.js?v=20260121_v2"></script>
 </body>
 
 </html>
