@@ -490,6 +490,11 @@ export default function PluginUserChat() {
         setIsLoading(true);
         enableAutoScroll();
 
+        // Immediately save user message to storage so it's available if user switches tabs
+        if (sessionId && user?.user_id && selectedCollection) {
+            saveSession(sessionId, updatedMessages, selectedCollection, user.user_id, user.role || 'plugin_user', true);
+        }
+
         try {
             const conversationHistory = updatedMessages.slice(-20).map((msg) => ({
                 role: msg.role,

@@ -54,7 +54,7 @@ export default function SuperadminChat() {
   const lastLocationRef = useRef<string>(location.pathname);
   const lastMessagesCountRef = useRef<number>(0);
   const messagesRef = useRef<ChatMessage[]>(messages);
-  
+
   // Keep messages ref in sync
   useEffect(() => {
     messagesRef.current = messages;
@@ -189,10 +189,10 @@ export default function SuperadminChat() {
           // Check if stored messages are different (newer or more messages)
           const storedCount = storedSession.messages.length;
           const currentCount = messagesRef.current.length;
-          
-          if (storedCount > currentCount || 
-              (storedCount === currentCount && storedCount > 0 && 
-               storedSession.messages[storedCount - 1]?.content !== messagesRef.current[currentCount - 1]?.content)) {
+
+          if (storedCount > currentCount ||
+            (storedCount === currentCount && storedCount > 0 &&
+              storedSession.messages[storedCount - 1]?.content !== messagesRef.current[currentCount - 1]?.content)) {
             // New messages found in storage, update state
             setMessages(storedSession.messages);
             lastMessagesCountRef.current = storedCount;
@@ -423,6 +423,11 @@ export default function SuperadminChat() {
     setInputMessage('');
     setIsLoading(true);
     enableAutoScroll();
+
+    // Immediately save user message to storage so it's available if user switches tabs
+    if (sessionId && user?.user_id && selectedCollection) {
+      saveSession(sessionId, updatedMessages, selectedCollection, user.user_id, user.role || 'superadmin', true);
+    }
 
     // Prepare conversation history (last ~20 messages)
     const conversationHistory = updatedMessages
