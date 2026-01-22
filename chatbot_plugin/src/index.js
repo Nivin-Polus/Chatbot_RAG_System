@@ -1817,6 +1817,13 @@ import "./styles.css";
       }
     });
 
+    // Process Markdown headings (# to ######) - must be done before bold text processing
+    // Match heading at start of line: optional whitespace, 1-6 #, space, then content
+    safe = safe.replace(/^(#{1,6})\s+(.+)$/gm, (match, hashes, content) => {
+      const level = hashes.length;
+      return `<h${level} class="chat-heading chat-heading-${level}">${content}</h${level}>`;
+    });
+
     safe = safe.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
     // safe = safe.replace(/(^|\n)Sources?:/g, (match) => `<div class="source-section-title">${match.trim()}</div>`); // Already handled by block token
     safe = safe.replace(/^\s*-\s+/gm, "• ");
