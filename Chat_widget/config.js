@@ -21,7 +21,7 @@ const WIDGET_CONFIG = {
         urls: {
             design: '',  // Not used in design mode
             local: 'http://localhost:8000',      // Local backend (FastAPI/Python)
-            dev: 'https://dev-chatbot.polussolutions.com',
+            dev: 'https://chatbot.polussolutions.com',
             prod: 'https://keyword-search.mit.edu',
         },
 

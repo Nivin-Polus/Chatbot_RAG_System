@@ -638,9 +638,21 @@ async def delete_collection(
         
         # Explicitly delete
         db.query(CrawlerJob).filter(CrawlerJob.collection_id == collection_id).delete(synchronize_session=False)
+        
+        # Get all session IDs for this collection to ensure cascade delete of queries/history
+        session_ids = [s.session_id for s in db.query(ChatSession.session_id).filter(ChatSession.collection_id == collection_id).all()]
+        
+        if session_ids:
+            # Delete dependent records by session ID (more reliable than collection_id)
+            db.query(ChatMessageHistory).filter(ChatMessageHistory.session_id.in_(session_ids)).delete(synchronize_session=False)
+            db.query(ChatQuery).filter(ChatQuery.session_id.in_(session_ids)).delete(synchronize_session=False)
+            
+            # Now delete the sessions
+            db.query(ChatSession).filter(ChatSession.collection_id == collection_id).delete(synchronize_session=False)
+            
+        # Cleanup any remaining orphans by collection_id
         db.query(ChatMessageHistory).filter(ChatMessageHistory.collection_id == collection_id).delete(synchronize_session=False)
         db.query(ChatQuery).filter(ChatQuery.collection_id == collection_id).delete(synchronize_session=False)
-        db.query(ChatSession).filter(ChatSession.collection_id == collection_id).delete(synchronize_session=False)
         
         db.query(CollectionUser).filter(CollectionUser.collection_id == collection_id).delete(synchronize_session=False)
         db.query(SystemPrompt).filter(SystemPrompt.collection_id == collection_id).delete(synchronize_session=False)
