@@ -260,7 +260,11 @@ async function lookupWidget(token) {
         const data = await response.json();
 
         // Store configuration
-        CONFIG.apiBaseUrl = data.api_base_url || baseUrl;
+        // Keep the local config URL if it exists, otherwise use what the backend returns
+        // CONFIG.apiBaseUrl = data.api_base_url || baseUrl;
+        if (!CONFIG.apiBaseUrl) {
+            CONFIG.apiBaseUrl = data.api_base_url || baseUrl;
+        }
         CONFIG.accessToken = data.access_token;
         CONFIG.collectionId = data.collection_id;
         CONFIG.collectionName = data.collection_name;
