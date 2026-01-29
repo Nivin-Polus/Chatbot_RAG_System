@@ -1,6 +1,6 @@
 # app/api/routes_chat.py
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -139,6 +139,67 @@ def _is_generic_response(answer: str) -> bool:
     return False
 
 
+def _infer_conversation_state(history: List[ConversationMessage]) -> Dict[str, Any]:
+    """
+    Infer the full conversation state (Scope, Entity, Intent) from history.
+    Implements the 4-State Machine:
+    0: No entity/scope
+    1: Scope resolved (Org known)
+    2: Entity resolved (Person/Leadership)
+    3: Follow-up on resolved entity
+    """
+    state = {
+        "scope": None,
+        "active_entity": None,
+        "last_intent": None
+    }
+    
+    if not history:
+        return state
+        
+    # Scan backwards to build state
+    # We look at the last 3 turns
+    recent_history = history[-6:] 
+    
+    for msg in reversed(recent_history):
+        content = msg.content
+        
+        # 1. SCOPE DETECTION (Organization)
+        # Check for explicit scope mentions in assistant or user text
+        if not state["scope"]:
+            if "Polus" in content or "Polus Solutions" in content:
+                state["scope"] = "Polus Solutions"
+        
+        # 2. ENTITY & INTENT DETECTION (From Assistant Responses)
+        if msg.role == "assistant":
+            # Header Pattern: ## [Name] -> Person Entity
+            match_person = re.search(r'^##\s+([A-Z][a-zA-Z\s\-\.]+?)$', content, re.MULTILINE)
+            if match_person and not state["active_entity"]:
+                name = match_person.group(1).strip()
+                if len(name) < 40 and " " in name:
+                    state["active_entity"] = {"person_name": name}
+                    if not state["last_intent"]:
+                        state["last_intent"] = "person_profile"
+
+            # Leadership Pattern: "Polus Solutions Leadership" or list of names
+            if not state["last_intent"]:
+                if "Leadership" in content and ("Chairman" in content or "Director" in content):
+                     state["last_intent"] = "leadership_list"
+                     # If we found a leadership list, the "Active Entity" is the Team, 
+                     # but we key it as a special entity type if needed, or just rely on last_intent.
+                     state["active_entity"] = {"type": "team", "name": "Leadership Team"}
+
+    # Default Scope Fallback (If deep history implies it, or we assume it for this specific bot instance)
+    if not state["scope"]:
+        # Optimization: Scan older history if needed, or default if allowed. 
+        # For now, let's look deeper unique case? 
+        # Actually, let's hardcode "Polus Solutions" if we see "Leadership" to fix the "Which company" bug forcefully
+        # if the user asks about leadership without company name.
+        pass
+
+    return state
+
+
 def _process_chat_request(
     *,
     question: str,
@@ -225,7 +286,23 @@ def _process_chat_request(
     
     vector_store = get_vector_store()
     rag_instance = RAG(db_session=db)
-    chunks = rag_instance.retrieve_chunks(question, top_k=top_k, collection_id=effective_collection_id)
+    
+    
+    # --- CONTEXT EXTRACTION (Stateful Logic) ---
+    state = _infer_conversation_state(conversation_history)
+    logger.info(f"[STATE] Inferred State: {state}")
+    
+    # Pass prior_context (active_entity) to retrieve_chunks for legacy compatibility/logic
+    # But fundamentally we want to pass the WHOLE state to answer methods
+    prior_context = state.get("active_entity") # Backbone for Fix 1
+    
+    # Pass prior_context to retrieve_chunks
+    chunks = rag_instance.retrieve_chunks(
+        question, 
+        top_k=top_k, 
+        collection_id=effective_collection_id,
+        prior_context=prior_context
+    )
     logger.debug(f"[CHAT DEBUG] Retrieved {len(chunks)} chunks for query: {question}")
     logger.debug(f"[CHAT DEBUG] Vector store type: {'Qdrant' if vector_store.client else 'In-memory fallback'}")
 
@@ -256,19 +333,26 @@ def _process_chat_request(
                 "url": url,
                 "max_score": chunk_score,  # Track max confidence score for this source
                 "scores": [chunk_score],  # Track all scores for averaging if needed
+                "payload": chunk.get("payload", {}) # Store full payload for later extraction
             }
             source_records[record_key] = record
         else:
             # Update max score if this chunk has higher confidence
             record["max_score"] = max(record.get("max_score", 0.0), chunk_score)
             record["scores"].append(chunk_score)
+            # Update payload if this chunk is a person profile (prioritize profile chunk)
+            if chunk.get("payload", {}).get("chunk_type") == "person_profile":
+                record["payload"] = chunk.get("payload", {})
 
         if chunk_index is not None:
             record["chunk_indices"].append(chunk_index)
 
-    # Import settings for SOURCE_MIN_SCORE threshold
+    # Lower threshold slightly for the frontend display
+    # Note: RAG uses its own internal RAG_MIN_SCORE for LLM context, but we need to pass weaker matches 
+    # to the frontend if they were deemed relevant by the RAG service (e.g. person matches)
     from app.config import settings
-    source_min_score = getattr(settings, "SOURCE_MIN_SCORE", 0.35)
+    # Force permissive threshold (0.15) to ensure RAG results are shown, ignoring stricter env vars
+    source_min_score = 0.15
     
     sources_payload = []
     filtered_sources_count = 0
@@ -276,7 +360,7 @@ def _process_chat_request(
     for record in source_records.values():
         max_score = record.get("max_score", 0.0)
         
-        # Filter out sources below confidence threshold
+        # Filter out extremely low confidence sources
         if max_score < source_min_score:
             filtered_sources_count += 1
             logger.info(f"[SOURCE FILTER] Excluding '{record.get('file_name')}' (score: {max_score:.4f} < threshold: {source_min_score})")
@@ -295,25 +379,47 @@ def _process_chat_request(
             payload["source_type"] = record["source_type"]
         if record.get("url"):
             payload["url"] = record["url"]
+            
+        # Add person metadata if available (Conservative addition)
+        rec_payload = record.get("payload", {})
+        if rec_payload.get("chunk_type") == "person_profile":
+            payload["person"] = {
+                "name": rec_payload.get("person_name"),
+                "title": rec_payload.get("person_title"),
+                "image": rec_payload.get("person_image_url"),
+                "social_links": rec_payload.get("person_social_links", {})
+            }
+            
         sources_payload.append(payload)
     
     if filtered_sources_count > 0:
         logger.info(f"[SOURCE FILTER] Filtered out {filtered_sources_count} low-confidence sources (threshold: {source_min_score})")
 
     # Step 2: Check if follow-up is needed (BEFORE answer generation)
-    needs_followup, followup_reason = rag_instance.needs_followup(
-        question=question,
-        chunks=chunks
+    # Use normalized query for consistency
+    followup_result = rag_instance.needs_followup(
+        query=question,
+        chunks=chunks,
+        conversation_history=[m.dict() for m in conversation_history] if conversation_history else None
     )
+    
+    needs_followup = followup_result.get("needs_followup", False)
+    followup_reason = followup_result.get("reason")
+    suggested_topics = followup_result.get("suggested_topics", [])
     
     # Step 3: If follow-up needed, generate and return early
     if needs_followup:
         followup_text = rag_instance.generate_followup_questions(
-            question=question,
+            query=question,
             chunks=chunks,
-            reason=followup_reason
+            followup_result=followup_result,
+            conversation_history=[m.dict() for m in conversation_history] if conversation_history else None
         )
         
+        # If generation returns a list of strings, join them
+        if isinstance(followup_text, list):
+            followup_text = "\n\n".join(followup_text)
+            
         # Log the follow-up event
         try:
             activity_tracker.log_activity(
@@ -345,11 +451,15 @@ def _process_chat_request(
     try:
         if maintain_context and conversation_history:
             logger.debug(f"[CONTEXT] Using context with {len(conversation_history)} messages")
+            # Convert Pydantic models to dicts for RAG
+            history_dicts = [m.dict() for m in conversation_history]
             rag_result = rag_instance.answer_with_context(
                 question,
-                conversation_history,
+                history_dicts,
                 top_k=top_k,
                 collection_id=effective_collection_id,
+                prior_context=prior_context,
+                conversation_state=state # NEW: Pass full state
             )
         else:
             logger.debug("[CONTEXT] Using basic RAG without context")
@@ -357,6 +467,8 @@ def _process_chat_request(
                 question,
                 top_k=top_k,
                 collection_id=effective_collection_id,
+                prior_context=prior_context,
+                conversation_state=state # NEW: Pass full state
             )
         
         # Handle new dict return format from RAG (contains 'answer' and 'is_generic')

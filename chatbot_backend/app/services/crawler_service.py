@@ -83,7 +83,11 @@ class CrawlerService:
         use_sitemap: bool = True,
         process_documents: bool = True,
         exclude_patterns: Optional[List[str]] = None,
-        include_keywords: Optional[List[str]] = None
+        include_keywords: Optional[List[str]] = None,
+        # OCR params
+        enable_ocr: bool = False,
+        ocr_max_images_per_page: int = 5,
+        ocr_min_confidence: float = 0.5
     ) -> CrawlerJob:
         """
         Create a new crawl job.
@@ -116,6 +120,11 @@ class CrawlerService:
             config_dict["exclude_patterns"] = exclude_patterns
         if include_keywords:
             config_dict["include_keywords"] = include_keywords
+            
+        # Add OCR settings
+        config_dict["enable_ocr"] = enable_ocr
+        config_dict["ocr_max_images_per_page"] = ocr_max_images_per_page
+        config_dict["ocr_min_confidence"] = ocr_min_confidence
         
         # Create job record
         job = CrawlerJob(

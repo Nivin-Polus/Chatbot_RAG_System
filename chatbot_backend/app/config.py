@@ -109,7 +109,7 @@ class Settings(BaseSettings):
 
     # RAG Configuration
     RAG_MIN_SCORE: float = Field(0.25, validation_alias="RAG_MIN_SCORE")  # Minimum similarity threshold to filter low-confidence chunks (lowered due to hybrid scoring)
-    SOURCE_MIN_SCORE: float = Field(0.40, validation_alias="SOURCE_MIN_SCORE")  # Minimum confidence score to show a source to users
+    SOURCE_MIN_SCORE: float = Field(0.15, validation_alias="SOURCE_MIN_SCORE")  # Minimum confidence score to show a source to users
     MAX_CONTEXT_TOKENS: int = Field(4000, validation_alias="MAX_CONTEXT_TOKENS")  # Token cap for context chunks sent to LLM
 
     # Chat Widget Configuration

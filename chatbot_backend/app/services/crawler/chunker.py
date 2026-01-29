@@ -6,9 +6,10 @@ Splits content into optimally-sized chunks with metadata preservation.
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple, Set, Any
 from datetime import datetime
 import hashlib
+from .config import CrawlConfig
 
 
 @dataclass
@@ -92,6 +93,93 @@ class ContentChunk:
             "source_type": "web_crawl",
             "chunk_index": self.chunk_index
         }
+
+
+@dataclass
+class EnhancedContentChunk(ContentChunk):
+    """
+    Extended chunk with Phase 2 metadata for enhanced retrieval.
+    Includes hierarchical linking, rich metadata, and content classification.
+    """
+    
+    # Phase 2: Hierarchical linking
+    parent_chunk_id: Optional[str] = None
+    child_chunk_ids: List[str] = field(default_factory=list)
+    is_parent_chunk: bool = False  # Explicit flag for filtering
+    
+    # Phase 2: Chunk classification
+    chunk_type: str = "narrative"  # narrative | reference | code | person_profile
+    section_id: Optional[str] = None   # Hashed section path for grouping
+    
+    # Phase 2: Page-level metadata (inherited)
+    page_type: str = "general"
+    page_confidence: float = 0.0
+    content_quality_score: float = 0.0
+    
+    # Phase 2: Person metadata (for person_profile chunks)
+    person_name: Optional[str] = None
+    person_title: Optional[str] = None
+    person_confidence: Optional[float] = None
+    
+    # Phase 3: Organizational Context (Fix 8)
+    organization_context: Optional[str] = "site_owner" # site_owner | external
+    person_type: Optional[str] = "internal"           # internal | external_reference
+    confidence_score: float = 1.0                     # numeric confidence (0-1)
+    
+    # Phase 2: Entities and summary
+    entities: List[str] = field(default_factory=list)
+    keywords: List[str] = field(default_factory=list)
+    summary: Optional[str] = None
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary including Phase 2 fields."""
+        base = super().to_dict()
+        base.update({
+            "parent_chunk_id": self.parent_chunk_id,
+            "child_chunk_ids": self.child_chunk_ids,
+            "is_parent_chunk": self.is_parent_chunk,
+            "chunk_type": self.chunk_type,
+            "section_id": self.section_id,
+            "page_type": self.page_type,
+            "page_confidence": self.page_confidence,
+            "content_quality_score": self.content_quality_score,
+            "person_name": self.person_name,
+            "person_title": self.person_title,
+            "person_confidence": self.person_confidence,
+            "organization_context": self.organization_context,
+            "person_type": self.person_type,
+            "confidence_score": self.confidence_score,
+            "entities": self.entities,
+            "keywords": self.keywords,
+            "summary": self.summary
+        })
+        return base
+        
+    def to_vector_metadata(self) -> dict:
+        """Get metadata for vector database storage with Phase 2 fields."""
+        # Start with base metadata
+        base = super().to_vector_metadata()
+        
+        # Add Phase 2 fields
+        enhanced = {
+            "parent_chunk_id": self.parent_chunk_id,
+            "is_parent_chunk": self.is_parent_chunk,
+            "chunk_type": self.chunk_type,
+            "section_id": self.section_id,
+            "page_type": self.page_type,
+            "page_confidence": self.page_confidence,
+            "content_quality_score": self.content_quality_score,
+            "person_name": self.person_name,
+            "person_title": self.person_title,
+            "person_confidence": self.person_confidence,
+            "organization_context": self.organization_context,
+            "person_type": self.person_type,
+            "confidence_score": self.confidence_score
+        }
+        
+        # Merge and filter None values
+        base.update(enhanced)
+        return {k: v for k, v in base.items() if v is not None}
 
 
 class TextChunker:
@@ -331,5 +419,466 @@ class TextChunker:
         # Restore abbreviations
         sentences = [s.replace('<ABBR>', '.') for s in sentences]
         
+
         # Filter empty sentences
         return [s.strip() for s in sentences if s.strip()]
+
+
+class SemanticChunker:
+    """
+    Phase 2 semantic chunker with hierarchical support.
+    
+    Splits content based on structure (headings, paragraphs) rather than just text length.
+    Supports hierarchical parent/child chunks and specialized person extraction.
+    """
+    
+    def __init__(self, config: CrawlConfig):
+        self.config = config
+        self.chunk_sizes = config.CHUNK_SIZES
+    
+    def chunk_page(
+        self,
+        extracted_content: Dict,
+        job_id: str,
+        collection_id: str,
+        crawl_depth: int = 0
+    ) -> List[EnhancedContentChunk]:
+        """
+        Create hierarchical chunks from extracted content in Phase 2 pipeline.
+        
+        Returns both parent and child chunks with proper linking.
+        """
+        chunks = []
+        timestamp = datetime.utcnow().isoformat()
+        
+        # Extract base metadata
+        url = extracted_content.get("url", "")
+        canonical_url = extracted_content.get("canonical_url", url)
+        page_title = extracted_content.get("title", "")
+        
+        # Extract Phase 1 metadata
+        page_meta = extracted_content.get("page_type", {})
+        page_type = page_meta.get("type", "general")
+        page_confidence = page_meta.get("confidence", 0.0)
+        
+        # 1. Handle Person-Specific Chunking
+        if self.config.ENABLE_PERSON_CHUNKING:
+            people = extracted_content.get("people", [])
+            for person in people:
+                person_chunk = self._create_person_chunk(
+                    person, 
+                    url, canonical_url, page_title, 
+                    page_type, page_confidence,
+                    job_id, collection_id, timestamp, crawl_depth
+                )
+                chunks.append(person_chunk)
+        
+        # 2. Get content sections
+        sections = extracted_content.get("sections", [])
+        if not sections:
+            # Fallback to text splitting if no sections
+            return chunks  # Return whatever we extracted so far (e.g. people)
+            
+        # 3. Create Hierarchical Chunks
+        if self.config.ENABLE_HIERARCHICAL_CHUNKING:
+            # Fix: Separate person profiles from narrative sections to prevent generic grouping
+            narrative_sections = []
+            
+            for section in sections:
+                meta = section.get('metadata', {})
+                # Check for person_profile type (Fix 6 integration)
+                if meta.get('type') == 'person_profile' or meta.get('doc_type') == 'person_profile':
+                    profile_chunk = self._create_section_profile_chunk(
+                        section, 
+                        url, canonical_url, page_title,
+                        page_type, page_confidence,
+                        job_id, collection_id, timestamp, crawl_depth
+                    )
+                    chunks.append(profile_chunk)
+                else:
+                    narrative_sections.append(section)
+
+            parent_chunks, child_chunks = self._create_hierarchical_chunks(
+                narrative_sections,
+                url, canonical_url, page_title,
+                page_type, page_confidence,
+                job_id, collection_id, timestamp, crawl_depth
+            )
+            chunks.extend(parent_chunks)
+            chunks.extend(child_chunks)
+            
+        else:
+            # TODO: Non-hierarchical semantic fallback if needed
+            # For now, we assume hierarchy is preferred in Phase 2
+            pass
+            
+        return chunks
+
+    def _create_person_chunk(
+        self, 
+        person: Dict,
+        url: str, canonical_url: str, page_title: str,
+        page_type: str, page_confidence: float,
+        job_id: str, collection_id: str, timestamp: str, crawl_depth: int
+    ) -> EnhancedContentChunk:
+        """Create a dedicated chunk for a person entity."""
+        # Format text for retrieval
+        text_parts = [f"Person: {person.get('name', 'Unknown')}"]
+        
+        if person.get('title'):
+            text_parts.append(f"Title: {person['title']}")
+            
+        if person.get('works_for'):
+            text_parts.append(f"Company: {person['works_for']}")
+            
+        if person.get('description'):
+            text_parts.append(f"Bio: {person['description']}")
+            
+        if person.get('email'):
+            text_parts.append(f"Contact: {person['email']}")
+            
+        socials = person.get('social_links', {})
+        if socials:
+            links = ", ".join([f"{k.title()}: {v}" for k, v in socials.items()])
+            text_parts.append(f"Social Links: {links}")
+            
+        full_text = "\n".join(text_parts)
+        
+        # Generate ID based on name and URL
+        chunk_id = hashlib.sha256(f"person:{url}:{person.get('name')}".encode()).hexdigest()[:16]
+        
+        return EnhancedContentChunk(
+            chunk_id=chunk_id,
+            text=full_text,
+            url=url,
+            canonical_url=canonical_url,
+            page_title=page_title,
+            
+            # Phase 2 Specifics
+            chunk_type="person_profile",
+            page_type=page_type,
+            page_confidence=page_confidence,
+            person_name=person.get("name"),
+            person_title=person.get("title"),
+            person_confidence=person.get("confidence"),
+            
+            # Metadata
+            crawl_job_id=job_id,
+            collection_id=collection_id,
+            crawl_timestamp=timestamp,
+            crawl_depth=crawl_depth,
+            
+            # Stats
+            word_count=len(full_text.split()),
+            char_count=len(full_text)
+        )
+
+    def _create_section_profile_chunk(
+        self,
+        section: Dict,
+        url: str, canonical_url: str, page_title: str,
+        page_type: str, page_confidence: float,
+        job_id: str, collection_id: str, timestamp: str, crawl_depth: int
+    ) -> EnhancedContentChunk:
+        """Create a dedicated chunk for a person profile section (Fix 6)."""
+        meta = section.get('metadata', {})
+        text = section.get('text', '')
+        
+        # Generate stable ID
+        chunk_id = hashlib.sha256(f"profile:{url}:{meta.get('name')}".encode()).hexdigest()[:16]
+        
+        return EnhancedContentChunk(
+            chunk_id=chunk_id,
+            text=text,
+            url=url,
+            canonical_url=canonical_url,
+            page_title=page_title,
+            section_header=section.get('heading'),
+            
+            # Phase 2 Specifics
+            chunk_type="person_profile",
+            page_type=page_type,
+            page_confidence=page_confidence,
+            
+            # Map metadata
+            person_name=meta.get("name"),
+            person_title=meta.get("title"),
+            person_confidence=meta.get("confidence") == "high",
+            organization_context=meta.get("organization_context", "site_owner"),
+            person_type=meta.get("person_type", "internal"),
+            confidence_score=meta.get("confidence_score", 1.0),
+            
+            # Metadata
+            crawl_job_id=job_id,
+            collection_id=collection_id,
+            crawl_timestamp=timestamp,
+            crawl_depth=crawl_depth,
+            
+            # Stats
+            word_count=len(text.split()),
+            char_count=len(text)
+        )
+
+    def _create_hierarchical_chunks(
+        self,
+        sections: List[Dict],
+        url: str, canonical_url: str, page_title: str,
+        page_type: str, page_confidence: float,
+        job_id: str, collection_id: str, timestamp: str, crawl_depth: int
+    ) -> Tuple[List[EnhancedContentChunk], List[EnhancedContentChunk]]:
+        """
+        Create parent and child chunks with linking.
+        Parent chunks group content under headings (~1500 tokens).
+        Child chunks split parents into smaller pieces (400-600 tokens).
+        """
+        parent_chunks = []
+        child_chunks = []
+        
+        # Group sections by parent header to form valid Parent Chunks
+        grouped_sections = self._group_by_parent_header(sections)
+        
+        for group in grouped_sections:
+            # 1. Create Parent Chunk
+            parent_text = self._combine_section_text(group)
+            if len(parent_text) < 50: # Skip empty/tiny groups
+                continue
+                
+            parent_id = hashlib.sha256(f"parent:{url}:{parent_text[:50]}".encode()).hexdigest()[:16]
+            section_header = group[0].get('header') if group else None
+            section_path_str = str(section_header) if section_header else "root"
+            section_id = hashlib.sha256(section_path_str.encode()).hexdigest()[:12]
+            
+            parent_chunk = EnhancedContentChunk(
+                chunk_id=parent_id,
+                text=parent_text,
+                url=url,
+                canonical_url=canonical_url,
+                page_title=page_title,
+                section_header=section_header,
+                
+                # Phase 2
+                is_parent_chunk=True,
+                chunk_type="narrative", # Default, refined later if mostly code
+                section_id=section_id,
+                page_type=page_type,
+                page_confidence=page_confidence,
+                
+                # Metadata
+                crawl_job_id=job_id,
+                collection_id=collection_id,
+                crawl_timestamp=timestamp,
+                crawl_depth=crawl_depth,
+                
+                word_count=len(parent_text.split()),
+                char_count=len(parent_text)
+            )
+            
+            # 2. Create Child Chunks from this Parent
+            children = self._split_parent_into_children(
+                parent_text, parent_chunk, 
+                self.config.CHILD_CHUNK_SIZE_RANGE
+            )
+            
+            # 3. Link them
+            parent_chunk.child_chunk_ids = [c.chunk_id for c in children]
+            
+            # 4. Apply semantic overlap to children
+            children = self._apply_semantic_overlap(children)
+            
+            parent_chunks.append(parent_chunk)
+            child_chunks.extend(children)
+            
+        return parent_chunks, child_chunks
+
+    def _group_by_parent_header(self, sections: List[Dict]) -> List[List[Dict]]:
+        """
+        Group sections that belong to the same logical parent block.
+        Currently groups by h1/h2 boundaries until size limit reached.
+        """
+        groups = []
+        current_group = []
+        current_token_count = 0
+        max_tokens = self.config.PARENT_CHUNK_SIZE
+        
+        for section in sections:
+            # Assuming 'section' is a dict from StructuredSection.to_dict()
+            content = section.get('text', '')
+            tokens = len(content.split()) # Rough approx
+            
+            # Start new group if explicit major header switch OR too big
+            # For Phase 1 compatibility, we rely on the header field
+            is_major_header = section.get('heading_level', 0) <= 2
+            
+            if is_major_header and current_group and current_token_count > 100:
+                groups.append(current_group)
+                current_group = []
+                current_token_count = 0
+            
+            current_group.append(section)
+            current_token_count += tokens
+            
+            # Soft limit check
+            if current_token_count > max_tokens:
+                groups.append(current_group)
+                current_group = []
+                current_token_count = 0
+        
+        if current_group:
+            groups.append(current_group)
+            
+        return groups
+
+    def _combine_section_text(self, sections: List[Dict]) -> str:
+        """Combine text from multiple sections for a parent chunk."""
+        return "\n\n".join([s.get('text', '') for s in sections if s.get('text')])
+
+    def _split_parent_into_children(
+        self, 
+        text: str, 
+        parent: EnhancedContentChunk,
+        size_range: Tuple[int, int]
+    ) -> List[EnhancedContentChunk]:
+        """Split parent text into smaller child chunks."""
+        min_tokens, max_tokens = size_range
+        # Rough char approximation (4 chars/token)
+        max_chars = max_tokens * 4
+        min_chars = min_tokens * 4
+        
+        # Use Semantic Splitting (Paragraphs > Sentences)
+        # We re-use logic similar to TextChunker but more aggressive on semantic boundaries
+        
+        # Simple splitting for now - refine with regex if needed
+        # Split by multiple newlines (paragraphs), handling messy whitespace
+        paragraphs = re.split(r'\n{2,}', text)
+        
+        children = []
+        current_text_parts = []
+        current_len = 0
+        
+        chunk_idx = 0
+        
+        for para in paragraphs:
+            para_len = len(para)
+            
+            if current_len + para_len > max_chars and current_text_parts:
+                # Flush current chunk
+                child_text = "\n\n".join(current_text_parts)
+                children.append(self._create_child_chunk_from_parent(child_text, parent, chunk_idx))
+                chunk_idx += 1
+                current_text_parts = []
+                current_len = 0
+            
+            if para_len > max_chars:
+                 # Huge paragraph, force sentence split (fallback)
+                 # Re-using the logic conceptually, implementing inline for simplicity
+                 # or could use helper method
+                 sentences = re.split(r'(?<=[.!?])\s+', para)
+                 for sent in sentences:
+                     if current_len + len(sent) > max_chars and current_text_parts:
+                         child_text = " ".join(current_text_parts)
+                         children.append(self._create_child_chunk_from_parent(child_text, parent, chunk_idx))
+                         chunk_idx += 1
+                         current_text_parts = []
+                         current_len = 0
+                     current_text_parts.append(sent)
+                     current_len += len(sent)
+            else:
+                current_text_parts.append(para)
+                current_len += para_len
+        
+        # Flush remaining
+        if current_text_parts:
+            child_text = "\n\n".join(current_text_parts)
+            children.append(self._create_child_chunk_from_parent(child_text, parent, chunk_idx))
+            
+        return children
+
+    def _create_child_chunk_from_parent(
+        self, 
+        text: str, 
+        parent: EnhancedContentChunk,
+        idx: int
+    ) -> EnhancedContentChunk:
+        """Helper to create child object inheriting parent metadata."""
+        child_id = hashlib.sha256(f"child:{parent.chunk_id}:{idx}".encode()).hexdigest()[:16]
+        
+        return EnhancedContentChunk(
+            chunk_id=child_id,
+            text=text,
+            url=parent.url,
+            canonical_url=parent.canonical_url,
+            page_title=parent.page_title,
+            section_header=parent.section_header,
+            
+            # Linking
+            parent_chunk_id=parent.chunk_id,
+            is_parent_chunk=False,
+            
+            # Phase 2 metadata
+            chunk_type=parent.chunk_type,
+            section_id=parent.section_id,
+            page_type=parent.page_type,
+            page_confidence=parent.page_confidence,
+            
+            # Sub-chunk index
+            chunk_index=idx,
+            
+            # Stats
+            word_count=len(text.split()),
+            char_count=len(text),
+            
+            # Pass through job IDs
+            crawl_job_id=parent.crawl_job_id,
+            collection_id=parent.collection_id,
+            crawl_timestamp=parent.crawl_timestamp,
+            crawl_depth=parent.crawl_depth
+        )
+
+    def _apply_semantic_overlap(self, chunks: List[EnhancedContentChunk]) -> List[EnhancedContentChunk]:
+        """
+        Apply overlap between consecutive child chunks.
+        Only overlaps at narrative boundaries. 
+        Respects section_id to prevent bleeding across logical sections.
+        """
+        if not chunks or len(chunks) < 2:
+            return chunks
+            
+        overlap_ratio = self.config.SEMANTIC_OVERLAP_RATIO
+        
+        for i in range(1, len(chunks)):
+            prev = chunks[i-1]
+            curr = chunks[i]
+            
+            # Only overlap if:
+            # 1. Not a person profile (handled separately)
+            # 2. Same section ID (don't cross logical boundaries)
+            # 3. Same parent (implied by section_id usually, but explicit check good)
+            if prev.chunk_type == "person_profile" or curr.chunk_type == "person_profile":
+                continue
+                
+            if prev.section_id != curr.section_id:
+                continue
+            
+            # Calculate overlap
+            # Take last N characters/tokens from prev
+            overlap_len = int(prev.char_count * overlap_ratio)
+            overlap_text = prev.text[-overlap_len:]
+            
+            # Try to find a clean break in the overlap text (newline or sentence end)
+            # This is a simple improvement to avoid cutting words
+            clean_break = -1
+            if '\n' in overlap_text:
+                clean_break = overlap_text.find('\n') 
+            elif '. ' in overlap_text:
+                clean_break = overlap_text.find('. ')
+            
+            if clean_break != -1:
+                overlap_text = overlap_text[clean_break+1:].strip()
+            
+            # Prepend to current
+            if overlap_text:
+                curr.text = overlap_text + "\n" + curr.text
+                curr.char_count = len(curr.text)
+                curr.word_count = len(curr.text.split())
+                
+        return chunks
