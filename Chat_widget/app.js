@@ -122,6 +122,7 @@ function cacheElements() {
         errorMessage: document.getElementById('error-message'),
         chatInterface: document.getElementById('chat-interface'),
         sidebar: document.getElementById('sidebar'),
+        chatMain: document.getElementById('chat-main'),//kebin
         toggleSidebarBtn: document.getElementById('toggle-sidebar'),
         mobileMenuBtn: document.getElementById('mobile-menu-btn'),
         newChatBtn: document.getElementById('new-chat-btn'),
@@ -142,6 +143,9 @@ function cacheElements() {
 }
 
 function setupEventListeners() {
+    //kebin
+    // Initialize mobile sidebar state
+    initializeMobileSidebar();  //kebin
     // Sidebar toggle (desktop + mobile)
     // Left sidebar header button
     if (elements.toggleSidebarBtn) {
@@ -158,6 +162,16 @@ function setupEventListeners() {
             }
         });
     }
+//kebin
+     // Close mobile sidebar when clicking on chat area on small screens
+   elements.chatMain.addEventListener('click', (e) => {
+    if (window.innerWidth <= 768 && !e.target.closest('#mobile-menu-btn')) {
+        closeMobileSidebar();
+    }
+});
+// Handle window resize to reset sidebar state
+    window.addEventListener('resize', handleWindowResize);
+//kebin
 
     // New chat
     if (elements.newChatBtn) {
@@ -260,11 +274,7 @@ async function lookupWidget(token) {
         const data = await response.json();
 
         // Store configuration
-        // Keep the local config URL if it exists, otherwise use what the backend returns
-        // CONFIG.apiBaseUrl = data.api_base_url || baseUrl;
-        if (!CONFIG.apiBaseUrl) {
-            CONFIG.apiBaseUrl = data.api_base_url || baseUrl;
-        }
+        CONFIG.apiBaseUrl = data.api_base_url || baseUrl;
         CONFIG.accessToken = data.access_token;
         CONFIG.collectionId = data.collection_id;
         CONFIG.collectionName = data.collection_name;
@@ -445,6 +455,11 @@ function startNewSession() {
     document.querySelectorAll('.history-item').forEach(item => {
         item.classList.remove('active');
     });
+
+    // Close mobile sidebar when clicking new chat on small screens
+    if (window.innerWidth <= 768) {
+        closeMobileSidebar();
+    }
 }
 
 function loadSession(sessionId) {
@@ -1194,10 +1209,21 @@ async function streamAssistantResponse(messageId, fullContent) {
 }
 
 // ===== Sidebar =====
+// function toggleSidebar() {
+//     elements.sidebar.classList.toggle('collapsed');
+//     state.sidebarOpen = !elements.sidebar.classList.contains('collapsed');
+// }
+// ===== Sidebar =====
+//kebin
 function toggleSidebar() {
-    elements.sidebar.classList.toggle('collapsed');
-    state.sidebarOpen = !elements.sidebar.classList.contains('collapsed');
-}
+    // On mobile, close the sidebar instead of collapsing
+    if (window.innerWidth <= 768) {
+        closeMobileSidebar();
+    } else {
+        // On desktop, toggle collapsed state
+        elements.sidebar.classList.toggle('collapsed');
+    }
+}//kebin
 
 function toggleMobileSidebar() {
     const isOpen = elements.sidebar.classList.contains('open');
@@ -1228,6 +1254,30 @@ function closeMobileSidebar() {
         overlay.classList.remove('visible');
     }
 }
+//kebin
+// Initialize mobile sidebar state on load
+function initializeMobileSidebar() {
+    if (window.innerWidth <= 768) {
+        // Close sidebar on mobile by default
+        closeMobileSidebar();
+    }
+}
+
+// Handle window resize to properly manage sidebar state
+function handleWindowResize() {
+    if (window.innerWidth <= 768) {
+        // Mobile view: remove collapsed state and close sidebar
+        elements.sidebar.classList.remove('collapsed');
+        closeMobileSidebar();
+    } else {
+        // Desktop view: remove open state (mobile overlay)
+        elements.sidebar.classList.remove('open');
+        const overlay = document.querySelector('.sidebar-overlay');
+        if (overlay) {
+            overlay.classList.remove('visible');
+        }
+    }
+}//kebin
 
 // ===== Theme =====
 function loadTheme() {
