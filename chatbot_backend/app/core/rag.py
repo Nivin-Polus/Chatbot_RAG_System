@@ -2532,34 +2532,35 @@ Answer:"""
         except:
              normalized_query = query.lower().strip()
 
-        query_classification = classify_query(normalized_query)
-        person_detection = detect_person_query(normalized_query, prior_context=prior_context)
-        query_name = person_detection.get("person_name")
-        
-        # Fix 5: Resolution Cache Lookup
-        cache_key = None
-        if person_detection["is_person_query"] and query_name:
-            import time
-            # Normalize key
-            norm_name = normalize_text(query_name)
-            # Use scope/org for key
-            org_scope = conversation_state.get("scope", "") if conversation_state else ""
-            cache_key = f"person:{org_scope}:{norm_name}"
+        try:
+            query_classification = classify_query(normalized_query)
+            person_detection = detect_person_query(normalized_query, prior_context=prior_context)
+            query_name = person_detection.get("person_name")
             
-            if cache_key in self._resolution_cache:
-                ans, mode, presence, ts = self._resolution_cache[cache_key]
-                ttl = 600 if org_scope else 300 # 10m if scope, 5m if not
-                if time.time() - ts < ttl:
-                    logger.info(f"[CACHE HIT] Returning cached profile for {query_name}")
-                    return {
-                        "answer": ans,
-                        "is_generic": False,
-                        "answer_mode": mode,
-                        "person_presence": presence,
-                        "cached": True
-                    }
+            # Fix 5: Resolution Cache Lookup
+            cache_key = None
+            if person_detection["is_person_query"] and query_name:
+                import time
+                # Normalize key
+                norm_name = normalize_text(query_name)
+                # Use scope/org for key
+                org_scope = conversation_state.get("scope", "") if conversation_state else ""
+                cache_key = f"person:{org_scope}:{norm_name}"
+                
+                if cache_key in self._resolution_cache:
+                    ans, mode, presence, ts = self._resolution_cache[cache_key]
+                    ttl = 600 if org_scope else 300 # 10m if scope, 5m if not
+                    if time.time() - ts < ttl:
+                        logger.info(f"[CACHE HIT] Returning cached profile for {query_name}")
+                        return {
+                            "answer": ans,
+                            "is_generic": False,
+                            "answer_mode": mode,
+                            "person_presence": presence,
+                            "cached": True
+                        }
 
-        chunks_with_sources = self.retrieve_chunks(query, top_k=top_k, collection_id=collection_id, prior_context=prior_context)
+            chunks_with_sources = self.retrieve_chunks(query, top_k=top_k, collection_id=collection_id, prior_context=prior_context)
             
             # Step 2: Enhanced follow-up detection
             followup_result = self.needs_followup(
@@ -2769,7 +2770,7 @@ IMPORTANT: A person named '{query_name}' was found in the documents, but there i
 IMPORTANT: The user's query is broad or overlaps with domain-specific content (e.g., specific plans, versions, or roles) that is not fully specified. 
 Instead of collecting more info, provide a PARTIAL ANSWER based on the available documents.
 - Explicitly state what your answer covers.
-- Mention that different rules might apply to other specific contexts (e.g., "This generally applies to...", "For specific plans like X, check...").
+- Mention that different rules might apply to other contexts (e.g., "This generally applies to...", "For specific plans like X, check...").
 - Do NOT refuse to answer. Provide the best overview possible.
 """
 
