@@ -59,6 +59,7 @@ class ChatResponse(BaseModel):
     sources: Optional[List[Dict]] = None
     chunk_count: int = 0  # NEW: Number of chunks retrieved
     answer_mode: Optional[str] = "FULL"  # NEW: Answer mode (FULL, PARTIAL_TRANSPARENT, FOLLOWUP)
+    person_presence: Optional[Dict] = None
 
 
 class PublicChatRequest(ChatRequest):
@@ -323,6 +324,11 @@ def _process_chat_request(
         record_key = file_id or file_name
         if not record_key:
             continue
+            
+        # REQUIREMENT: if it can't be downloaded (no file_id) and isn't a link (no url), don't show
+        if not file_id and not url:
+            logger.info(f"[SOURCE FILTER] Skipping source with no file_id or url: {file_name}")
+            continue
 
         record = source_records.get(record_key)
         if not record:
@@ -368,7 +374,7 @@ def _process_chat_request(
             continue
         
         payload = {
-            "file_name": record.get("file_name", "Unknown File"),
+            "file_name": record.get("file_name") or "Source",
             "confidence": round(max_score, 4),  # Add confidence score to payload
         }
         if record.get("file_id"):
@@ -667,7 +673,8 @@ def _process_chat_request(
         is_generic=is_generic, 
         sources=sources_payload, 
         chunk_count=len(chunks), 
-        answer_mode=answer_mode
+        answer_mode=answer_mode,
+        person_presence=rag_result.get("person_presence")
     )
 
 

@@ -1853,6 +1853,7 @@ class ContentExtractor:
         if og_title:
             return og_title.get('content', '')
         
+        # Final fallback: use URL part (this will be improved in extract() anyway, but good to have here)
         return ""
     
     def _extract_meta_description(self, soup: BeautifulSoup) -> str:

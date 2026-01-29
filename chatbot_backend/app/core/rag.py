@@ -47,6 +47,7 @@ class AnswerMode:
     FULL = "FULL"
     PARTIAL_TRANSPARENT = "PARTIAL_TRANSPARENT"
     FOLLOWUP = "FOLLOWUP"
+    NO_DATA_CONFIRMED = "NO_DATA_CONFIRMED"
 
 # ============================================
 # RAG SEARCH HELPERS
@@ -209,6 +210,13 @@ def detect_person_query(normalized_query: str, prior_context: Optional[Dict] = N
         match = re.search(pattern, query_lower)
         if match:
             extracted = match.group(1).strip()
+            
+            # --- FIX: Strip context phrases (e.g. "at Polus Solutions") ---
+            # This ensures "Ramya A at Polus Solutions" -> "Ramya A"
+            context_stops = [r"\s+at\s+.*", r"\s+from\s+.*", r"\s+in\s+.*", r"\s+who\s+.*"]
+            for stop in context_stops:
+                extracted = re.sub(stop, "", extracted).strip()
+                
             # Heuristic: Valid names are usually 1-3 words
             if 1 <= len(extracted.split()) <= 3:
                 potential_name = extracted
@@ -402,12 +410,44 @@ def rerank_results(
         if p_name:
              person_counts[p_name] = person_counts.get(p_name, 0) + 1
 
+    # --- FIX 1 & 2: Decouple Existence from Leadership (Early Detection) ---
+    query_name = person_detection.get("person_name")
+    person_detected = False
+    if query_name:
+        query_name_norm = normalize_text(query_name)
+        for result in results:
+            meta = result.get("payload", {})
+            p_name = meta.get("person_name")
+            if p_name and query_name_norm in normalize_text(p_name):
+                person_detected = True
+                break
+            # Also check text snippet for name presence
+            if query_name_norm in normalize_text(meta.get("text", "")):
+                person_detected = True
+                break
+
+    leadership_detected = False
+    person_presence = {
+        "found": person_detected,
+        "has_title": False,
+        "has_leadership_keyword": False,
+        "source_domains": []
+    }
+
     for result in results:
         base_score = result.get("score", 0)
         boost = 1.0
         # Handle payload access (might be dict or object depending on vector store)
         metadata = result.get("payload", {})
         
+        # Track domains for person_presence
+        if person_detected:
+            domain = metadata.get("domain", "general")
+            if domain not in person_presence["source_domains"]:
+                person_presence["source_domains"].append(domain)
+            if metadata.get("person_title"):
+                person_presence["has_title"] = True
+
         # --- BOOSTING LOGIC ---
         
         # 1. Content Quality
@@ -580,6 +620,9 @@ def rerank_results(
                         # 0.9 -> 2.0 (Boost)
                         # 1.0+ -> 3.0 (Strong Boost)
                         
+                        if ai_conf >= 0.7:
+                            leadership_detected = True
+                        
                         if ai_conf < 0.3:
                              ai_multiplier = 0.5
                         elif ai_conf < 0.6:
@@ -606,6 +649,10 @@ def rerank_results(
                 else:
                     # Fix 5: Enhanced Logging for Skips
                     logger.info(f"AI Leadership Skipped: reason={skip_reason} | Name: {meta_name}")
+                    if skip_reason == "no_leadership_keyword":
+                        person_presence["has_leadership_keyword"] = False
+                    else:
+                        person_presence["has_leadership_keyword"] = True # It had it but failed other checks or wasn't run
                 
         # 3. Procedural Relevance
         if query_classification["query_type"] == "procedural":
@@ -643,8 +690,8 @@ def rerank_results(
                         boost *= 1.15
             
             # FIX 3: Collect fuzzy matches for "Did you mean...?"
-            if name_to_match and meta_name:
-                f_score = fuzzy_match(name_to_match, meta_name)
+            if query_name and meta_name:
+                f_score = fuzzy_match(query_name, meta_name)
                 if 0.7 <= f_score < 0.95: # Close match but not exact
                     fuzzy_matches.append({
                         "name": meta_name,
@@ -693,6 +740,14 @@ def rerank_results(
     # Sort and return
     reranked.sort(key=lambda x: x["score"], reverse=True)
     
+    # Store detected signals for AnswerMode selection later
+    # We can attach them to the result list or return as a tuple
+    # For now, let's attach to the results if list is not empty
+    if reranked:
+        reranked[0]["person_detected"] = person_detected
+        reranked[0]["leadership_detected"] = leadership_detected
+        reranked[0]["person_presence"] = person_presence
+
     # FIX 3 (Production UX): If no good matches, inject the best fuzzy match into context
     if person_detection["is_person_query"] and person_detection["person_name"]:
         top_score = reranked[0].get("original_score", 0) * reranked[0].get("boost_factor", 1.0) if reranked else 0
@@ -777,11 +832,26 @@ def format_general_context(chunks: List[Dict]) -> str:
     parts = []
     for i, chunk in enumerate(chunks):
         meta = chunk.get("payload", {})
-        title = meta.get("title") or meta.get("file_name") or meta.get("page_title") or f"Source {i+1}"
-        url = meta.get("url", "#")
+        
+        # Improved title fallback logic
+        title = meta.get("title") or meta.get("file_name") or meta.get("page_title")
+        url = meta.get("url") or meta.get("canonical_url", "")
+        
+        if not title:
+            if url and url != "#":
+                # Use last part of URL as title if possible
+                path = url.split('/')[-1]
+                title = path if path else url
+            else:
+                title = f"Source {i+1}"
+        
+        # Ensure title is cleaned if it's still defaulting to "Unknown File" elsewhere
+        if title == "Unknown File" and url:
+             title = url.split('/')[-1] or url
+
         text = chunk.get("text", "")
         
-        parts.append(f"### {title}\nSource: [{title}]({url})\n{text}")
+        parts.append(f"### {title}\nSource: [{title}]({url if url else '#ID:' + meta.get('file_id', '')})\n{text}")
         
     return "\n\n---\n\n".join(parts)
 
@@ -955,7 +1025,8 @@ class RAG:
         return {
             "answer": "Hello! I'm here to help with questions about your knowledge base documents. "
                       "Let me know what you'd like to learn or explore.",
-            "is_generic": True
+            "is_generic": True,
+            "answer_mode": "FULL"
         }
 
     def _parse_ai_response(self, raw_response: str) -> Dict[str, any]:
@@ -1213,21 +1284,42 @@ class RAG:
             payload = r.get("payload", {})
             score = r.get("score", 0)
             
+            # REQUIREMENT: If it can't be downloaded or visited, don't show (and don't give to LLM)
+            file_id = payload.get("file_id", "")
+            url = payload.get("url", "") or payload.get("canonical_url", "")
+            
+            if not file_id and not url:
+                logger.warning(f"[RAG RETRIEVE] Skipping chunk with no file_id or url to prevent 'Unknown File' sources.")
+                continue
+
+            # Improved filename fallback
+            file_name = payload.get("file_name")
+            if not file_name or file_name == "Unknown File":
+                file_name = payload.get("title") or payload.get("page_title")
+                if not file_name and url:
+                    # Clean fallback from URL
+                    file_name = url.split('/')[-1] or url
+                if not file_name:
+                    file_name = "Relevant Document"
+            
             chunks_with_sources.append({
                 "text": payload.get("text", ""),
-                "file_name": payload.get("file_name", "Unknown File"),
-                "file_id": payload.get("file_id", ""),
+                "file_name": file_name,
+                "file_id": file_id,
                 "chunk_index": payload.get("chunk_index", 0),
                 "source_type": payload.get("source_type", "file"),
-                "url": payload.get("url", ""),
-                "canonical_url": payload.get("canonical_url", ""),
+                "url": url,
+                "canonical_url": url,
                 "score": score,
                 "payload": payload, # Pass full payload for formatting later
                 # Analysis metadata
                 "metadata": {
                     "vector_score": r.get("original_score", 0),
                     "boost_factor": r.get("boost_factor", 1.0),
-                    "query_type": query_classification["query_type"]
+                    "query_type": query_classification["query_type"],
+                    "person_detected": r.get("person_detected"),
+                    "leadership_detected": r.get("leadership_detected"),
+                    "person_presence": r.get("person_presence")
                 }
             })
         
@@ -2407,14 +2499,42 @@ Answer:"""
             conversation_state=conversation_state # NEW
         )
         
-        # DETERMINE ANSWER MODE (P0 FIX)
+        # DETERMINE ANSWER MODE (Fix 4)
+        person_detected = False
+        leadership_detected = False
+        person_presence = {}
+        
+        if chunks_with_sources:
+             # Retrieve signals from reranker (stored in the first chunk's metadata)
+             first_chunk = chunks_with_sources[0]
+             meta = first_chunk.get("metadata", {})
+             
+             # Use propagated flags from reranker
+             person_detected = meta.get("person_detected", False)
+             leadership_detected = meta.get("leadership_detected", False)
+             person_presence = meta.get("person_presence", {})
+             
+             # Fallback for person_detected (only if False but we have a match)
+             if not person_detected and query_name:
+                 query_name_norm = normalize_text(query_name)
+                 for chunk in chunks_with_sources:
+                     payload = chunk.get("payload", {})
+                     p_name = payload.get("person_name")
+                     if p_name and query_name_norm in normalize_text(p_name):
+                         person_detected = True
+                         break
+
         answer_mode = AnswerMode.FULL
         if followup_result.get("reason") == "domain_mismatch_partial":
             answer_mode = AnswerMode.PARTIAL_TRANSPARENT
         elif followup_result.get("needs_followup"):
             answer_mode = AnswerMode.FOLLOWUP
+        elif person_detected and not leadership_detected:
+            answer_mode = AnswerMode.PARTIAL_TRANSPARENT
+        elif not person_detected and person_detection.get("is_person_query"):
+            answer_mode = AnswerMode.NO_DATA_CONFIRMED
             
-        logger.info(f"[ANSWER_MODE] Selected mode: {answer_mode} (Reason: {followup_result.get('reason')})")
+        logger.info(f"[ANSWER_MODE] Selected mode: {answer_mode} (Person: {person_detected}, Leader: {leadership_detected})")
         
         # Step 3: If follow-up needed, generate questions
         # Enforce confidence threshold
@@ -2436,6 +2556,7 @@ Answer:"""
                 "is_followup": True,
                 "is_generic": False, # Technically it's a specific follow-up
                 "item_mode": AnswerMode.FOLLOWUP, # P5 FIX
+                "answer_mode": AnswerMode.FOLLOWUP,
                 "sources": [],
                 "chunk_count": 0,
                 "followup_reason": followup_result["reason"],
@@ -2446,10 +2567,11 @@ Answer:"""
         # If we had a potential follow-up but confidence was low, we fall through to FULL/PARTIAL answer logic
         
         # Fallback to standard generic response if chunks are missing but no follow-up triggered
-        if not chunks_with_sources:
+        if not chunks_with_sources or answer_mode == AnswerMode.NO_DATA_CONFIRMED:
             return {
-                "answer": "I wasn't able to retrieve a confident answer, please refine your question.",
-                "is_generic": True
+                "answer": f"I don't have any information about {query_name or 'this person'} in the knowledge base." if person_detection.get("is_person_query") else "I wasn't able to retrieve a confident answer, please refine your question.",
+                "is_generic": True,
+                "answer_mode": AnswerMode.NO_DATA_CONFIRMED
             }
 
         system_prompt, model, max_tokens, temperature = self._resolve_prompt_settings(
@@ -2522,7 +2644,7 @@ When answering questions about people:
             
         # Build source_files dict (common for both paths)
         for i, chunk in enumerate(chunks_with_sources):
-             file_name = chunk.get("file_name", "Unknown File")
+             file_name = chunk.get("file_name") or "Source"
              if file_name not in source_files:
                 source_files[file_name] = {
                     'file_id': chunk.get('file_id', ''),
@@ -2539,8 +2661,18 @@ When answering questions about people:
 
         # Inject PARTIAL_TRANSPARENT instructions (P0 FIX)
         if answer_mode == AnswerMode.PARTIAL_TRANSPARENT:
-            prompt_header += """
-            
+            if person_detected and not leadership_detected:
+                 # Fix 5: Specific template for unconfirmed leadership
+                 prompt_header += f"""
+                 
+IMPORTANT: A person named '{query_name}' was found in the documents, but there is NO information confirming they are in a leadership role or have a specific executive title.
+- You MUST state: "{query_name} appears in Polus Solutions content, but no leadership role or title is mentioned in the available documents."
+- Provide any other general information found about them (e.g. mentions in blogs or articles).
+- Do NOT halluncinate a role.
+"""
+            else:
+                prompt_header += """
+                
 IMPORTANT: The user's query is broad or overlaps with domain-specific content (e.g., specific plans, versions, or roles) that is not fully specified. 
 Instead of collecting more info, provide a PARTIAL ANSWER based on the available documents.
 - Explicitly state what your answer covers.
@@ -2607,4 +2739,16 @@ Answer:"""
             if source_list:
                 answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
 
-        return {"answer": answer, "is_generic": is_generic, "tokens_used": tokens_used, "source_files": source_files, "answer_mode": answer_mode}
+        return {
+            "answer": answer, 
+            "is_generic": is_generic, 
+            "tokens_used": tokens_used, 
+            "source_files": source_files, 
+            "answer_mode": answer_mode,
+            "person_presence": {
+                "found": person_detected,
+                "has_title": any(c.get("payload", {}).get("person_title") for c in chunks_with_sources),
+                "has_leadership_keyword": leadership_detected,
+                "source_domains": list(set(c.get("payload", {}).get("domain", "general") for c in chunks_with_sources))
+            } if person_detection.get("is_person_query") else None
+        }
