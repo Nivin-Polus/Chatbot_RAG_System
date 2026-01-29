@@ -162,16 +162,16 @@ function setupEventListeners() {
             }
         });
     }
-//kebin
-     // Close mobile sidebar when clicking on chat area on small screens
-   elements.chatMain.addEventListener('click', (e) => {
-    if (window.innerWidth <= 768 && !e.target.closest('#mobile-menu-btn')) {
-        closeMobileSidebar();
-    }
-});
-// Handle window resize to reset sidebar state
+    //kebin
+    // Close mobile sidebar when clicking on chat area on small screens
+    elements.chatMain.addEventListener('click', (e) => {
+        if (window.innerWidth <= 768 && !e.target.closest('#mobile-menu-btn')) {
+            closeMobileSidebar();
+        }
+    });
+    // Handle window resize to reset sidebar state
     window.addEventListener('resize', handleWindowResize);
-//kebin
+    //kebin
 
     // New chat
     if (elements.newChatBtn) {
@@ -809,16 +809,78 @@ function removeTypingIndicator() {
 }
 
 function formatMessageContent(content) {
-    // Basic markdown-like formatting
-    let formatted = escapeHtml(content);
+    if (!content) return '';
 
-    // Bold text
+    // 1. Remove the "---" separator (often found at end of generic responses)
+    //    Regex matches: newline, optional spaces, 3 or more dashes, optional spaces, end of string or newline
+    let formatted = content.replace(/\n\s*-{3,}\s*(\n|$)/g, '$1');
+
+    // 2. Escape HTML to prevent XSS (basic)
+    formatted = escapeHtml(formatted);
+
+    // 3. Headers (H6 to H1)
+    //    We process H6 first so H1 regex doesn't match part of H6 (###### vs #)
+    //    Use replace with regex for each level
+    formatted = formatted.replace(/^######\s+(.+)$/gm, '<h6>$1</h6>');
+    formatted = formatted.replace(/^#####\s+(.+)$/gm, '<h5>$1</h5>');
+    formatted = formatted.replace(/^####\s+(.+)$/gm, '<h4>$1</h4>');
+    formatted = formatted.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+    formatted = formatted.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+    formatted = formatted.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
+
+    // 4. Bold text: **text**
     formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 
-    // Italic text
-    formatted = formatted.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    // 5. Italic text: *text* (careful not to break bold)
+    formatted = formatted.replace(/(^|[^*])\*([^*]+?)\*/g, '$1<em>$2</em>');
 
-    // Line breaks
+    // 6. Unordered lists
+    //    Match lines starting with "- " or "* "
+    //    This is a simple replacement; proper nested lists would need a real parser.
+    //    We'll verify if it's part of a list and wrap items in <li>.
+    //    For a simple implementation, we can turn "- item" into "<li>item</li>".
+    //    Then, if we have consecutive <li>s, we might want a <ul> wrapper, 
+    //    but often just <li> styling is enough if CSS supports it or we rely on line breaks.
+    //    Let's try a slightly safer per-line approach for now.
+    formatted = formatted.replace(/^\s*[-*]\s+(.+)$/gm, '<li>$1</li>');
+
+    // Wrap groups of <li> into <ul> (optional but better HTML)
+    // This simple regex might overlap, so let's check if we can do it effectively.
+    // If not, standard <br> separation works for now, but <li> is better.
+    // Let's stick to simple <li> replacement and rely on CSS or global <ul> structure if needed,
+    // usually raw <li> elements are invalid without `<ul>`.
+    // Valid approach for simple rich text:
+    // We can replace the whole block of <li>s with <ul>...</ul>.
+    formatted = formatted.replace(/(<li>.*<\/li>\s*)+/g, (match) => {
+        return `<ul>${match}</ul>`;
+    });
+
+    // 7. Auto-link URLs
+    //    Regex for http/https URLs
+    const urlRegex = /(https?:\/\/[^\s<]+)/g;
+    formatted = formatted.replace(urlRegex, (url) => {
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+    });
+
+    // 8. Auto-link Emails
+    const emailRegex = /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/g;
+    formatted = formatted.replace(emailRegex, (email) => {
+        return `<a href="mailto:${email}">${email}</a>`;
+    });
+
+    // 9. Convert remaining newlines to <br> 
+    //    (but NOT inside ul/ol/hTags to avoid huge gaps)
+    //    We only convert newlines that aren't adjacent to block-level tags we just created.
+    //    Actually, simplest is to just swap \n for <br>, but that adds extra space after specific blocks.
+    //    Let's try to be smart: remove newlines around block tags.
+
+    // Normalize newlines first
+    formatted = formatted.replace(/\r\n/g, '\n');
+
+    // Remove newlines after headers and list closes
+    formatted = formatted.replace(/(<\/h[1-6]>|<\/ul>|<\/li>)\n/g, '$1');
+
+    // Convert remaining newlines to <br>
     formatted = formatted.replace(/\n/g, '<br>');
 
     return formatted;
