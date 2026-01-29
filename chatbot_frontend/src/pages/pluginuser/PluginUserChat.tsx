@@ -1119,7 +1119,7 @@ export default function PluginUserChat() {
                                         <div className="flex items-center justify-center text-muted-foreground dark:text-gray-300 h-[50vh]">
                                             <div className="flex flex-col items-center gap-3 text-center">
                                                 <MessageSquare className="h-12 w-12 opacity-50" />
-                                                <p className="text-base font-medium">You can start the conversation by sending a message below.</p>
+                                                <p className="text-base font-medium">How can I help you?</p>
                                             </div>
                                         </div>
                                     ) : (
