@@ -834,25 +834,20 @@ function formatMessageContent(content) {
     // 5. Italic text: *text* (careful not to break bold)
     formatted = formatted.replace(/(^|[^*])\*([^*]+?)\*/g, '$1<em>$2</em>');
 
-    // 6. Unordered lists
-    //    Match lines starting with "- " or "* "
-    //    This is a simple replacement; proper nested lists would need a real parser.
-    //    We'll verify if it's part of a list and wrap items in <li>.
-    //    For a simple implementation, we can turn "- item" into "<li>item</li>".
-    //    Then, if we have consecutive <li>s, we might want a <ul> wrapper, 
-    //    but often just <li> styling is enough if CSS supports it or we rely on line breaks.
-    //    Let's try a slightly safer per-line approach for now.
-    formatted = formatted.replace(/^\s*[-*]\s+(.+)$/gm, '<li>$1</li>');
+    // 6. Lists
+    // Unordered lists: match lines starting with "- " or "* "
+    formatted = formatted.replace(/^\s*[-*]\s+(.+)$/gm, '<li data-list-type="ul">$1</li>');
 
-    // Wrap groups of <li> into <ul> (optional but better HTML)
-    // This simple regex might overlap, so let's check if we can do it effectively.
-    // If not, standard <br> separation works for now, but <li> is better.
-    // Let's stick to simple <li> replacement and rely on CSS or global <ul> structure if needed,
-    // usually raw <li> elements are invalid without `<ul>`.
-    // Valid approach for simple rich text:
-    // We can replace the whole block of <li>s with <ul>...</ul>.
-    formatted = formatted.replace(/(<li>.*<\/li>\s*)+/g, (match) => {
-        return `<ul>${match}</ul>`;
+    // Ordered lists: match lines starting with "1. " or "2. " etc.
+    formatted = formatted.replace(/^\s*(\d+)\.\s+(.+)$/gm, '<li data-list-type="ol">$2</li>');
+
+    // Wrap groups of <li> into <ul> or <ol>
+    formatted = formatted.replace(/((<li data-list-type="(ul|ol)".*?>.*?<\/li>\s*)+)/g, (match) => {
+        const isOrdered = match.includes('data-list-type="ol"');
+        const tag = isOrdered ? 'ol' : 'ul';
+        // Remove the data attribute used for detection
+        const cleanedMatch = match.replace(/\s*data-list-type="(ul|ol)"/g, '');
+        return `<${tag}>${cleanedMatch}</${tag}>`;
     });
 
     // 7. Auto-link URLs

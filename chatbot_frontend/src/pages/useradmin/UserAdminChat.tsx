@@ -1240,6 +1240,42 @@ export default function UserAdminChat() {
           continue;
         }
 
+        // Check for Markdown lists (- or * for ul, 1. for ol)
+        const listMatch = trimmed.match(/^([-*]|\d+\.)\s+(.+)$/);
+        if (listMatch && !inSourcesSection) {
+          const isOrdered = /^\d+/.test(listMatch[1]);
+          const listLines: string[] = [];
+          let j = i;
+
+          while (j < lines.length) {
+            const currentTrimmed = lines[j].trim();
+            const currentMatch = currentTrimmed.match(/^([-*]|\d+\.)\s+(.+)$/);
+            if (!currentMatch) break;
+            listLines.push(currentTrimmed);
+            j++;
+          }
+
+          const ListTag = isOrdered ? 'ol' : 'ul';
+          nodes.push(
+            <ListTag
+              key={`${messageId}-list-${i}`}
+              className={`my-3 ml-6 ${isOrdered ? 'list-decimal' : 'list-disc'} space-y-1`}
+            >
+              {listLines.map((line, idx) => {
+                const itemContent = line.replace(/^([-*]|\d+\.)\s+/, '');
+                return (
+                  <li key={`${messageId}-list-${i}-item-${idx}`} className="pl-1">
+                    {createInlineElements(itemContent, false)}
+                  </li>
+                );
+              })}
+            </ListTag>
+          );
+
+          i = j - 1;
+          continue;
+        }
+
         // Wrap each line in a container to keep inline elements together
         const lineNodes = createInlineElements(rawLine, false); // block=false
         if (lineNodes.length > 0) {
