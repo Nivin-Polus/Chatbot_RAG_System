@@ -59,7 +59,7 @@ const WIDGET_CONFIG = {
         thinkingText: 'Leto is thinking',
 
         // Empty chat placeholder message
-        emptyStateMessage: 'You can start the conversation by sending a message below.',
+        emptyStateMessage: 'How can I help you?',
 
         // Input placeholder text
         inputPlaceholder: 'Type your message...',
