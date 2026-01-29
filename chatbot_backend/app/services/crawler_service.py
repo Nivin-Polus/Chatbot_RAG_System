@@ -366,21 +366,6 @@ class CrawlerService:
                     job.update_from_stats(stats)
                     session.commit()
                     
-                    # Fix 1: Refresh person cache on crawl completion
-                    if stats.status == "completed" and previous_status != "completed":
-                        try:
-                            from app.core.rag import RAG
-                            # We can't easily get the RAG instance here without a DB session or similar,
-                            # but we can initialize a temporary one or use a singleton if it existed.
-                            # However, refresh_person_cache is a method that needs vector_store.
-                            # The CrawlerService already has self.vector_store.
-                            rag = RAG(db_session=session)
-                            import threading
-                            threading.Thread(target=rag.refresh_person_cache, daemon=True).start()
-                            logger.info(f"Crawl completed for job {job_id}. Triggered person cache refresh.")
-                        except Exception as e:
-                            logger.error(f"Failed to trigger person cache refresh: {e}")
-
                     # Log activity when crawl completes or fails
                     if stats.status in ("completed", "failed") and previous_status != stats.status:
                         try:
