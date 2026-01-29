@@ -2486,6 +2486,7 @@ Answer:"""
 
         query_classification = classify_query(normalized_query)
         person_detection = detect_person_query(normalized_query, prior_context=prior_context)
+        query_name = person_detection.get("person_name")
 
         chunks_with_sources = self.retrieve_chunks(query, top_k=top_k, collection_id=collection_id, prior_context=prior_context)
         
