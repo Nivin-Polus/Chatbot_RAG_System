@@ -58,6 +58,7 @@ class ChatResponse(BaseModel):
     followup_reason: Optional[str] = None  # NEW: Reason for follow-up
     sources: Optional[List[Dict]] = None
     chunk_count: int = 0  # NEW: Number of chunks retrieved
+    answer_mode: Optional[str] = "FULL"  # NEW: Answer mode (FULL, PARTIAL_TRANSPARENT, FOLLOWUP)
 
 
 class PublicChatRequest(ChatRequest):
@@ -445,7 +446,8 @@ def _process_chat_request(
             followup_questions=followup_text,
             followup_reason=followup_reason,
             sources=[],
-            chunk_count=len(chunks)
+            chunk_count=len(chunks),
+            answer_mode="FOLLOWUP"
         )
 
     try:
@@ -474,11 +476,13 @@ def _process_chat_request(
         # Handle new dict return format from RAG (contains 'answer' and 'is_generic')
         tokens_used = None
         model_name = None
+        answer_mode = "FULL"
         if isinstance(rag_result, dict):
             answer_text = rag_result.get("answer", "")
             is_generic_from_ai = rag_result.get("is_generic", False)
             tokens_used = rag_result.get("tokens_used")
             model_name = rag_result.get("model_name")
+            answer_mode = rag_result.get("answer_mode", "FULL")
         else:
             # Fallback for string return (shouldn't happen with updated RAG)
             answer_text = rag_result
@@ -504,6 +508,7 @@ def _process_chat_request(
             session_id=effective_session_id,
             is_generic=True,
             sources=sources_payload,
+            answer_mode="GENERIC_ERROR"
         )
 
     processing_time = int((time.time() - start_time) * 1000)
@@ -515,6 +520,7 @@ def _process_chat_request(
         "maintain_context": maintain_context,
         "conversation_history_length": len(conversation_history),
         "top_k": top_k,
+        "answer_mode": answer_mode # Log answer_mode
     }
 
     if effective_session_id:
@@ -655,7 +661,14 @@ def _process_chat_request(
     logger.info(f"[API RESPONSE] Final answer content:\n{answer_text}")
     logger.info(f"[API RESPONSE] is_generic: {is_generic}, sources count: {len(sources_payload)}")
     
-    return ChatResponse(answer=answer_text, session_id=effective_session_id, is_generic=is_generic, sources=sources_payload, chunk_count=len(chunks))
+    return ChatResponse(
+        answer=answer_text, 
+        session_id=effective_session_id, 
+        is_generic=is_generic, 
+        sources=sources_payload, 
+        chunk_count=len(chunks), 
+        answer_mode=answer_mode
+    )
 
 
 # Chat endpoint

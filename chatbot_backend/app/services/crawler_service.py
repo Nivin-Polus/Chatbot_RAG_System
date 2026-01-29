@@ -180,6 +180,55 @@ class CrawlerService:
             on_chunk=on_chunk
         )
         
+        # FIX 8: Batching State
+        chunk_buffer: List[ContentChunk] = []
+        BATCH_SIZE = 50
+        buffer_lock = threading.Lock()
+        
+        def flush_chunks():
+            """Flush buffered chunks to vector store."""
+            with buffer_lock:
+                if not chunk_buffer:
+                    return
+                
+                try:
+                    docs_to_add = []
+                    for c in chunk_buffer:
+                        docs_to_add.append({
+                            "text": c.text,
+                            "metadata": c.to_vector_metadata()
+                        })
+                    
+                    self.vector_store.add_documents_with_metadata(docs_to_add)
+                    logger.debug(f"Flushed {len(docs_to_add)} chunks to Qdrant")
+                except Exception as e:
+                    logger.error(f"Failed to flush chunks: {e}")
+                finally:
+                    chunk_buffer.clear()
+
+        # Update chunk callback for batching
+        def on_chunk_batched(chunk: ContentChunk):
+            with buffer_lock:
+                chunk_buffer.append(chunk)
+                if len(chunk_buffer) >= BATCH_SIZE:
+                    # Flush outside of lock? No, keep it simple for now, 
+                    # add_documents_with_metadata is thread-safe internally usually,
+                    # but we need to clear buffer safely.
+                    # To avoid blocking the lock too long, we could copy list.
+                    pass
+            
+            # Simple check with lock
+            should_flush = False
+            with buffer_lock:
+                if len(chunk_buffer) >= BATCH_SIZE:
+                    should_flush = True
+            
+            if should_flush:
+                flush_chunks()
+        
+        # Override the engine's callback
+        engine.on_chunk = on_chunk_batched
+        
         # Store reference for cancellation
         self._active_jobs[job_id] = engine
         
@@ -189,6 +238,9 @@ class CrawlerService:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 loop.run_until_complete(engine.crawl(job_id))
+                
+                # Flush remaining chunks
+                flush_chunks()
             except Exception as e:
                 logger.error(f"Crawl failed: {e}")
                 self._update_job_error(job_id, str(e))

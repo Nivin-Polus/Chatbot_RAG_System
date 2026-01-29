@@ -80,6 +80,7 @@ class StructuredSection:
     content_quality_score: float = 0.0
     is_boilerplate: bool = False
     word_count: int = 0
+    domain: str = "general" # P1 FIX: Added domain tag
     metadata: Dict = field(default_factory=dict)
     
     def __post_init__(self):
@@ -100,6 +101,7 @@ class StructuredSection:
             "content_quality_score": self.content_quality_score,
             "is_boilerplate": self.is_boilerplate,
             "word_count": self.word_count,
+            "domain": self.domain, # P1 FIX
             "metadata": self.metadata or {}
         }
 
@@ -365,9 +367,16 @@ class ContentExtractor:
             # Phase 1: Detect page type with confidence
             page_type = self.detect_page_type(soup, url, structured_data)
             
+            # P3 FIX: Gate people extraction by domain
+            page_domain = self._infer_page_domain(url, title)
+            
             # Phase 1: Extract people/team members (Dual Path - Fix 3)
             # Path 1: Raw DOM (before cleaning)
-            people_raw = self._person_extractor.extract_people(soup, url, structured_data)
+            people_raw = []
+            if page_domain not in ["admin", "policy", "research"]:
+                people_raw = self._person_extractor.extract_people(soup, url, structured_data)
+            else:
+                 logger.debug(f"Skipping person extraction (raw) for {page_domain} page: {url}")
             
             # Determine Organizational Context (Fix 8)
             path_lower = url.lower()
@@ -389,7 +398,9 @@ class ContentExtractor:
             self.remove_boilerplate_elements(main_content)
             
             # Path 2: Cleaned DOM (after cleaning)
-            people_clean = self._person_extractor.extract_people(main_content, url, structured_data)
+            people_clean = []
+            if page_domain not in ["admin", "policy", "research"]:
+                people_clean = self._person_extractor.extract_people(main_content, url, structured_data)
             
             # Merge and deduplicate
             # We trust cleaned extraction slightly more for precision, but raw for recall
@@ -403,7 +414,8 @@ class ContentExtractor:
             people = list(people_map.values())
             
             # Phase 1: Extract structured sections with quality scoring
-            structured_sections = self.extract_structured_sections(main_content)
+            # P1 FIX: Pass page-level domain metadata (Inferred earlier now)
+            structured_sections = self.extract_structured_sections(main_content, page_domain)
             
             # Merge Elementor sections (Fix 6)
             structured_sections.extend(elementor_sections)
@@ -1355,7 +1367,7 @@ class ContentExtractor:
     # 6. STRUCTURE-PRESERVING SECTION EXTRACTION
     # -------------------------------------------------------------------------
     
-    def extract_structured_sections(self, container: Tag) -> List[StructuredSection]:
+    def extract_structured_sections(self, container: Tag, page_domain: str = "general") -> List[StructuredSection]:
         """
         Extract sections with heading hierarchy and structure metadata.
         
@@ -1375,6 +1387,7 @@ class ContentExtractor:
         
         Args:
             container: Content container to extract from
+            page_domain: Domain tag inferred from page level (default for sections)
             
         Returns:
             List of StructuredSection objects
@@ -1439,7 +1452,8 @@ class ContentExtractor:
                 has_list=current_has_list,
                 has_table=current_has_table,
                 content_quality_score=quality_score,
-                is_boilerplate=is_boilerplate
+                is_boilerplate=is_boilerplate,
+                domain=page_domain # P1 FIX
             )
             sections.append(section)
             
@@ -1486,6 +1500,7 @@ class ContentExtractor:
                         section_path=f"{' > '.join(h[1] for h in heading_stack)} > {name_title_meta.get('name', 'Card')}",
                         content_quality_score=0.9, # High score for cards
                         is_boilerplate=False,
+                        domain="people", # P1 FIX: Explicitly tag cards as people
                         metadata={
                             "type": "person_profile",
                             "is_card": True,
@@ -1781,6 +1796,41 @@ class ContentExtractor:
         
         # Round to 2 decimal places
         return round(final_score, 2)
+    
+    # -------------------------------------------------------------------------
+    # 8. DOMAIN INFERENCE
+    # -------------------------------------------------------------------------
+    
+    def _infer_page_domain(self, url: str, title: str) -> str:
+        """
+        Infer the content domain based on URL patterns and title.
+        
+        Domains: "admin", "policy", "research", "history", "people", "general"
+        """
+        url_lower = url.lower()
+        title_lower = title.lower()
+        
+        # 1. Admin / Policy
+        if any(x in url_lower for x in ["/admin", "/policy", "/legal", "/terms", "/compliance", "policies"]):
+            return "admin"
+        if any(x in title_lower for x in ["policy", "compliance", "terms of use", "privacy", "administration"]):
+            return "admin"
+            
+        # 2. People / Leadership (URL-based backstop if cards logic misses)
+        if any(x in url_lower for x in ["/people", "/team", "/leadership", "/staff", "/profiles"]):
+            return "people"
+            
+        # 3. History
+        if any(x in url_lower for x in ["/history", "/about/story", "/timeline", "/legacy"]):
+            return "history"
+        if any(x in title_lower for x in ["our history", "company history", "legacy", "founding"]):
+            return "history"
+            
+        # 4. Research
+        if any(x in url_lower for x in ["/research", "/publications", "/whitepapers", "/case-studies"]):
+            return "research"
+            
+        return "general"
     
     # -------------------------------------------------------------------------
     # LEGACY METHODS (Backward Compatibility)

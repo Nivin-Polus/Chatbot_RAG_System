@@ -43,6 +43,9 @@ class ContentChunk:
     word_count: int = 0
     char_count: int = 0
     
+    # P1 FIX: Domain tag
+    domain: str = "general"
+    
     def __post_init__(self):
         self.word_count = len(self.text.split())
         self.char_count = len(self.text)
@@ -72,7 +75,9 @@ class ContentChunk:
             "crawl_timestamp": self.crawl_timestamp,
             "crawl_depth": self.crawl_depth,
             "word_count": self.word_count,
-            "char_count": self.char_count
+            "word_count": self.word_count,
+            "char_count": self.char_count,
+            "domain": self.domain # P1 FIX
         }
     
     def to_vector_metadata(self) -> dict:
@@ -91,7 +96,9 @@ class ContentChunk:
             "crawl_job_id": self.crawl_job_id,
             "crawl_timestamp": self.crawl_timestamp,
             "source_type": "web_crawl",
-            "chunk_index": self.chunk_index
+            "source_type": "web_crawl",
+            "chunk_index": self.chunk_index,
+            "domain": self.domain # P1 FIX
         }
 
 
@@ -245,7 +252,8 @@ class TextChunker:
                         crawl_job_id=job_id,
                         collection_id=collection_id,
                         crawl_timestamp=timestamp,
-                        crawl_depth=crawl_depth
+                        crawl_depth=crawl_depth,
+                        domain="general" # Default for raw text fallback
                     ))
             return chunks
         
@@ -309,7 +317,11 @@ class TextChunker:
         """Chunk a group of sections under the same header."""
         chunks = []
         
-        # Combine section content
+        # Determine domain from sections (majority or first)
+        domain = "general"
+        if sections:
+             # Use the first section's domain (assuming page-level consistency)
+             domain = sections[0].domain if hasattr(sections[0], 'domain') else sections[0].get('domain', 'general')
         combined_text = ""
         block_type = "paragraph"
         
@@ -350,7 +362,8 @@ class TextChunker:
                 crawl_job_id=job_id,
                 collection_id=collection_id,
                 crawl_timestamp=timestamp,
-                crawl_depth=crawl_depth
+                crawl_depth=crawl_depth,
+                domain=domain # P1 FIX
             ))
         
         return chunks

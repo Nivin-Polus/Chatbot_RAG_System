@@ -40,6 +40,15 @@ SUMMARY_TRIGGER_THRESHOLD = 20  # Start summarizing when history exceeds this co
 
 
 # ============================================
+# CONSTANTS & ENUMS
+# ============================================
+
+class AnswerMode:
+    FULL = "FULL"
+    PARTIAL_TRANSPARENT = "PARTIAL_TRANSPARENT"
+    FOLLOWUP = "FOLLOWUP"
+
+# ============================================
 # RAG SEARCH HELPERS
 # ============================================
 
@@ -93,6 +102,11 @@ def classify_query(normalized_query: str) -> Dict[str, str]:
     compare_patterns = [r" vs ", r" versus ", r"difference between", r"compare", r"better than"]
     if any(re.search(p, query_lower) for p in compare_patterns):
         return {"query_type": "comparison", "complexity": "complex"}
+
+    # 5. History / Background (For P1 Domain Mismatch Logic)
+    history_patterns = [r"history", r"founding", r"legacy", r"timeline", r"when did .* start", r"background", r"story of"]
+    if any(re.search(p, query_lower) for p in history_patterns):
+        return {"query_type": "history", "complexity": "medium"}
 
     return {"query_type": "exploratory", "complexity": "medium"}
 
@@ -399,6 +413,18 @@ def rerank_results(
         # 1. Content Quality
         quality = metadata.get("content_quality_score", 0.7)
         boost *= (0.8 + 0.2 * quality) # Mild boost
+        
+        # --- P1 FIX: History vs Admin Domain Mismatch ---
+        chunk_domain = metadata.get("domain", "general")
+        q_type = query_classification.get("query_type")
+        
+        if q_type == "history" and chunk_domain == "admin":
+            boost *= 0.6 # Penetize admin docs when user wants history/story
+            logger.info(f"[RAG BOOST] Penalized admin content for history query: {metadata.get('file_name')}")
+            
+        # Penalize admin pages for general exploratory queries to avoid dry policy docs dominating
+        if q_type == "exploratory" and chunk_domain == "admin":
+             boost *= 0.9
         
         # 2. Person Relevance (High Priority)
         if person_detection["is_person_query"]:
@@ -1470,7 +1496,7 @@ class RAG:
                     return result
         
         # ─────────────────────────────────────────────────────────
-        # RULE 7: Domain-specific context requirements
+        # RULE 7: Domain-specific context requirements (P0 FIX)
         # ─────────────────────────────────────────────────────────
         
         # Check if chunks mention specific domains that need context
@@ -1485,12 +1511,37 @@ class RAG:
         
         for keyword, questions in domain_patterns.items():
             if keyword in chunk_texts.lower() and keyword not in query_lower:
+                # P0 FIX: Difference between missing context (FOLLOWUP) and domain mismatch (PARTIAL)
+                # If intent is exploratory/overview, prefer PARTIAL answer
+                if query_classification and query_classification.get("query_type") in ["exploratory", "overview", "history"]:
+                    logger.info(f"[FOLLOWUP] Domain mismatch detected ({keyword}) but intent is exploratory. Switching to PARTIAL_TRANSPARENT.")
+                    return {
+                        "needs_followup": False,
+                        "reason": "domain_mismatch_partial",
+                        "confidence": 0.0,
+                        "missing_context": []
+                    }
+                
+                # Otherwise, strict follow-up for procedural/specific queries
                 result.update({
                     "needs_followup": True,
                     "reason": f"missing_{keyword}_context",
                     "confidence": 0.55,
                     "missing_context": questions
                 })
+                return result
+        
+        # ─────────────────────────────────────────────────────────
+        # RULE 8: Clear Query Override (P2 FIX)
+        # ─────────────────────────────────────────────────────────
+        if self._is_clear_query(query) and chunks and len(chunks) > 0:
+            # If we have a clear query and chunks, avoid nitpicking follow-ups
+            # (Unless explicitly caught by above strict rules)
+            current_max = max(c.get("score", 0) for c in chunks)
+            if current_max > 0.45:
+                logger.info("[FOLLOWUP] Query is clear and has relevant chunks. Skipping verification.")
+                result["needs_followup"] = False
+                result["reason"] = "confident"
                 return result
         
         # ─────────────────────────────────────────────────────────
@@ -2029,7 +2080,7 @@ Summary:"""
             return f"Earlier in the conversation, the user asked about: {topics}..."
         return "The conversation covered various topics earlier."
 
-    def _resolve_prompt_settings(self, collection_id: Optional[str] = None, scope: Optional[str] = None):
+    def _resolve_prompt_settings(self, collection_id: Optional[str] = None, scope: Optional[str] = None, intent: Optional[str] = None, answer_mode: Optional[str] = None):
         """Determine system prompt and model configuration for the given collection.
         
         Note: model, max_tokens, and temperature are ALWAYS taken from environment
@@ -2050,7 +2101,22 @@ Summary:"""
         if scope:
              # Prevent "which company" questions by explicitly grounding the prompt
              system_prompt += f"\n\nIMPORTANT CONTEXT: The user is asking about '{scope}'. Assume all questions relate to {scope} unless specified otherwise."
-        
+
+        # FIX 10: INTENT-AWARE SYSTEM PROMPTS
+        if intent:
+            if intent in ["history", "overview", "exploratory"]:
+                system_prompt += "\n\nRESPONSE GUIDELINE: Provide a high-level summary. Focus on narrative flow, key events, and broad concepts rather than minute details."
+            elif intent in ["policy", "admin"]:
+                system_prompt += "\n\nRESPONSE GUIDELINE: Be precise and authoritative. Quote relevant policy clauses where possible. Differentiate between strict rules and general guidelines."
+            elif intent in ["people", "leadership"]:
+                system_prompt += "\n\nRESPONSE GUIDELINE: Focus on role, responsibilities, and professional background. If multiple people match, list them clearly."
+            elif intent in ["procedural", "troubleshooting"]:
+                system_prompt += "\n\nRESPONSE GUIDELINE: Provide step-by-step instructions. Use numbered lists. Highlight any prerequisites or warnings."
+
+        # FIX 1: PARTIAL ANSWER TRANSPARENCY
+        if answer_mode == "PARTIAL_TRANSPARENT":
+            system_prompt += "\n\nIMPORTANT: The available context might be from a different domain than requested (e.g., policy documents for a history question). You MUST explicitly acknowledge this limitation. Start or end by saying something like 'Based on the available [domain] documents...'"
+
         # ALWAYS use env defaults for model configuration
         model = self.default_model
         max_tokens = self.default_max_tokens
@@ -2163,9 +2229,21 @@ Summary:"""
                 "is_generic": True
             }
 
+        # Run classification for intent-aware prompts
+        try:
+             # normalized_query might be redundant but safely consistent
+             normalized_query = normalize_text(query)
+        except:
+             normalized_query = query.lower().strip()
+        
+        query_classification = classify_query(normalized_query)
+        intent = query_classification.get("query_type") if query_classification else None
+
         system_prompt, model, max_tokens, temperature = self._resolve_prompt_settings(
             collection_id=collection_id,
-            scope=conversation_state.get("scope") if conversation_state else None
+            scope=conversation_state.get("scope") if conversation_state else None,
+            intent=intent,
+            answer_mode="FULL" # 'answer' method usually implies full/direct answer
         )
 
         # Check for person data to adjust formatting
@@ -2329,11 +2407,20 @@ Answer:"""
             conversation_state=conversation_state # NEW
         )
         
+        # DETERMINE ANSWER MODE (P0 FIX)
+        answer_mode = AnswerMode.FULL
+        if followup_result.get("reason") == "domain_mismatch_partial":
+            answer_mode = AnswerMode.PARTIAL_TRANSPARENT
+        elif followup_result.get("needs_followup"):
+            answer_mode = AnswerMode.FOLLOWUP
+            
+        logger.info(f"[ANSWER_MODE] Selected mode: {answer_mode} (Reason: {followup_result.get('reason')})")
+        
         # Step 3: If follow-up needed, generate questions
         # Enforce confidence threshold
         FOLLOWUP_CONFIDENCE_THRESHOLD = getattr(settings, "RAG_FOLLOWUP_CONFIDENCE_THRESHOLD", 0.6)
         
-        if followup_result["needs_followup"] and followup_result["confidence"] >= FOLLOWUP_CONFIDENCE_THRESHOLD:
+        if answer_mode == AnswerMode.FOLLOWUP and followup_result["confidence"] >= FOLLOWUP_CONFIDENCE_THRESHOLD:
             followup_questions = self.generate_followup_questions(
                 query=query,
                 followup_result=followup_result,
@@ -2348,12 +2435,15 @@ Answer:"""
                 "answer": followup_text,
                 "is_followup": True,
                 "is_generic": False, # Technically it's a specific follow-up
+                "item_mode": AnswerMode.FOLLOWUP, # P5 FIX
                 "sources": [],
                 "chunk_count": 0,
                 "followup_reason": followup_result["reason"],
                 "followup_confidence": followup_result["confidence"],
                 "suggested_topics": followup_result.get("suggested_topics", [])
             }
+        
+        # If we had a potential follow-up but confidence was low, we fall through to FULL/PARTIAL answer logic
         
         # Fallback to standard generic response if chunks are missing but no follow-up triggered
         if not chunks_with_sources:
@@ -2364,7 +2454,9 @@ Answer:"""
 
         system_prompt, model, max_tokens, temperature = self._resolve_prompt_settings(
             collection_id=collection_id,
-            scope=conversation_state.get("scope") if conversation_state else None
+            scope=conversation_state.get("scope") if conversation_state else None,
+            intent=query_classification.get("query_type") if query_classification else None,
+            answer_mode=answer_mode
         )
 
         # Build conversation context with summarization for long histories
@@ -2445,6 +2537,17 @@ When answering questions about people:
         if conversation_context:
             prompt_header = f"{system_prompt}{conversation_context}"
 
+        # Inject PARTIAL_TRANSPARENT instructions (P0 FIX)
+        if answer_mode == AnswerMode.PARTIAL_TRANSPARENT:
+            prompt_header += """
+            
+IMPORTANT: The user's query is broad or overlaps with domain-specific content (e.g., specific plans, versions, or roles) that is not fully specified. 
+Instead of collecting more info, provide a PARTIAL ANSWER based on the available documents.
+- Explicitly state what your answer covers.
+- Mention that different rules might apply to other specific contexts (e.g., "This generally applies to...", "For specific plans like X, check...").
+- Do NOT refuse to answer. Provide the best overview possible.
+"""
+
         enhanced_prompt = f"""{prompt_header}
 
 IMPORTANT: At the end of your response, always include a "Sources:" section listing the specific files you referenced.
@@ -2504,4 +2607,4 @@ Answer:"""
             if source_list:
                 answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
 
-        return {"answer": answer, "is_generic": is_generic, "tokens_used": tokens_used, "source_files": source_files}
+        return {"answer": answer, "is_generic": is_generic, "tokens_used": tokens_used, "source_files": source_files, "answer_mode": answer_mode}
