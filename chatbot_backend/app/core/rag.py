@@ -533,7 +533,15 @@ def rerank_results(
                 person_detected = True
                 break
     
+    
     leadership_detected = False
+    
+    person_presence = {
+        "found": person_detected,
+        "has_title": False,
+        "has_leadership_keyword": False,
+        "source_domains": []
+    }
     
     for result in results:
         base_score = result.get("score", 0)
@@ -542,6 +550,17 @@ def rerank_results(
         
         name = metadata.get("person_name", "Unknown")
         title = metadata.get("person_title", "")
+        
+        # Populate person_presence
+        if person_detection.get("is_person_query"):
+            domain = metadata.get("domain", "general")
+            if domain not in person_presence["source_domains"]:
+                person_presence["source_domains"].append(domain)
+            if title:
+                person_presence["has_title"] = True
+            if leadership_detected: # This is updated inside loop, so this specific check might be early
+                # We will update has_leadership_keyword at end or if we detect it here.
+                pass
         
         # --- FIX 2: Redefine External Org Logic ---
         detected_org = metadata.get("org") or metadata.get("organization_context")
@@ -746,6 +765,9 @@ def rerank_results(
     if reranked:
         reranked[0]["person_detected"] = person_detected
         reranked[0]["leadership_detected"] = leadership_detected
+        
+        # Finalize person_presence
+        person_presence["has_leadership_keyword"] = leadership_detected
         reranked[0]["person_presence"] = person_presence
 
     # FIX 3 (Production UX): If no good matches, inject the best fuzzy match into context
