@@ -70,9 +70,26 @@ def classify_query(normalized_query: str) -> Dict[str, str]:
     if not normalized_query:
         return {"query_type": "exploratory", "complexity": "medium"}
         
-    # Input is already normalized (lowercase, trimmed)
     query_lower = normalized_query
     
+    # 0. Leadership List (New Priority)
+    # Detection rule: plural language + leadership role + org presence (implied by context usually)
+    list_patterns = [r"who all", r"list ", r"members", r"who are the", r"staff", r"team", r"everyone"]
+    role_patterns = [r"director", r"vp", r"head", r"leadership", r"management", r"executives", r"board"]
+    
+    # Check for plural/list intent + leadership role
+    has_list_intent = any(re.search(p, query_lower) for p in list_patterns)
+    has_leadership_role = any(re.search(p, query_lower) for p in role_patterns)
+    
+    if has_list_intent and has_leadership_role:
+        # Negative guard: Avoid misclassifying singular person queries like "Who is the director of Polus Solutions?"
+        # Simple heuristic: "who is the [role]" or "who is [name]" (without "all" or "list")
+        is_singular_role_query = re.search(r"who is the (?:director|vp|head|ceo|cto)", query_lower)
+        is_singular_name_query = re.search(r"who is (?!the )", query_lower) and len(query_lower.split()) <= 5
+        
+        if not (is_singular_role_query or is_singular_name_query):
+            return {"query_type": "leadership_list", "complexity": "medium"}
+
     # 1. Person queries (Highest Priority)
     person_patterns = [
         r"who is", r"who's", r"tell me about", r"what does .* do", 
@@ -155,11 +172,21 @@ def detect_person_query(normalized_query: str, prior_context: Optional[Dict] = N
             # but for now, just anchoring the person is the critical fix.
             return result
 
-    if not normalized_query:
-        return result
-        
     query_lower = normalized_query
     
+    # 0. FIX 2: Disable person-name logic for leadership_list
+    # If the query was already classified as leadership_list, we skip name extraction
+    # This prevents "Brief Description" and footer junk from being detected as names
+    if prior_context and prior_context.get("query_type") == "leadership_list":
+        result.update({
+             "is_person_query": True,
+             "query_type": "leadership_list",
+             "person_name": None,
+             "role_title": "director", # Default expected role for retrieval
+             "intent": "team"
+        })
+        return result
+
     # 1. Detect Intent
     if any(w in query_lower for w in ["contact", "email", "reach", "phone"]):
         result["intent"] = "contact"
@@ -380,7 +407,8 @@ def rerank_results(
     results: List,
     query: str,
     query_classification: Dict,
-    person_detection: Dict
+    person_detection: Dict,
+    **kwargs
 ) -> List:
     """
     Rerank search results with diversity, quality, and relevance boosting.
@@ -401,6 +429,29 @@ def rerank_results(
     # Metadata for fuzzy matching suggestions
     fuzzy_matches = [] # List of (name, title, score)
     
+    # FIX 3: Enforce org-scope hard filter in leadership scoring
+    query_org = kwargs.get("query_org")
+    is_leadership_list = query_classification.get("query_type") == "leadership_list"
+    
+    if is_leadership_list and query_org:
+        filtered_results = []
+        for res in results:
+            meta = res.get("payload", {})
+            # Hard filter: drop chunks if org doesn't match query_org
+            chunk_org = meta.get("org") or meta.get("organization_context")
+            if chunk_org and normalize_text(chunk_org) != normalize_text(query_org):
+                logger.info(f"[RAG FILTER] Dropped chunk due to org mismatch: {chunk_org} != {query_org}")
+                continue
+            
+            # Refinement 3: Strict domain allow-list for leadership_list
+            allowed_domains = {"people", "about", "leadership"}
+            chunk_domain = meta.get("domain")
+            if chunk_domain and chunk_domain not in allowed_domains:
+                logger.info(f"[RAG FILTER] Dropped chunk due to domain restriction: {chunk_domain}")
+                continue
+                
+            filtered_results.append(res)
+        results = filtered_results
 
     # Pre-calculate person counts for gating logic
     person_counts = {}
@@ -473,8 +524,8 @@ def rerank_results(
             meta_title = metadata.get("person_title")
             text_lower = metadata.get("text", "").lower()
             
-            name_to_match = person_detection["person_name"].lower() if person_detection["person_name"] else None
-            role_to_match = person_detection["role_title"].lower() if person_detection["role_title"] else None
+            name_to_match = person_detection.get("person_name").lower() if person_detection.get("person_name") else None
+            role_to_match = person_detection.get("role_title").lower() if person_detection.get("role_title") else None
             
             # --- FIX 8: Organization Context Filtering --- 
             org_ctx = metadata.get("organization_context", "site_owner")
@@ -673,19 +724,19 @@ def rerank_results(
             boost *= (1.0 + 0.4 * kw_score) # Up to 40% boost for high overlap
             
         # 6. Fuzzy Name Match (New)
-        if person_detection["is_person_query"] and person_detection["person_name"]:
+        if person_detection.get("is_person_query") and person_detection.get("person_name"):
             # Check meta name
             meta_name = metadata.get("person_name")
             if meta_name:
-                f_score = fuzzy_match(person_detection["person_name"], meta_name)
+                f_score = fuzzy_match(person_detection.get("person_name"), meta_name)
                 if f_score > 0.85: # High confidence typo match
                     boost *= 1.2
             
             # Check role title fuzzily
-            if person_detection["role_title"]:
+            if person_detection.get("role_title"):
                 meta_title = metadata.get("person_title")
                 if meta_title:
-                    f_score = fuzzy_match(person_detection["role_title"], meta_title)
+                    f_score = fuzzy_match(person_detection.get("role_title"), meta_title)
                     if f_score > 0.85:
                         boost *= 1.15
             
@@ -1163,7 +1214,14 @@ class RAG:
         normalized_query = normalize_text(query)
         
         query_classification = classify_query(normalized_query)
-        person_detection = detect_person_query(normalized_query, prior_context=prior_context, known_people=known_people)
+        
+        # Pass query_type into detect_person_query via prior_context if not already there
+        merged_context = prior_context or {}
+        if "query_type" not in merged_context:
+            merged_context = merged_context.copy()
+            merged_context["query_type"] = query_classification["query_type"]
+            
+        person_detection = detect_person_query(normalized_query, prior_context=merged_context, known_people=known_people)
         
         logger.info(
             f"[RAG ANALYSIS] Type: {query_classification['query_type']}, Person: {person_detection['is_person_query']}",
@@ -1172,8 +1230,8 @@ class RAG:
                 "normalized_query": normalized_query
             }
         )
-        if person_detection['is_person_query']:
-            logger.info(f"[RAG PERSON] Name: {person_detection['person_name']}, Title: {person_detection['role_title']}")
+        if person_detection.get('is_person_query'):
+            logger.info(f"[RAG PERSON] Name: {person_detection.get('person_name')}, Title: {person_detection.get('role_title')}")
             
         # Step 2: Adjust Retrieval Parameters
         # Base settings
@@ -1204,11 +1262,15 @@ class RAG:
         # Add basic expansion if relevant
         if person_detection["person_name"]:
              expanded_queries.append(person_detection["person_name"])
-        elif person_detection.get("query_type") == "team_list":
-             # FIX 5: Fallback Keyword Search for Leadership
-             # Add specific role/title keywords to ensure we find potential profiles
              expanded_queries.append("leadership team management executives")
              expanded_queries.append("CEO CTO Founder Director President")
+        elif query_classification["query_type"] == "leadership_list":
+             # FIX 4: Role-first retrieval strategy
+             # Search for role + org
+             org_scope = prior_context.get("scope", "") if prior_context else ""
+             expanded_queries.append(f"directors and leadership at {org_scope}")
+             expanded_queries.append(f"management board executives {org_scope}")
+             expanded_queries.append(f"vp head director {org_scope}")
         elif query_classification["query_type"] == "factual":
              # Minimal expansion for factual queries
              pass
@@ -1262,7 +1324,8 @@ class RAG:
             all_results, 
             query, 
             query_classification, 
-            person_detection
+            person_detection,
+            query_org=prior_context.get("scope") if prior_context else None
         )
         
         # Step 6: Filter by Score & Final Top-K
@@ -1364,7 +1427,7 @@ class RAG:
         
         # FIX 3: LEADERSHIP/EXECUTIVE INTENTS ARE COMPLETE
         kw = query.lower()
-        if "leadership" in kw or "executive" in kw or "management team" in kw:
+        if "leadership" in kw or "executive" in kw or "management team" in kw or (query_classification and query_classification.get("query_type") == "leadership_list"):
              return {
                 "needs_followup": False,
                 "reason": "leadership_intent_complete",
@@ -2484,11 +2547,19 @@ Answer:"""
         except:
              normalized_query = query.lower().strip()
 
-        query_classification = classify_query(normalized_query)
-        person_detection = detect_person_query(normalized_query, prior_context=prior_context)
+        # Inject query_type and scope for detection and retrieval gating
+        merged_context = prior_context or {}
+        if "query_type" not in merged_context or (conversation_state and conversation_state.get("scope") and "scope" not in merged_context):
+            merged_context = merged_context.copy()
+            if "query_type" not in merged_context:
+                merged_context["query_type"] = query_classification["query_type"]
+            if conversation_state and conversation_state.get("scope") and "scope" not in merged_context:
+                merged_context["scope"] = conversation_state.get("scope")
+            
+        person_detection = detect_person_query(normalized_query, prior_context=merged_context)
         query_name = person_detection.get("person_name")
 
-        chunks_with_sources = self.retrieve_chunks(query, top_k=top_k, collection_id=collection_id, prior_context=prior_context)
+        chunks_with_sources = self.retrieve_chunks(query, top_k=top_k, collection_id=collection_id, prior_context=merged_context)
         
         # Step 2: Enhanced follow-up detection
         followup_result = self.needs_followup(
@@ -2497,7 +2568,7 @@ Answer:"""
             conversation_history=conversation_history,
             query_classification=query_classification,
             person_detection=person_detection,
-            conversation_state=conversation_state # NEW
+            conversation_state=conversation_state 
         )
         
         # DETERMINE ANSWER MODE (Fix 4)
@@ -2569,6 +2640,13 @@ Answer:"""
         
         # Fallback to standard generic response if chunks are missing but no follow-up triggered
         if not chunks_with_sources or answer_mode == AnswerMode.NO_DATA_CONFIRMED:
+            if query_classification.get("query_type") == "leadership_list":
+                 org_name = conversation_state.get("scope", "the organization") if conversation_state else "the organization"
+                 return {
+                     "answer": f"I couldn’t find an explicit list of directors on the {org_name} site, but I can help you search for specific roles or other information.",
+                     "is_generic": True,
+                     "answer_mode": AnswerMode.PARTIAL_TRANSPARENT
+                 }
             return {
                 "answer": f"I don't have any information about {query_name or 'this person'} in the knowledge base." if person_detection.get("is_person_query") else "I wasn't able to retrieve a confident answer, please refine your question.",
                 "is_generic": True,
