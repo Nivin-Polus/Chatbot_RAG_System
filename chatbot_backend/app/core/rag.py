@@ -53,9 +53,64 @@ class AnswerMode:
 # RAG SEARCH HELPERS
 # ============================================
 
+
 def _estimate_tokens(text: str) -> int:
     """Estimate token count (~4 chars per token for English)."""
     return len(text) // 4 if text else 0
+
+
+# ============================================
+# ORG & LEADERSHIP HELPERS (FIX 1, 3, 6)
+# ============================================
+
+ALLOWED_LEADERSHIP_TITLES = {
+    "director",
+    "managing director",
+    "board member",
+    "founder",
+    "co-founder",
+    "ceo",
+    "cto", 
+    "cfo",
+    "president",
+    "vice president",
+    "vp",
+    "chairman",
+    "head",
+    "chief",
+    "exec"
+}
+
+def mentions_org(chunk: Dict, target_org: str) -> bool:
+    """
+    FIX 3: Strong mentions_org() detector.
+    Returns True if the chunk is explicitly about the target_org.
+    """
+    payload = chunk.get("payload", {})
+    text = (payload.get("text") or "").lower()
+    
+    # Normalize target
+    t_org = target_org.lower()
+    
+    # Check metadata explicitly
+    if payload.get("org") == t_org:
+        return True
+    
+    # Check domain/url/source
+    domain = payload.get("domain", "")
+    url = payload.get("url", "")
+    source = payload.get("source", "")
+    
+    if t_org in domain: return True
+    if f"/{t_org}" in url: return True
+    if source in {f"{t_org}_site", f"{t_org}_pdf"}: return True
+    
+    # Check text content
+    if t_org in text:
+        return True
+        
+    return False
+
 
 
 # ============================================
@@ -412,6 +467,7 @@ def rerank_results(
 ) -> List:
     """
     Rerank search results with diversity, quality, and relevance boosting.
+    Enhanced with Fix 2, 4, 5, 6, 7, 8 (Org-Aware Logic).
     """
     query_lower = query.lower()
     reranked = []
@@ -453,6 +509,10 @@ def rerank_results(
             filtered_results.append(res)
         results = filtered_results
 
+    # FIX 1 & 8: Extract locked state
+    rag_state = kwargs.get("rag_state", {})
+    target_org = rag_state.get("target_org", "polus")
+    
     # Pre-calculate person counts for gating logic
     person_counts = {}
     for result in results:
@@ -461,7 +521,7 @@ def rerank_results(
         if p_name:
              person_counts[p_name] = person_counts.get(p_name, 0) + 1
 
-    # --- FIX 1 & 2: Decouple Existence from Leadership (Early Detection) ---
+    # Check existence
     query_name = person_detection.get("person_name")
     person_detected = False
     if query_name:
@@ -472,241 +532,100 @@ def rerank_results(
             if p_name and query_name_norm in normalize_text(p_name):
                 person_detected = True
                 break
-            # Also check text snippet for name presence
-            if query_name_norm in normalize_text(meta.get("text", "")):
-                person_detected = True
-                break
-
+    
     leadership_detected = False
-    person_presence = {
-        "found": person_detected,
-        "has_title": False,
-        "has_leadership_keyword": False,
-        "source_domains": []
-    }
-
+    
     for result in results:
         base_score = result.get("score", 0)
         boost = 1.0
-        # Handle payload access (might be dict or object depending on vector store)
         metadata = result.get("payload", {})
         
-        # Track domains for person_presence
-        if person_detected:
-            domain = metadata.get("domain", "general")
-            if domain not in person_presence["source_domains"]:
-                person_presence["source_domains"].append(domain)
-            if metadata.get("person_title"):
-                person_presence["has_title"] = True
+        name = metadata.get("person_name", "Unknown")
+        title = metadata.get("person_title", "")
+        
+        # --- FIX 2: Redefine External Org Logic ---
+        detected_org = metadata.get("org") or metadata.get("organization_context")
+        
+        is_internal = False
+        is_external = False
+        
+        # Rule: Polus present -> ALWAYS internal
+        if mentions_org(result, target_org):
+            is_internal = True
+            is_external = False
+        # Other org mentioned and NOT Polus -> external
+        elif detected_org and normalize_text(detected_org) != target_org:
+            is_internal = False
+            is_external = True
+        else:
+            # Unknown org != external, it's just unknown/neutral
+            is_internal = False
+            is_external = False
+            
+        # FIX 8: Debug Logging
+        if rag_state.get("intent") == "leadership_list":
+            logger.info(
+                "[ORG DEBUG] name=%s | title=%s | polus=%s | detected_org=%s | external=%s",
+                name, title, 
+                is_internal, 
+                detected_org, 
+                is_external
+            )
 
-        # --- BOOSTING LOGIC ---
+        # --- FIX 4 & 5: Org-Aware Boosting & Demotion ---
+        section = "secondary" # Default to secondary (Fix 7)
+        
+        if person_detection.get("query_type") == "leadership_list" or person_detection.get("query_type") == "team_list":
+            
+            # Check Title Validity (Fix 6)
+            title_valid = False
+            if title:
+                t_low = title.lower()
+                if any(t in t_low for t in ALLOWED_LEADERSHIP_TITLES):
+                    title_valid = True
+            
+            if title_valid:
+                if is_internal:
+                    # Polus + Allowed Title -> Strong Boost + Primary
+                    boost *= 2.0
+                    if "director" in title.lower() or "founder" in title.lower():
+                        boost *= 1.2 # Extra for top brass
+                        
+                    section = "primary"
+                    leadership_detected = True
+                    
+                elif is_external:
+                    # Fix 5: Do NOT skip, demote heavily
+                    boost *= 0.1
+                    section = "secondary"
+                    logger.info(f"Demoted external leader: {name}")
+                
+                else:
+                    # Unknown Org + Allowed Title -> Neutral/Slight Demotion
+                    boost *= 0.8
+                    section = "secondary"
+            else:
+                # Invalid title for leadership list -> Demote
+                boost *= 0.5
+                section = "secondary"
+                
+        # --- Standard Relevance Logic (Preserved) ---
         
         # 1. Content Quality
         quality = metadata.get("content_quality_score", 0.7)
-        boost *= (0.8 + 0.2 * quality) # Mild boost
+        boost *= (0.8 + 0.2 * quality)
         
-        # --- P1 FIX: History vs Admin Domain Mismatch ---
-        chunk_domain = metadata.get("domain", "general")
-        q_type = query_classification.get("query_type")
+        # 2. Person Name Exact Match (Always boost if looking for person)
+        if person_detection.get("is_person_query") and query_name:
+             if name and normalize_text(query_name) in normalize_text(name):
+                 boost *= 3.0
+                 if metadata.get("chunk_type") == "person_profile":
+                     boost *= 1.5
+                     if person_detection.get("query_type") == "specific_person":
+                         section = "primary"
         
-        if q_type == "history" and chunk_domain == "admin":
-            boost *= 0.6 # Penetize admin docs when user wants history/story
-            logger.info(f"[RAG BOOST] Penalized admin content for history query: {metadata.get('file_name')}")
-            
-        # Penalize admin pages for general exploratory queries to avoid dry policy docs dominating
-        if q_type == "exploratory" and chunk_domain == "admin":
-             boost *= 0.9
-        
-        # 2. Person Relevance (High Priority)
-        if person_detection["is_person_query"]:
-            is_profile = metadata.get("chunk_type") == "person_profile"
-            meta_name = metadata.get("person_name")
-            meta_title = metadata.get("person_title")
-            text_lower = metadata.get("text", "").lower()
-            
-            name_to_match = person_detection.get("person_name").lower() if person_detection.get("person_name") else None
-            role_to_match = person_detection.get("role_title").lower() if person_detection.get("role_title") else None
-            
-            # --- FIX 8: Organization Context Filtering --- 
-            org_ctx = metadata.get("organization_context", "site_owner")
-            p_type = metadata.get("person_type", "internal")
-            
-            # If "who is" leadership query and no external org mentioned, penalize external profiles
-            if person_detection.get("query_type") == "team_list" or (name_to_match and not has_external_org):
-                if org_ctx == "external" or p_type == "external_reference":
-                    boost *= 0.1 # Hide Sarah Chen etc. from generic team queries
-            
-            # --- FIX 4: Role-Scoped Retrieval ---
-            if meta_title:
-                title_lower = meta_title.lower()
-                # Internal role keywords
-                internal_roles = ["ceo", "founder", "director", "manager", "head", "lead", "hr", "vp", "president"]
-                if any(ir in title_lower for ir in internal_roles):
-                    # Deprioritize if it contains "of [Another Company]"
-                    if "of " in title_lower and not any(kw in title_lower for kw in ["polus", "solutions"]):
-                       boost *= 0.7
-                    else:
-                       boost *= 1.2 # Prioritize internal roles
-                elif p_type == "external_reference":
-                    boost *= 0.8
-            
-            # Update quality from metadata
-            conf_score = metadata.get("confidence_score")
-            if conf_score is not None:
-                boost *= (0.7 + 0.3 * conf_score) # Penalize low confidence (Fix 8)
-
-            # Name Match (Metadata or Text)
-            if name_to_match:
-                # Use normalized soft matching
-                norm_name_to_match = normalize_text(name_to_match)
-                norm_meta_name = normalize_text(meta_name) if meta_name else ""
-                norm_text = normalize_text(metadata.get("text", ""))
-                
-                if (meta_name and norm_name_to_match in norm_meta_name) or (norm_name_to_match in norm_text):
-                    boost *= 3.0  # Massive boost for name match
-                    if is_profile:
-                        boost *= 1.5  # Extra boost if it's their profile card
-                elif meta_name:
-                    # Fuzzy match fallback for typos (Remya -> Ramya)
-                    f_score = fuzzy_match(name_to_match, meta_name)
-                    if f_score > 0.75:
-                        boost *= 3.0 # Treat high fuzzy match as exact match
-                        if is_profile:
-                            boost *= 1.5
-            
-            # Title Match (Metadata or Text)
-            if role_to_match:
-                if (meta_title and role_to_match in meta_title.lower()) or (role_to_match in text_lower):
-                    boost *= 1.5
-                    
-            # Profile Boost
-            if is_profile:
-                # Higher boost for generic team queries to bubble up profiles
-                if person_detection.get("query_type") == "team_list":
-                    boost *= 2.0
-                else:
-                    boost *= 1.2
-
-            # --- NEW: AI Leadership Classification ---
-            # Apply only for leadership/team queries OR if we found a potential leader
-            is_leadership_query = person_detection.get("query_type") == "team_list"
-            
-            non_leadership_roles = ["associate", "manager", "lead", "intern", "analyst", "hr", "consultant"]
-            
-            # Use 0.0 default (Fix 4)
-            ai_conf = 0.0
-            ai_multiplier = 1.0
-            
-            if (is_leadership_query or role_to_match or is_profile) and meta_name:
-                from app.services.leadership_classifier import leadership_classifier
-                
-                # Check Explicit Leadership Boost (Deterministic)
-                # If page_type is profile AND title is clearly C-suite
-                page_type_meta = metadata.get("page_type", {})
-                # Handle if page_type is dict or str (legacy)
-                p_type_str = page_type_meta.get("type") if isinstance(page_type_meta, dict) else str(page_type_meta)
-                
-                explicit_leadership_titles = ["ceo", "chief executive", "founder", "president", "managing director", "chairman"]
-                is_explicit_leader = False
-                if meta_title:
-                   t_low = meta_title.lower()
-                   # Exclude "assistant to ceo" cases
-                   if any(et in t_low for et in explicit_leadership_titles) and "assistant" not in t_low:
-                       is_explicit_leader = True
-
-                ai_input = {
-                    "person_name": meta_name,
-                    "person_title": meta_title or "",
-                    "page_type": p_type_str,
-                    "source_url": metadata.get("url", ""),
-                    "text_snippet": metadata.get("text", "")[:300], # First 300 chars
-                    "chunk_count": person_counts.get(meta_name, 1)
-                }
-                
-                # Fix 1: Strict Gating
-                should_run = True
-                skip_reason = ""
-                
-                if not meta_title:
-                    should_run = False
-                    skip_reason = "no_title"
-                elif p_type_str == "job_posting":
-                    should_run = False
-                    skip_reason = "job_posting"
-                elif not any(k in meta_title.lower() for k in ["ceo", "founder", "director", "head", "md", "chief", "president", "vp", "partner"]):
-                    # Strict keyword gate
-                     should_run = False
-                     skip_reason = "no_leadership_keyword"
-                
-                if should_run:
-                    # Call Classifier
-                    ai_result = leadership_classifier.classify_leadership_role(ai_input)
-                    ai_conf = ai_result.get("confidence", 0.0)
-                    
-                    # Fix 2: Enforce Organization Match (CRITICAL)
-                    # If the chunk explicitly belongs to another org (via external reference type or context), kill confidence
-                    # (Assuming 'organization_context' metadata field exists from previous steps)
-                    org_context = metadata.get("organization_context", "site_owner") # site_owner means internal
-                    if org_context == "external":
-                        logger.info(f"AI Leadership Skipped: reason=external_org | Name: {meta_name}")
-                        ai_conf = 0.0
-                    
-                    # Apply Explicit Boost Overlay (Refinement 4)
-                    if is_explicit_leader and p_type_str in ["person_profile", "team_page"]:
-                        ai_conf = max(ai_conf, 0.9)
-                        
-                    # Fix 3: Hard-cap non-leadership roles
-                    # AI is not allowed to argue with org hierarchy
-                    if meta_title and any(r in meta_title.lower() for r in non_leadership_roles):
-                        # Allow explicit leader override ONLY if sure (e.g. "Senior Manager" might get small boost, but capped at 0.3 if strict)
-                        # User said: leadership_confidence = min(leadership_confidence, 0.3)
-                        ai_conf = min(ai_conf, 0.3)
-                    
-                    # Apply AI Multiplier
-                    # Logic: If high confidence (>= 0.7), boost. If low (< 0.3), demote.
-                    if ai_conf > 0.0:
-                        # Map 0.0-1.2 to multiplier
-                        # 0.2 -> 0.5 (Demote)
-                        # 0.5 -> 1.0 (Neutral)
-                        # 0.9 -> 2.0 (Boost)
-                        # 1.0+ -> 3.0 (Strong Boost)
-                        
-                        if ai_conf >= 0.7:
-                            leadership_detected = True
-                        
-                        if ai_conf < 0.3:
-                             ai_multiplier = 0.5
-                        elif ai_conf < 0.6:
-                             ai_multiplier = 0.8
-                        elif ai_conf < 0.8:
-                             ai_multiplier = 1.2
-                        elif ai_conf < 0.95:
-                             ai_multiplier = 1.5
-                        else:
-                             ai_multiplier = 2.0
-                             
-                        # Hard cap for non-leadership roles (Safety)
-                        if not ai_result.get("is_leadership") and not is_explicit_leader:
-                            ai_multiplier = min(ai_multiplier, 1.0)
-                        
-                        boost *= ai_multiplier
-                        
-                        # LOGGING (Step 5 - Fixed)
-                        logger.info(f"AI Leadership Boost: {meta_name} | Role: {meta_title} | AI Conf: {ai_conf} | IsExplicit: {is_explicit_leader} | Multiplier: {ai_multiplier}")
-                    else:
-                         # Log if we ran AI but it returned 0 confidence
-                         logger.info(f"AI Leadership Result 0.0: {meta_name}")
-
-                else:
-                    # Fix 5: Enhanced Logging for Skips
-                    logger.info(f"AI Leadership Skipped: reason={skip_reason} | Name: {meta_name}")
-                    if skip_reason == "no_leadership_keyword":
-                        person_presence["has_leadership_keyword"] = False
-                    else:
-                        person_presence["has_leadership_keyword"] = True # It had it but failed other checks or wasn't run
-                
         # 3. Procedural Relevance
-        if query_classification["query_type"] == "procedural":
+        if query_classification.get("query_type") == "procedural":
             if metadata.get("chunk_type") == "procedural":
                 boost *= 1.3
                 
@@ -718,12 +637,12 @@ def rerank_results(
             elif age > 365:
                 boost *= 0.95
                 
-        # 5. Keyword Overlap (New)
+        # 5. Keyword Overlap
         kw_score = get_keyword_score(metadata.get("text", ""), query)
         if kw_score > 0:
             boost *= (1.0 + 0.4 * kw_score) # Up to 40% boost for high overlap
             
-        # 6. Fuzzy Name Match (New)
+        # 6. Fuzzy Name Match
         if person_detection.get("is_person_query") and person_detection.get("person_name"):
             # Check meta name
             meta_name = metadata.get("person_name")
@@ -750,6 +669,37 @@ def rerank_results(
                         "score": f_score
                     })
 
+        # 7. AI Classifier Integration (Fallthrough for non-explicit cases)
+        # Only run if we haven't already decided it's external/internal via heuristic
+        # If leadership_detected is True, we already boosted it.
+        
+        if not leadership_detected and not is_external:
+             is_leadership_query = person_detection.get("query_type") == "team_list" or person_detection.get("query_type") == "leadership_list"
+             if (is_leadership_query or person_detection.get("role_title")) and name != "Unknown":
+                 from app.services.leadership_classifier import leadership_classifier
+                 
+                 # Prepare input
+                 page_type_meta = metadata.get("page_type", {})
+                 p_type_str = page_type_meta.get("type") if isinstance(page_type_meta, dict) else str(page_type_meta)
+                 
+                 ai_input = {
+                    "person_name": name,
+                    "person_title": title or "",
+                    "page_type": p_type_str,
+                    "source_url": metadata.get("url", ""),
+                    "text_snippet": metadata.get("text", "")[:300],
+                    "chunk_count": person_counts.get(name, 1)
+                 }
+                 
+                 # Strict Gating
+                 if title and "director" in title.lower(): # Minimal gate
+                     ai_result = leadership_classifier.classify_leadership_role(ai_input)
+                     ai_conf = ai_result.get("confidence", 0.0)
+                     
+                     if ai_conf > 0.8:
+                         boost *= 1.5
+                         logger.info(f"AI Boosted Legacy: {name} ({ai_conf})")
+
         # --- DIVERSITY & PENALTY LOGIC ---
         
         # 1. Duplicate URL Penalty
@@ -767,7 +717,7 @@ def rerank_results(
             boost *= 0.8
             
         # 3. Person Diversity
-        if person_detection["is_person_query"] and metadata.get("chunk_type") == "person_profile":
+        if person_detection.get("is_person_query") and metadata.get("chunk_type") == "person_profile":
              p_name = metadata.get("person_name", "unknown")
              p_count = seen_people.get(p_name, 0)
              seen_people[p_name] = p_count + 1
@@ -782,18 +732,17 @@ def rerank_results(
                  
         final_score = base_score * boost
         
-        # Update result with new info
         result["score"] = final_score
-        result["original_score"] = base_score
         result["boost_factor"] = round(boost, 3)
-        reranked.append(result)
+        result["section"] = section # FIX 7
+        result["is_internal"] = is_internal
+        result["is_external"] = is_external
         
-    # Sort and return
+        reranked.append(result)
+
+    # Sort
     reranked.sort(key=lambda x: x["score"], reverse=True)
     
-    # Store detected signals for AnswerMode selection later
-    # We can attach them to the result list or return as a tuple
-    # For now, let's attach to the results if list is not empty
     if reranked:
         reranked[0]["person_detected"] = person_detected
         reranked[0]["leadership_detected"] = leadership_detected
@@ -1215,6 +1164,16 @@ class RAG:
         
         query_classification = classify_query(normalized_query)
         
+        # FIX 1: Lock target organisation early
+        # Currently hardcoded to 'polus' as per instructions ("Polus present -> ALWAYS internal")
+        target_org = "polus"
+        rag_state = {
+            "intent": query_classification.get("query_type"),
+            "target_org": target_org,
+            "target_org_confidence": 0.95
+        }
+
+        
         # Pass query_type into detect_person_query via prior_context if not already there
         merged_context = prior_context or {}
         if "query_type" not in merged_context:
@@ -1325,7 +1284,8 @@ class RAG:
             query, 
             query_classification, 
             person_detection,
-            query_org=prior_context.get("scope") if prior_context else None
+            query_org=prior_context.get("scope") if prior_context else None,
+            rag_state=rag_state  # Pass the locked org state
         )
         
         # Step 6: Filter by Score & Final Top-K
@@ -2546,6 +2506,9 @@ Answer:"""
              normalized_query = normalize_text(query)
         except:
              normalized_query = query.lower().strip()
+
+        # FIX: Define query_classification before using it
+        query_classification = classify_query(normalized_query)
 
         # Inject query_type and scope for detection and retrieval gating
         merged_context = prior_context or {}
