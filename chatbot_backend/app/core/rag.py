@@ -38,6 +38,22 @@ def _get_max_context_tokens():
 MAX_VERBATIM_MESSAGES = 20   # Keep last 10 Q&A pairs (20 messages) verbatim
 SUMMARY_TRIGGER_THRESHOLD = 20  # Start summarizing when history exceeds this count
 
+# Fix 4: Hard Caps for Intent-based context
+MAX_CONTEXT_TOKENS_BY_INTENT = {
+    "person": 600,      # Specific person lookup
+    "person_profile": 600,
+    "history": 3000,
+    "policy": 2000,
+    "admin": 2000,
+    "default": 4000
+}
+
+MAX_CHUNKS_BY_INTENT = {
+    "person": 2,
+    "person_profile": 2,
+    "default": 10
+}
+
 
 # ============================================
 # CONSTANTS & ENUMS
@@ -380,7 +396,8 @@ def rerank_results(
     results: List,
     query: str,
     query_classification: Dict,
-    person_detection: Dict
+    person_detection: Dict,
+    skip_leadership_scoring: bool = False
 ) -> List:
     """
     Rerank search results with diversity, quality, and relevance boosting.
@@ -546,7 +563,11 @@ def rerank_results(
             ai_conf = 0.0
             ai_multiplier = 1.0
             
-            if (is_leadership_query or role_to_match or is_profile) and meta_name:
+            # Fix 3: Short-circuit leadership logic
+            if skip_leadership_scoring:
+                if meta_name:
+                    logger.debug(f"Skipping leadership scoring for {meta_name} (short-circuit)")
+            elif (is_leadership_query or role_to_match or is_profile) and meta_name:
                 from app.services.leadership_classifier import leadership_classifier
                 
                 # Check Explicit Leadership Boost (Deterministic)
@@ -965,6 +986,11 @@ class RAG:
         # Person cache for fuzzy matching
         self.known_person_cache = []
         self.last_person_fetch_time = 0
+        self._cache_warming = False
+        self._cache_ready = False
+
+        # Fix 5: Resolution Cache (Short TTL)
+        self._resolution_cache = {} # key -> (answer, answer_mode, person_presence, timestamp)
 
         # AWS Bedrock setup (lazy init)
         self.aws_region = getattr(settings, "AWS_REGION", "us-east-1")
@@ -1088,36 +1114,55 @@ class RAG:
         
         return {"answer": cleaned_response, "is_generic": is_generic}
 
-    def _fetch_known_people(self) -> List[str]:
-        """Fetch all known person names from vector store with caching."""
-        import time
-        current_time = time.time()
+    async def refresh_person_cache_async(self):
+        """Asynchronously refresh the known person cache."""
+        if self._cache_warming:
+            return
         
-        # Cache for 1 hour (3600 seconds)
-        if hasattr(self, "known_person_cache") and self.known_person_cache and (current_time - getattr(self, "last_person_fetch_time", 0) < 3600):
-            return self.known_person_cache
-            
+        self._cache_warming = True
         try:
-            # Fetch from vector store if initialized
-            if not self.vector_store:
-                return []
+            # We run the synchronous fetch in a thread pool to avoid blocking
+            import asyncio
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self.refresh_person_cache)
+        finally:
+            self._cache_warming = False
 
+    def refresh_person_cache(self):
+        """Fetch all known person names from vector store and update cache."""
+        try:
+            if not self.vector_store:
+                return
+            
+            logger.info("Refreshing known person cache...")
             names = self.vector_store.get_all_unique_values(
                 field="person_name", 
                 filter_key="chunk_type", 
                 filter_value="person_profile"
             )
             
-            # Filter valid names
             valid_names = [n for n in names if n and isinstance(n, str) and len(n.split()) >= 1]
             
             self.known_person_cache = valid_names
-            self.last_person_fetch_time = current_time
+            import time
+            self.last_person_fetch_time = time.time()
+            self._cache_ready = True
             logger.info(f"Refreshed known person cache: {len(valid_names)} people found")
-            return valid_names
+            
+            # Fix 5: Invalidate resolution cache on crawl refresh
+            self._resolution_cache = {}
+            
         except Exception as e:
-            logger.error(f"Failed to fetch known people: {e}")
-            return getattr(self, "known_person_cache", [])
+            logger.error(f"Failed to refresh known people: {e}")
+
+    def _fetch_known_people(self) -> List[str]:
+        """Read-only access to known person cache. Triggers async refresh if empty."""
+        if not self.known_person_cache and not self._cache_warming:
+            # Trigger async refresh but don't block
+            import threading
+            threading.Thread(target=self.refresh_person_cache, daemon=True).start()
+            
+        return self.known_person_cache
 
     def get_prompt_for_collection(self, collection_id: str) -> Optional[SystemPrompt]:
         """Get the active prompt for a specific collection from database"""
@@ -1145,13 +1190,10 @@ class RAG:
             return None
 
     def retrieve_chunks(self, query: str, top_k: int = 5, collection_id: Optional[str] = None, prior_context: Optional[Dict] = None) -> List[Dict]:
-        """Search vector DB and return top matching chunks with metadata.
+        """Search vector DB and return top matching chunks with metadata."""
+        import time
+        t_start = time.time()
         
-        Enhancements:
-        - Query Classification & Person Detection
-        - Metadata Filtering
-        - Advanced Reranking & Diversity
-        """
         # Handle None collection_id properly
         collection_id_str = collection_id if collection_id is not None else None
         
@@ -1164,6 +1206,8 @@ class RAG:
         
         query_classification = classify_query(normalized_query)
         person_detection = detect_person_query(normalized_query, prior_context=prior_context, known_people=known_people)
+        
+        t_analysis = time.time()
         
         logger.info(
             f"[RAG ANALYSIS] Type: {query_classification['query_type']}, Person: {person_detection['is_person_query']}",
@@ -1197,73 +1241,79 @@ class RAG:
             soft=True
         )
         
-        # Step 4: Perform Search (with Mutation/Expansion)
-        # Keep existing expansion logic but simplified
-        expanded_queries = [query]
-        
-        # Add basic expansion if relevant
-        if person_detection["person_name"]:
-             expanded_queries.append(person_detection["person_name"])
-        elif person_detection.get("query_type") == "team_list":
-             # FIX 5: Fallback Keyword Search for Leadership
-             # Add specific role/title keywords to ensure we find potential profiles
-             expanded_queries.append("leadership team management executives")
-             expanded_queries.append("CEO CTO Founder Director President")
-        elif query_classification["query_type"] == "factual":
-             # Minimal expansion for factual queries
-             pass
-        else:
-             # Basic keyword expansion for other types
-             if len(query.split()) < 4:
-                 expanded_queries.append(query + " details")
-        
-        # Limit expansions
-        expanded_queries = expanded_queries[:5]
-        
-        all_results = []
-        seen_ids = set()
-        
-        for q in expanded_queries:
-            # We fetch more results than needed to allow for reranking
-            # IMPORTANT: Reverting to non-filtered vector search if filtered search fails/timeouts
-            # Or just doing Python-side filtering for robustness (since it worked before)
+        # Step 4: Perform Search (with Mutation/Expansion) - Fix 2 Refinement
+        def run_single_query(q: str):
             try:
-                # First try with basic collection filter only (lightest)
-                results = self.vector_store.search(
+                res = self.vector_store.search(
                     q, 
                     top_k=search_top_k * 2, 
                     collection_id=collection_id_str
                 )
             except Exception as e:
-                logger.warning(f"[RAG SEARCH] Filtered search failed: {e}. Falling back to raw search.")
-                results = self.vector_store.search(q, top_k=search_top_k * 4)
+                logger.warning(f"[RAG SEARCH] Search failed for '{q}': {e}")
+                res = self.vector_store.search(q, top_k=search_top_k * 4)
             
-            for r in results:
+            for r in res:
                 payload = r.get("payload", {})
-                
-                # Precise Python-side collection filtering for safety
                 if collection_id_str:
                     p_coll = payload.get("collection_id")
                     if not p_coll or str(p_coll) != str(collection_id_str):
                         continue
-
-                # Deduplicate by ID if available, otherwise by text hash
                 res_id = r.get("id") or hash(payload.get("text", ""))
-                
                 if res_id not in seen_ids:
                     seen_ids.add(res_id)
                     all_results.append(r)
-                    
-        logger.info(f"[RAG RETRIEVE] Retrieved {len(all_results)} raw results after Python filtering")
+            return res
+
+        seen_ids = set()
+        all_results = []
+        
+        # 1. First search: Original/Canonical
+        initial_results = run_single_query(query)
+        best_initial_score = initial_results[0].get("score", 0) if initial_results else 0
+        
+        # 2. Threshold Decision
+        if best_initial_score > 0.85:
+            logger.info(f"[RAG SEARCH] Strong match found ({best_initial_score:.3f}). Skipping expansions.")
+        else:
+            # Plan expansions
+            fallback_queries = []
+            if person_detection["person_name"]:
+                fallback_queries.append(person_detection["person_name"])
+            elif person_detection.get("query_type") == "team_list":
+                fallback_queries.extend(["leadership team management executives", "CEO CTO Founder Director President"])
+            else:
+                 if len(query.split()) < 4:
+                     fallback_queries.append(query + " details")
+            
+            if best_initial_score > 0.65:
+                logger.info(f"[RAG SEARCH] Moderate match found ({best_initial_score:.3f}). Adding 1 fallback.")
+                if fallback_queries:
+                    run_single_query(fallback_queries[0])
+            else:
+                logger.info(f"[RAG SEARCH] Weak match ({best_initial_score:.3f}). Full expansion.")
+                for fallback in fallback_queries[:4]:
+                    run_single_query(fallback)
+
+        t_retrieval = time.time()
+        logger.info(f"[RAG RETRIEVE] Retrieved {len(all_results)} raw results (Time: {t_retrieval - t_analysis:.3f}s)")
 
         # Step 5: Rerank Results
-        # Reranking logic is already robust (handles missing metadata)
+        skip_leadership = False
+        if person_detection["is_person_query"] and person_detection["intent"] in ["bio", "contact", "experience"]:
+            if not any(kw in query.lower() for kw in ["leadership", "management", "team", "executive", "board"]):
+                skip_leadership = True
+                logger.info(f"[RAG RERANK] Short-circuiting leadership scoring for query: {query}")
+
         reranked_results = rerank_results(
             all_results, 
             query, 
             query_classification, 
-            person_detection
+            person_detection,
+            skip_leadership_scoring=skip_leadership
         )
+        t_rerank = time.time()
+        logger.info(f"[RAG RERANK] Reranking complete (Time: {t_rerank - t_retrieval:.3f}s)")
         
         # Step 6: Filter by Score & Final Top-K
         final_results = []
@@ -2478,8 +2528,6 @@ Answer:"""
         
         # Step 1: Analyze Query to prep for retrieval and follow-up
         try:
-             # normalized_query might be redundant if retrieve_chunks does it, 
-             # but we need it for pre-retrieval logic
              normalized_query = normalize_text(query)
         except:
              normalized_query = query.lower().strip()
@@ -2487,193 +2535,237 @@ Answer:"""
         query_classification = classify_query(normalized_query)
         person_detection = detect_person_query(normalized_query, prior_context=prior_context)
         query_name = person_detection.get("person_name")
+        
+        # Fix 5: Resolution Cache Lookup
+        cache_key = None
+        if person_detection["is_person_query"] and query_name:
+            import time
+            # Normalize key
+            norm_name = normalize_text(query_name)
+            # Use scope/org for key
+            org_scope = conversation_state.get("scope", "") if conversation_state else ""
+            cache_key = f"person:{org_scope}:{norm_name}"
+            
+            if cache_key in self._resolution_cache:
+                ans, mode, presence, ts = self._resolution_cache[cache_key]
+                ttl = 600 if org_scope else 300 # 10m if scope, 5m if not
+                if time.time() - ts < ttl:
+                    logger.info(f"[CACHE HIT] Returning cached profile for {query_name}")
+                    return {
+                        "answer": ans,
+                        "is_generic": False,
+                        "answer_mode": mode,
+                        "person_presence": presence,
+                        "cached": True
+                    }
 
         chunks_with_sources = self.retrieve_chunks(query, top_k=top_k, collection_id=collection_id, prior_context=prior_context)
-        
-        # Step 2: Enhanced follow-up detection
-        followup_result = self.needs_followup(
-            query=query,
-            chunks=chunks_with_sources,
-            conversation_history=conversation_history,
-            query_classification=query_classification,
-            person_detection=person_detection,
-            conversation_state=conversation_state # NEW
-        )
-        
-        # DETERMINE ANSWER MODE (Fix 4)
-        person_detected = False
-        leadership_detected = False
-        person_presence = {}
-        
-        if chunks_with_sources:
-             # Retrieve signals from reranker (stored in the first chunk's metadata)
-             first_chunk = chunks_with_sources[0]
-             meta = first_chunk.get("metadata", {})
-             
-             # Use propagated flags from reranker
-             person_detected = meta.get("person_detected", False)
-             leadership_detected = meta.get("leadership_detected", False)
-             person_presence = meta.get("person_presence", {})
-             
-             # Fallback for person_detected (only if False but we have a match)
-             if not person_detected and query_name:
-                 query_name_norm = normalize_text(query_name)
-                 for chunk in chunks_with_sources:
-                     payload = chunk.get("payload", {})
-                     p_name = payload.get("person_name")
-                     if p_name and query_name_norm in normalize_text(p_name):
-                         person_detected = True
-                         break
-
-        answer_mode = AnswerMode.FULL
-        if followup_result.get("reason") == "domain_mismatch_partial":
-            answer_mode = AnswerMode.PARTIAL_TRANSPARENT
-        elif followup_result.get("needs_followup"):
-            answer_mode = AnswerMode.FOLLOWUP
-        elif person_detected and not leadership_detected:
-            answer_mode = AnswerMode.PARTIAL_TRANSPARENT
-        elif not person_detected and person_detection.get("is_person_query"):
-            answer_mode = AnswerMode.NO_DATA_CONFIRMED
             
-        logger.info(f"[ANSWER_MODE] Selected mode: {answer_mode} (Person: {person_detected}, Leader: {leadership_detected})")
-        
-        # Step 3: If follow-up needed, generate questions
-        # Enforce confidence threshold
-        FOLLOWUP_CONFIDENCE_THRESHOLD = getattr(settings, "RAG_FOLLOWUP_CONFIDENCE_THRESHOLD", 0.6)
-        
-        if answer_mode == AnswerMode.FOLLOWUP and followup_result["confidence"] >= FOLLOWUP_CONFIDENCE_THRESHOLD:
-            followup_questions = self.generate_followup_questions(
+            # Step 2: Enhanced follow-up detection
+            followup_result = self.needs_followup(
                 query=query,
-                followup_result=followup_result,
                 chunks=chunks_with_sources,
-                conversation_history=conversation_history
+                conversation_history=conversation_history,
+                query_classification=query_classification,
+                person_detection=person_detection,
+                conversation_state=conversation_state # NEW
             )
             
-            # Format follow-up response
-            followup_text = "\n\n".join(followup_questions)
+            # DETERMINE ANSWER MODE (Fix 4)
+            person_detected = False
+            leadership_detected = False
+            person_presence = {}
             
-            return {
-                "answer": followup_text,
-                "is_followup": True,
-                "is_generic": False, # Technically it's a specific follow-up
-                "item_mode": AnswerMode.FOLLOWUP, # P5 FIX
-                "answer_mode": AnswerMode.FOLLOWUP,
-                "sources": [],
-                "chunk_count": 0,
-                "followup_reason": followup_result["reason"],
-                "followup_confidence": followup_result["confidence"],
-                "suggested_topics": followup_result.get("suggested_topics", [])
-            }
-        
-        # If we had a potential follow-up but confidence was low, we fall through to FULL/PARTIAL answer logic
-        
-        # Fallback to standard generic response if chunks are missing but no follow-up triggered
-        if not chunks_with_sources or answer_mode == AnswerMode.NO_DATA_CONFIRMED:
-            return {
-                "answer": f"I don't have any information about {query_name or 'this person'} in the knowledge base." if person_detection.get("is_person_query") else "I wasn't able to retrieve a confident answer, please refine your question.",
-                "is_generic": True,
-                "answer_mode": AnswerMode.NO_DATA_CONFIRMED
-            }
+            if chunks_with_sources:
+                 # Retrieve signals from reranker (stored in the first chunk's metadata)
+                 first_chunk = chunks_with_sources[0]
+                 meta = first_chunk.get("metadata", {})
+                 
+                 # Use propagated flags from reranker
+                 person_detected = meta.get("person_detected", False)
+                 leadership_detected = meta.get("leadership_detected", False)
+                 person_presence = meta.get("person_presence", {})
+                 
+                 # Fallback for person_detected (only if False but we have a match)
+                 if not person_detected and query_name:
+                     query_name_norm = normalize_text(query_name)
+                     for chunk in chunks_with_sources:
+                         payload = chunk.get("payload", {})
+                         p_name = payload.get("person_name")
+                         if p_name and query_name_norm in normalize_text(p_name):
+                             person_detected = True
+                             break
 
-        system_prompt, model, max_tokens, temperature = self._resolve_prompt_settings(
-            collection_id=collection_id,
-            scope=conversation_state.get("scope") if conversation_state else None,
-            intent=query_classification.get("query_type") if query_classification else None,
-            answer_mode=answer_mode
-        )
-
-        # Build conversation context with summarization for long histories
-        conversation_context = ""
-        if conversation_history:
-            history_length = len(conversation_history)
+            answer_mode = AnswerMode.FULL
+            if followup_result.get("reason") == "domain_mismatch_partial":
+                answer_mode = AnswerMode.PARTIAL_TRANSPARENT
+            elif followup_result.get("needs_followup"):
+                answer_mode = AnswerMode.FOLLOWUP
+            elif person_detected and not leadership_detected:
+                answer_mode = AnswerMode.PARTIAL_TRANSPARENT
+            elif not person_detected and person_detection.get("is_person_query"):
+                answer_mode = AnswerMode.NO_DATA_CONFIRMED
+                
+            logger.info(f"[ANSWER_MODE] Selected mode: {answer_mode} (Person: {person_detected}, Leader: {leadership_detected})")
             
-            # Check if we need to summarize older messages
-            if history_length > SUMMARY_TRIGGER_THRESHOLD:
-                # Split: older (summarize) + recent (verbatim)
-                older_messages = conversation_history[:-MAX_VERBATIM_MESSAGES]
-                recent_messages = conversation_history[-MAX_VERBATIM_MESSAGES:]
-                
-                # Generate summary
-                summary = self.summarize_conversation(older_messages)
-                
-                # Build context
-                conversation_context = "\n\n[Conversation Summary (earlier messages)]:\n"
-                conversation_context += f"{summary}\n"
-                conversation_context += "\n[Recent Conversation (last 10 Q&A pairs)]:\n"
-                
-                for msg in recent_messages:
-                    if hasattr(msg, 'role') and hasattr(msg, 'content'):
-                        role = "Human" if msg.role == "user" else "Assistant"
-                        content = msg.content
-                    else:
-                        role = "Human" if msg.get("role") == "user" else "Assistant"
-                        content = msg.get("content", "")
-                    conversation_context += f"{role}: {content}\n"
-            else:
-                # History is within limit, use all messages verbatim
-                conversation_context = "\n\nPrevious Conversation:\n"
-                for msg in conversation_history:
-                    if hasattr(msg, 'role') and hasattr(msg, 'content'):
-                        role = "Human" if msg.role == "user" else "Assistant"
-                        content = msg.content
-                    else:
-                        role = "Human" if msg.get("role") == "user" else "Assistant"
-                        content = msg.get("content", "")
-                    conversation_context += f"{role}: {content}\n"
-
-        # Check for person data to adjust formatting
-        person_chunks = [c for c in chunks_with_sources if c.get("payload", {}).get("chunk_type") == "person_profile"]
-        has_person_data = len(person_chunks) > 0
-        
-        # Build context
-        source_files = {}
-        total_tokens = 0
-        
-        # Use appropriate formatter
-        if has_person_data:
-            context = format_person_context(chunks_with_sources, detect_person_query(query, prior_context=prior_context))
-            system_prompt += """
+            # Step 3: If follow-up needed, generate questions
+            # Enforce confidence threshold
+            FOLLOWUP_CONFIDENCE_THRESHOLD = getattr(settings, "RAG_FOLLOWUP_CONFIDENCE_THRESHOLD", 0.6)
             
+            if answer_mode == AnswerMode.FOLLOWUP and followup_result["confidence"] >= FOLLOWUP_CONFIDENCE_THRESHOLD:
+                followup_questions = self.generate_followup_questions(
+                    query=query,
+                    followup_result=followup_result,
+                    chunks=chunks_with_sources,
+                    conversation_history=conversation_history
+                )
+                
+                # Format follow-up response
+                followup_text = "\n\n".join(followup_questions)
+                
+                return {
+                    "answer": followup_text,
+                    "is_followup": True,
+                    "is_generic": False, # Technically it's a specific follow-up
+                    "item_mode": AnswerMode.FOLLOWUP, # P5 FIX
+                    "answer_mode": AnswerMode.FOLLOWUP,
+                    "sources": [],
+                    "chunk_count": 0,
+                    "followup_reason": followup_result["reason"],
+                    "followup_confidence": followup_result["confidence"],
+                    "suggested_topics": followup_result.get("suggested_topics", [])
+                }
+            
+            # If we had a potential follow-up but confidence was low, we fall through to FULL/PARTIAL answer logic
+            
+            # Fallback to standard generic response if chunks are missing but no follow-up triggered
+            if not chunks_with_sources or answer_mode == AnswerMode.NO_DATA_CONFIRMED:
+                return {
+                    "answer": f"I don't have any information about {query_name or 'this person'} in the knowledge base." if person_detection.get("is_person_query") else "I wasn't able to retrieve a confident answer, please refine your question.",
+                    "is_generic": True,
+                    "answer_mode": AnswerMode.NO_DATA_CONFIRMED
+                }
+
+            system_prompt, model, max_tokens, temperature = self._resolve_prompt_settings(
+                collection_id=collection_id,
+                scope=conversation_state.get("scope") if conversation_state else None,
+                intent=query_classification.get("query_type") if query_classification else None,
+                answer_mode=answer_mode
+            )
+
+            # Build conversation context with summarization for long histories
+            conv_context = ""
+            if conversation_history:
+                history_length = len(conversation_history)
+                
+                # Check if we need to summarize older messages
+                if history_length > SUMMARY_TRIGGER_THRESHOLD:
+                    # Split: older (summarize) + recent (verbatim)
+                    older_messages = conversation_history[:-MAX_VERBATIM_MESSAGES]
+                    recent_messages = conversation_history[-MAX_VERBATIM_MESSAGES:]
+                    
+                    # Generate summary
+                    summary = self.summarize_conversation(older_messages)
+                    
+                    # Build context
+                    conv_context = "\n\n[Conversation Summary (earlier messages)]:\n"
+                    conv_context += f"{summary}\n"
+                    conv_context += "\n[Recent Conversation (last 10 Q&A pairs)]:\n"
+                    
+                    for msg in recent_messages:
+                        if hasattr(msg, 'role') and hasattr(msg, 'content'):
+                            role = "Human" if msg.role == "user" else "Assistant"
+                            content = msg.content
+                        else:
+                            role = "Human" if msg.get("role") == "user" else "Assistant"
+                            content = msg.get("content", "")
+                        conv_context += f"{role}: {content}\n"
+                else:
+                    # History is within limit, use all messages verbatim
+                    conv_context = "\n\nPrevious Conversation:\n"
+                    for msg in conversation_history:
+                        if hasattr(msg, 'role') and hasattr(msg, 'content'):
+                            role = "Human" if msg.role == "user" else "Assistant"
+                            content = msg.content
+                        else:
+                            role = "Human" if msg.get("role") == "user" else "Assistant"
+                            content = msg.get("content", "")
+                        conv_context += f"{role}: {content}\n"
+
+            # Check for person data to adjust formatting
+            person_chunks = [c for c in chunks_with_sources if c.get("payload", {}).get("chunk_type") == "person_profile"]
+            has_person_data = len(person_chunks) > 0
+            
+            # Build context
+            source_files = {}
+            total_tokens = 0
+            
+            # Fix 4: Hard Caps for context and chunks
+            intent_type = query_classification.get("query_type", "default")
+            # Ensure we have a valid key for the caps
+            if intent_type not in MAX_CONTEXT_TOKENS_BY_INTENT:
+                intent_type = "default"
+                
+            max_tokens_cap = MAX_CONTEXT_TOKENS_BY_INTENT.get(intent_type, 4000)
+            max_chunks_cap = MAX_CHUNKS_BY_INTENT.get(intent_type, 10)
+            
+            # Apply chunk cap
+            if len(chunks_with_sources) > max_chunks_cap:
+                 logger.info(f"[RAG CAPS] Capping chunks to {max_chunks_cap} for intent {intent_type}")
+                 chunks_with_sources = chunks_with_sources[:max_chunks_cap]
+
+            # Use appropriate formatter
+            if has_person_data:
+                context = format_person_context(chunks_with_sources, detect_person_query(query, prior_context=prior_context))
+                system_prompt += """
+                
 When answering questions about people:
 - Present information in a clear, structured format
 - Include: Full name, Title/Role, Department (if available)
 - Add contact information if available (LinkedIn, email)
 - Keep the tone professional and factual
 """
-        else:
-            context = format_general_context(chunks_with_sources)
-            
-        # Build source_files dict (common for both paths)
-        for i, chunk in enumerate(chunks_with_sources):
-             file_name = chunk.get("file_name") or "Source"
-             if file_name not in source_files:
-                source_files[file_name] = {
-                    'file_id': chunk.get('file_id', ''),
-                    'source_type': chunk.get('source_type', 'file'),
-                    'url': chunk.get('url', '') or chunk.get('canonical_url', ''),
-                    'payload': chunk.get('payload', {}) # Store payload
-                }
-        
-        logger.info(f"[RAG CONTEXT] Using formatted context (~{_estimate_tokens(context)} tokens)")
-        
-        prompt_header = system_prompt
-        if conversation_context:
-            prompt_header = f"{system_prompt}{conversation_context}"
+            else:
+                context = format_general_context(chunks_with_sources)
+                
+            # Apply token cap to context
+            context_tokens = _estimate_tokens(context)
+            if context_tokens > max_tokens_cap:
+                 logger.info(f"[RAG CAPS] Capping context tokens from {context_tokens} to {max_tokens_cap}")
+                 # Crude truncation to save time, usually we should truncate by chunk but this is a hard safety
+                 context = context[:max_tokens_cap * 4] 
 
-        # Inject PARTIAL_TRANSPARENT instructions (P0 FIX)
-        if answer_mode == AnswerMode.PARTIAL_TRANSPARENT:
-            if person_detected and not leadership_detected:
-                 # Fix 5: Specific template for unconfirmed leadership
-                 prompt_header += f"""
-                 
+            # Build source_files dict (common for both paths)
+            for i, chunk in enumerate(chunks_with_sources):
+                 file_name = chunk.get("file_name") or "Source"
+                 if file_name not in source_files:
+                    source_files[file_name] = {
+                        'file_id': chunk.get('file_id', ''),
+                        'source_type': chunk.get('source_type', 'file'),
+                        'url': chunk.get('url', '') or chunk.get('canonical_url', ''),
+                        'payload': chunk.get('payload', {}) # Store payload
+                    }
+            
+            logger.info(f"[RAG CONTEXT] Using formatted context (~{_estimate_tokens(context)} tokens)")
+            
+            prompt_header = system_prompt
+            if conv_context:
+                prompt_header = f"{system_prompt}{conv_context}"
+
+            # Inject PARTIAL_TRANSPARENT instructions (P0 FIX)
+            if answer_mode == AnswerMode.PARTIAL_TRANSPARENT:
+                if person_detected and not leadership_detected:
+                     # Fix 5: Specific template for unconfirmed leadership
+                     prompt_header += f"""
+                     
 IMPORTANT: A person named '{query_name}' was found in the documents, but there is NO information confirming they are in a leadership role or have a specific executive title.
 - You MUST state: "{query_name} appears in Polus Solutions content, but no leadership role or title is mentioned in the available documents."
 - Provide any other general information found about them (e.g. mentions in blogs or articles).
 - Do NOT halluncinate a role.
 """
-            else:
-                prompt_header += """
-                
+                else:
+                    prompt_header += """
+                    
 IMPORTANT: The user's query is broad or overlaps with domain-specific content (e.g., specific plans, versions, or roles) that is not fully specified. 
 Instead of collecting more info, provide a PARTIAL ANSWER based on the available documents.
 - Explicitly state what your answer covers.
@@ -2681,7 +2773,7 @@ Instead of collecting more info, provide a PARTIAL ANSWER based on the available
 - Do NOT refuse to answer. Provide the best overview possible.
 """
 
-        enhanced_prompt = f"""{prompt_header}
+            enhanced_prompt = f"""{prompt_header}
 
 IMPORTANT: At the end of your response, always include a "Sources:" section listing the specific files you referenced.
 
@@ -2690,66 +2782,77 @@ Context from uploaded documents:
 
 Question: {query}
 Answer:"""
-        # Append classification instruction (cannot be overridden by user-configurable prompts)
-        enhanced_prompt += CLASSIFICATION_INSTRUCTION
-        
-        # Extract values
-        model_value = model if isinstance(model, str) else getattr(model, 'model_name', self.default_model)
-        max_tokens_value = max_tokens if isinstance(max_tokens, int) else getattr(max_tokens, 'max_tokens', self.default_max_tokens)
-        temperature_value = temperature if isinstance(temperature, (int, float)) else getattr(temperature, 'temperature', self.default_temperature)
-        
-        # Debug logging
-        logger.info(f"[RAG AI CALL WITH CONTEXT] Using max_tokens={max_tokens_value}, model={model_value}, temperature={temperature_value}")
-        
-        raw_answer, tokens_used = self.call_ai(
-            enhanced_prompt,
-            model=model_value,
-            max_tokens=max_tokens_value,
-            temperature=temperature_value,
-        )
-        
-        # Log response
-        logger.info(f"[LLM RESPONSE] Provider: {self.ai_provider}, Model: {model_value}")
-        logger.info(f"[LLM RESPONSE] Tokens used: {tokens_used}")
-        logger.info(f"[LLM RESPONSE] Response length: {len(raw_answer)} chars")
-        logger.info(f"[LLM RESPONSE] Full response:\n{raw_answer}")
-        
-        # Parse AI response
-        parsed = self._parse_ai_response(raw_answer)
-        answer = parsed["answer"]
-        is_generic = parsed["is_generic"]
-        
-        # Force is_generic=True if AI call failed
-        if tokens_used is None or "I encountered an error while processing your question" in answer:
-            is_generic = True
-        
-        # ALWAYS add formatted sources - remove any AI-generated sources section first
-        answer = re.sub(r'(?:^|\n)\s*\**\s*\bSources?\b:?\s*\**\s*(?:\n[\s\S]*)?$', '', answer, flags=re.IGNORECASE).strip()
-        
-        # Build and append formatted sources ONLY if not a generic response
-        if True:  # Always show sources
-            source_list = []
-            for file_name, info in sorted(source_files.items()):
-                source_type = info.get('source_type', 'file')
-                if source_type == 'web_crawl' and info.get('url'):
-                    reference = info['url']
-                else:
-                    reference = info.get('file_id', '')
-                source_list.append(f"- [{file_name}]({reference}|{source_type})")
+            # Append classification instruction (cannot be overridden by user-configurable prompts)
+            enhanced_prompt += CLASSIFICATION_INSTRUCTION
             
-            if source_list:
-                answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
+            # Extract values
+            model_value = model if isinstance(model, str) else getattr(model, 'model_name', self.default_model)
+            max_tokens_value = max_tokens if isinstance(max_tokens, int) else getattr(max_tokens, 'max_tokens', self.default_max_tokens)
+            temperature_value = temperature if isinstance(temperature, (int, float)) else getattr(temperature, 'temperature', self.default_temperature)
+            
+            # Debug logging
+            logger.info(f"[RAG AI CALL WITH CONTEXT] Using max_tokens={max_tokens_value}, model={model_value}, temperature={temperature_value}")
+            
+            raw_answer, tokens_used = self.call_ai(
+                enhanced_prompt,
+                model=model_value,
+                max_tokens=max_tokens_value,
+                temperature=temperature_value,
+            )
+            
+            # Log response
+            logger.info(f"[LLM RESPONSE] Provider: {self.ai_provider}, Model: {model_value}")
+            logger.info(f"[LLM RESPONSE] Tokens used: {tokens_used}")
+            logger.info(f"[LLM RESPONSE] Response length: {len(raw_answer)} chars")
+            logger.info(f"[LLM RESPONSE] Full response:\n{raw_answer}")
+            
+            # Parse AI response
+            parsed = self._parse_ai_response(raw_answer)
+            answer = parsed["answer"]
+            is_generic = parsed["is_generic"]
+            
+            # Force is_generic=True if AI call failed
+            if tokens_used is None or "I encountered an error while processing your question" in answer:
+                is_generic = True
+            
+            # ALWAYS add formatted sources - remove any AI-generated sources section first
+            answer = re.sub(r'(?:^|\n)\s*\**\s*\bSources?\b:?\s*\**\s*(?:\n[\s\S]*)?$', '', answer, flags=re.IGNORECASE).strip()
+            
+            # Build and append formatted sources ONLY if not a generic response
+            if True:  # Always show sources
+                source_list = []
+                for file_name, info in sorted(source_files.items()):
+                    source_type = info.get('source_type', 'file')
+                    if source_type == 'web_crawl' and info.get('url'):
+                        reference = info['url']
+                    else:
+                        reference = info.get('file_id', '')
+                    source_list.append(f"- [{file_name}]({reference}|{source_type})")
+                
+                if source_list:
+                    answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
 
-        return {
-            "answer": answer, 
-            "is_generic": is_generic, 
-            "tokens_used": tokens_used, 
-            "source_files": source_files, 
-            "answer_mode": answer_mode,
-            "person_presence": {
-                "found": person_detected,
-                "has_title": any(c.get("payload", {}).get("person_title") for c in chunks_with_sources),
-                "has_leadership_keyword": leadership_detected,
-                "source_domains": list(set(c.get("payload", {}).get("domain", "general") for c in chunks_with_sources))
-            } if person_detection.get("is_person_query") else None
-        }
+            result = {
+                "answer": answer, 
+                "is_generic": is_generic, 
+                "tokens_used": tokens_used, 
+                "source_files": source_files, 
+                "answer_mode": answer_mode,
+                "person_presence": {
+                    "found": person_detected,
+                    "has_title": any(c.get("payload", {}).get("person_title") for c in chunks_with_sources),
+                    "has_leadership_keyword": leadership_detected,
+                    "source_domains": list(set(c.get("payload", {}).get("domain", "general") for c in chunks_with_sources))
+                } if person_detection.get("is_person_query") else None
+            }
+            
+            # Fix 5: Cache resolution
+            if cache_key and not is_generic and answer_mode != AnswerMode.FOLLOWUP:
+                 import time
+                 self._resolution_cache[cache_key] = (answer, answer_mode, result.get("person_presence"), time.time())
+                 logger.info(f"[CACHE SET] Cached profile for {query_name}")
+                 
+            return result
+        except Exception as e:
+            logger.error(f"Error in answer_with_context: {e}")
+            return {"answer": f"I encountered an error while processing your question: {e}", "is_generic": True}
