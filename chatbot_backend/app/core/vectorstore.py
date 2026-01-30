@@ -21,7 +21,7 @@ class VectorStore:
             # Import here to avoid PyO3 initialization issues during module import
             from qdrant_client import QdrantClient
             from qdrant_client.http.models import PointStruct, Distance
-            self.client = QdrantClient(url=self.url)
+            self.client = QdrantClient(url=self.url, timeout=30)
             self.PointStruct = PointStruct
             self.Distance = Distance
             # Ensure collection exists
@@ -72,18 +72,38 @@ class VectorStore:
                     vectors_config=VectorParams(size=384, distance=self.Distance.COSINE)
                 )
                 logger.debug(f"Qdrant collection '{self.collection_name}' created.")
+                
+                # FIX 19: Payload Indexing
+                self._create_payload_indexes()
+                
                 self._collection_verified = True
             except Exception as create_error:
                 if "already exists" in str(create_error) or "409" in str(create_error):
                     # logger.info(f"Qdrant collection '{self.collection_name}' already exists.")
                     self._collection_verified = True
+                    # Try indexing anyway just in case
+                    try:
+                        self._create_payload_indexes()
+                    except:
+                        pass
                 else:
                     logger.error(f"Failed to create collection: {create_error}")
-                    # Don't raise here if it's just a creation failure, but verified is not set
-                    # However, if we can't create and it doesn't exist, we have a problem.
-                    # But if it's a 400 Bad Request, it might mean it exists but we sent wrong params?
-                    # The user log says 400 Bad Request.
                     pass
+
+    def _create_payload_indexes(self):
+        """Create indexes for frequently filtered fields (Fix 19)."""
+        if not self.client: return
+        try:
+            fields = ["organization", "entity_type", "source_type", "file_id", "crawl_job_id", "domain"]
+            for field in fields:
+                self.client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name=field,
+                    field_schema="keyword"
+                )
+            logger.info("Payload indexes created/verified.")
+        except Exception as e:
+            logger.warning(f"Failed to create payload indexes: {e}")
 
     def add_document(self, doc_text: str, metadata: dict = None):
         # Ensure collection exists before adding documents
@@ -392,44 +412,57 @@ class VectorStore:
                 # Fallback to no filter rather than failing
                 qdrant_filter = None
 
-            try:
-                # Log usage of custom filters for debugging
-                if qdrant_filter:
-                    logger.debug(f"[RAG SEARCH] Final filter object: {qdrant_filter}")
+            # FIX 19: Connection Resilience (Retry Logic)
+            import time
+            max_retries = 3
+            last_error = None
+            
+            for attempt in range(max_retries):
+                try:
+                    # Log usage of custom filters for debugging
+                    if qdrant_filter:
+                        logger.debug(f"[RAG SEARCH] Final filter object: {qdrant_filter}")
 
-                results = self.client.search(
-                    collection_name=self.collection_name,
-                    query_vector=query_vector.tolist(),
-                    limit=top_k * 4,  # Fetch significantly more for better Python-side reranking
-                    query_filter=qdrant_filter
-                )
+                    results = self.client.search(
+                        collection_name=self.collection_name,
+                        query_vector=query_vector.tolist(),
+                        limit=top_k * 4,  # Fetch significantly more for better Python-side reranking
+                        query_filter=qdrant_filter
+                    )
+                    
+                    # Enhanced logging for debugging retrieval issues
+                    logger.info(f"[RAG SEARCH] Qdrant returned {len(results)} raw results")
+                    
+                    # Log top results with scores and text snippets
+                    for i, r in enumerate(results[:5]):
+                        text_snippet = r.payload.get("text", "")[:100].replace("\n", " ")
+                        file_name = r.payload.get("file_name", "unknown")
+                        source_type = r.payload.get("source_type", "file")
+                        logger.info(f"[RAG SEARCH] Result {i+1}: score={r.score:.4f} | source={source_type} | file={file_name}")
+                        logger.debug(f"[RAG SEARCH] Result {i+1} text: {text_snippet}...")
+                    
+                    # Apply score threshold filter
+                    filtered_results = [r for r in results if r.score >= score_threshold]
+                    if len(filtered_results) < len(results):
+                        logger.info(f"[RAG SEARCH] Filtered {len(results) - len(filtered_results)} results below score threshold {score_threshold}")
+                    
+                    # Take top_k after filtering
+                    final_results = filtered_results[:top_k]
+                    
+                    return [{"payload": r.payload, "score": r.score, "id": str(r.id)} for r in final_results]
                 
-                # Enhanced logging for debugging retrieval issues
-                logger.info(f"[RAG SEARCH] Qdrant returned {len(results)} raw results")
-                
-                # Log top results with scores and text snippets
-                for i, r in enumerate(results[:5]):
-                    text_snippet = r.payload.get("text", "")[:100].replace("\n", " ")
-                    file_name = r.payload.get("file_name", "unknown")
-                    source_type = r.payload.get("source_type", "file")
-                    logger.info(f"[RAG SEARCH] Result {i+1}: score={r.score:.4f} | source={source_type} | file={file_name}")
-                    logger.debug(f"[RAG SEARCH] Result {i+1} text: {text_snippet}...")
-                
-                # Apply score threshold filter
-                filtered_results = [r for r in results if r.score >= score_threshold]
-                if len(filtered_results) < len(results):
-                    logger.info(f"[RAG SEARCH] Filtered {len(results) - len(filtered_results)} results below score threshold {score_threshold}")
-                
-                # Take top_k after filtering
-                final_results = filtered_results[:top_k]
-                
-                return [{"payload": r.payload, "score": r.score, "id": str(r.id)} for r in final_results]
-            except Exception as search_error:
-                logger.error(f"Qdrant search failed: {search_error}. Falling back to in-memory search.")
-                # Disable client and fall through to fallback logic
-                self.client = None
-                if not hasattr(self, 'documents'):
-                    self._init_fallback_storage()
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"Qdrant search attempt {attempt+1}/{max_retries} failed: {e}")
+                    if attempt < max_retries - 1:
+                        time.sleep(0.5 * (2 ** attempt)) # Exponential backoff: 0.5, 1.0, 2.0
+                    else:
+                        logger.error(f"Qdrant search failed after {max_retries} attempts. Falling back locally.")
+
+            # Fallback logic after all retries failed
+            self.client = None
+            if not hasattr(self, 'documents'):
+                self._init_fallback_storage()
         
         if not self.client:
             # Use fallback: simple cosine similarity

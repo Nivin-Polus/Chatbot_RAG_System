@@ -618,18 +618,6 @@ export default function SuperadminChat() {
     (content: string, messageId: string, messageSources?: ChatSource[], answerMode?: 'FULL' | 'PARTIAL_TRANSPARENT' | 'FOLLOWUP') => {
       const nodes: ReactNode[] = [];
 
-      // P2 UI: Partial Answer Banner
-      if (answerMode === 'PARTIAL_TRANSPARENT') {
-        nodes.push(
-          <div key="partial-warning" className="flex items-start gap-2 p-3 mb-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md dark:bg-amber-900/20 dark:text-amber-200 dark:border-amber-800/30">
-            <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-            <div>
-              <span className="font-semibold">Partial Answer:</span> Some information might be missing or generic due to domain mismatch (e.g., asking for history but matching policy docs).
-            </div>
-          </div>
-        );
-      }
-
       const lines = content.split('\n');
       let inSourcesSection = false;
       let keyCounter = 0;

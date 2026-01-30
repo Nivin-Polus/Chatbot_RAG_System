@@ -46,6 +46,14 @@ class ContentChunk:
     # P1 FIX: Domain tag
     domain: str = "general"
     
+    # FIX 15: Person Entity Fields
+    entity_type: str = "content" # content | person | image
+    person_name: Optional[str] = None
+    person_title: Optional[str] = None
+    
+    # FIX 1: Organization Field (Mandatory)
+    organization: Optional[str] = None
+    
     def __post_init__(self):
         self.word_count = len(self.text.split())
         self.char_count = len(self.text)
@@ -75,9 +83,12 @@ class ContentChunk:
             "crawl_timestamp": self.crawl_timestamp,
             "crawl_depth": self.crawl_depth,
             "word_count": self.word_count,
-            "word_count": self.word_count,
             "char_count": self.char_count,
-            "domain": self.domain # P1 FIX
+            "domain": self.domain, # P1 FIX
+            "organization": self.organization, # FIX 1
+            "entity_type": self.entity_type, # FIX 15
+            "person_name": self.person_name,
+            "person_title": self.person_title
         }
     
     def to_vector_metadata(self) -> dict:
@@ -96,9 +107,12 @@ class ContentChunk:
             "crawl_job_id": self.crawl_job_id,
             "crawl_timestamp": self.crawl_timestamp,
             "source_type": "web_crawl",
-            "source_type": "web_crawl",
             "chunk_index": self.chunk_index,
-            "domain": self.domain # P1 FIX
+            "domain": self.domain, # P1 FIX
+            "organization": self.organization, # FIX 1
+            "entity_type": self.entity_type, # FIX 15
+            "person_name": self.person_name,
+            "person_title": self.person_title
         }
 
 
@@ -133,6 +147,10 @@ class EnhancedContentChunk(ContentChunk):
     person_type: Optional[str] = "internal"           # internal | external_reference
     confidence_score: float = 1.0                     # numeric confidence (0-1)
     
+    # FIX 1: Organization Field (Already added in base, but emphasizing overriding rules if needed)
+    # Inherits from ContentChunk
+
+    
     # Phase 2: Entities and summary
     entities: List[str] = field(default_factory=list)
     keywords: List[str] = field(default_factory=list)
@@ -158,7 +176,8 @@ class EnhancedContentChunk(ContentChunk):
             "confidence_score": self.confidence_score,
             "entities": self.entities,
             "keywords": self.keywords,
-            "summary": self.summary
+            "summary": self.summary,
+            "organization": self.organization # FIX 1
         })
         return base
         
@@ -181,7 +200,10 @@ class EnhancedContentChunk(ContentChunk):
             "person_confidence": self.person_confidence,
             "organization_context": self.organization_context,
             "person_type": self.person_type,
-            "confidence_score": self.confidence_score
+            "organization_context": self.organization_context,
+            "person_type": self.person_type,
+            "confidence_score": self.confidence_score,
+            "organization": self.organization # FIX 1
         }
         
         # Merge and filter None values
@@ -233,6 +255,19 @@ class TextChunker:
         url = extracted_content.get("url", "")
         canonical_url = extracted_content.get("canonical_url", url)
         page_title = extracted_content.get("title", "")
+        # FIX 1: Get page-level organization
+        organization = extracted_content.get("organization")
+        
+        # FIX 15: Process Person Entities (even in TextChunker)
+        people = extracted_content.get("people", [])
+        if people:
+            person_chunks = self._create_person_chunks(
+                people, url, canonical_url, page_title,
+                job_id, collection_id, timestamp, crawl_depth,
+                organization
+            )
+            chunks.extend(person_chunks)
+        
         sections = extracted_content.get("sections", [])
         
         if not sections:
@@ -253,7 +288,8 @@ class TextChunker:
                         collection_id=collection_id,
                         crawl_timestamp=timestamp,
                         crawl_depth=crawl_depth,
-                        domain="general" # Default for raw text fallback
+                        domain="general", # Default for raw text fallback
+                        organization=organization # FIX 1
                     ))
             return chunks
         
@@ -271,7 +307,8 @@ class TextChunker:
                         current_header,
                         current_parents,
                         url, canonical_url, page_title,
-                        job_id, collection_id, timestamp, crawl_depth
+                        job_id, collection_id, timestamp, crawl_depth,
+                        organization # FIX 1 passed
                     )
                     chunks.extend(group_chunks)
                     current_group = []
@@ -289,7 +326,8 @@ class TextChunker:
                 current_header,
                 current_parents,
                 url, canonical_url, page_title,
-                job_id, collection_id, timestamp, crawl_depth
+                job_id, collection_id, timestamp, crawl_depth,
+                organization # FIX 1 passed
             )
             chunks.extend(group_chunks)
         
@@ -312,7 +350,9 @@ class TextChunker:
         job_id: str,
         collection_id: str,
         timestamp: str,
-        crawl_depth: int
+
+        crawl_depth: int,
+        organization: Optional[str] # FIX 1
     ) -> List[ContentChunk]:
         """Chunk a group of sections under the same header."""
         chunks = []
@@ -363,7 +403,8 @@ class TextChunker:
                 collection_id=collection_id,
                 crawl_timestamp=timestamp,
                 crawl_depth=crawl_depth,
-                domain=domain # P1 FIX
+                domain=domain, # P1 FIX
+                organization=organization # FIX 1
             ))
         
         return chunks
@@ -436,6 +477,67 @@ class TextChunker:
         # Filter empty sentences
         return [s.strip() for s in sentences if s.strip()]
 
+    
+    def _create_person_chunks(
+        self,
+        people: List[Dict],
+        url: str,
+        canonical_url: str,
+        page_title: str,
+        job_id: str,
+        collection_id: str,
+        timestamp: str,
+        crawl_depth: int,
+        organization: Optional[str]
+    ) -> List[ContentChunk]:
+        """Create chunks for person entities."""
+        chunks = []
+        for i, person in enumerate(people):
+            # Format text for retrieval
+            text_parts = [f"Person: {person.get('name', 'Unknown')}"]
+            
+            if person.get('title'):
+                text_parts.append(f"Title: {person['title']}")
+            
+            # Use 'works_for' or fallback to organization
+            org = person.get('works_for') or organization
+            if org:
+                text_parts.append(f"Company: {org}")
+                
+            if person.get('description'):
+                text_parts.append(f"Bio: {person['description']}")
+            
+            # Add extracted entities as text for better retrieval
+            if person.get('social_links'):
+                for platform, link in person['social_links'].items():
+                    text_parts.append(f"{platform.title()}: {link}")
+                    
+            full_text = "\n".join(text_parts)
+            
+            # Generate ID based on name and URL to prevent duplicates
+            chunk_id = hashlib.sha256(f"person:{url}:{person.get('name')}".encode()).hexdigest()[:16]
+            
+            chunks.append(ContentChunk(
+                chunk_id=chunk_id,
+                text=full_text,
+                url=url,
+                canonical_url=canonical_url,
+                page_title=page_title,
+                chunk_index=i,  
+                total_chunks=len(people),
+                crawl_job_id=job_id,
+                collection_id=collection_id,
+                crawl_timestamp=timestamp,
+                crawl_depth=crawl_depth,
+                domain="general",
+                organization=org,
+                entity_type="person",
+                person_name=person.get("name"),
+                person_title=person.get("title")
+            ))
+            
+        return chunks
+
 
 class SemanticChunker:
     """
@@ -469,6 +571,9 @@ class SemanticChunker:
         canonical_url = extracted_content.get("canonical_url", url)
         page_title = extracted_content.get("title", "")
         
+        # FIX 1: Get page-level organization
+        organization = extracted_content.get("organization")
+        
         # Extract Phase 1 metadata
         page_meta = extracted_content.get("page_type", {})
         page_type = page_meta.get("type", "general")
@@ -482,7 +587,8 @@ class SemanticChunker:
                     person, 
                     url, canonical_url, page_title, 
                     page_type, page_confidence,
-                    job_id, collection_id, timestamp, crawl_depth
+                    job_id, collection_id, timestamp, crawl_depth,
+                    organization # FIX 1 passed
                 )
                 chunks.append(person_chunk)
         
@@ -505,7 +611,8 @@ class SemanticChunker:
                         section, 
                         url, canonical_url, page_title,
                         page_type, page_confidence,
-                        job_id, collection_id, timestamp, crawl_depth
+                        job_id, collection_id, timestamp, crawl_depth,
+                        organization # FIX 1 passed
                     )
                     chunks.append(profile_chunk)
                 else:
@@ -515,7 +622,8 @@ class SemanticChunker:
                 narrative_sections,
                 url, canonical_url, page_title,
                 page_type, page_confidence,
-                job_id, collection_id, timestamp, crawl_depth
+                job_id, collection_id, timestamp, crawl_depth,
+                organization # FIX 1 passed
             )
             chunks.extend(parent_chunks)
             chunks.extend(child_chunks)
@@ -532,7 +640,8 @@ class SemanticChunker:
         person: Dict,
         url: str, canonical_url: str, page_title: str,
         page_type: str, page_confidence: float,
-        job_id: str, collection_id: str, timestamp: str, crawl_depth: int
+        job_id: str, collection_id: str, timestamp: str, crawl_depth: int,
+        organization: Optional[str] # FIX 1
     ) -> EnhancedContentChunk:
         """Create a dedicated chunk for a person entity."""
         # Format text for retrieval
@@ -583,7 +692,14 @@ class SemanticChunker:
             
             # Stats
             word_count=len(full_text.split()),
-            char_count=len(full_text)
+
+            char_count=len(full_text),
+            
+            # FIX 3: Inherit from person object (which got it from content_extractor)
+            organization=person.get("organization") or organization, # Prefer person's copy (Fix 3)
+            
+            # FIX 15: Set entity type
+            entity_type="person"
         )
 
     def _create_section_profile_chunk(
@@ -591,7 +707,8 @@ class SemanticChunker:
         section: Dict,
         url: str, canonical_url: str, page_title: str,
         page_type: str, page_confidence: float,
-        job_id: str, collection_id: str, timestamp: str, crawl_depth: int
+        job_id: str, collection_id: str, timestamp: str, crawl_depth: int,
+        organization: Optional[str] # FIX 1
     ) -> EnhancedContentChunk:
         """Create a dedicated chunk for a person profile section (Fix 6)."""
         meta = section.get('metadata', {})
@@ -629,7 +746,10 @@ class SemanticChunker:
             
             # Stats
             word_count=len(text.split()),
-            char_count=len(text)
+            char_count=len(text),
+            
+            # FIX 1
+            organization=meta.get("organization") or organization
         )
 
     def _create_hierarchical_chunks(
@@ -637,7 +757,8 @@ class SemanticChunker:
         sections: List[Dict],
         url: str, canonical_url: str, page_title: str,
         page_type: str, page_confidence: float,
-        job_id: str, collection_id: str, timestamp: str, crawl_depth: int
+        job_id: str, collection_id: str, timestamp: str, crawl_depth: int,
+        organization: Optional[str] # FIX 1
     ) -> Tuple[List[EnhancedContentChunk], List[EnhancedContentChunk]]:
         """
         Create parent and child chunks with linking.
@@ -683,7 +804,11 @@ class SemanticChunker:
                 crawl_depth=crawl_depth,
                 
                 word_count=len(parent_text.split()),
-                char_count=len(parent_text)
+    
+                char_count=len(parent_text),
+                
+                # FIX 1
+                organization=organization
             )
             
             # 2. Create Child Chunks from this Parent

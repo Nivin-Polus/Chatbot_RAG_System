@@ -447,11 +447,25 @@ class ContentExtractor:
             # Also extract legacy SemanticBlock format for backward compat with chunker
             legacy_sections = self._extract_semantic_blocks(main_content)
             
+            # Fix 1 & 2: Page-level Organization Detection
+            # Detect ONCE, store forever.
+            page_organization = self._detect_organization(url, title, meta_description)
+            
+            # Fix 3: Inherit organization automatically for PERSON entities
+            # Critical: Copy, do not reference.
+            for person in people:
+                person["organization"] = page_organization
+                
+            # Also apply to sections
+            for section in filtered_sections:
+                section.metadata["organization"] = page_organization
+            
             return {
                 "title": title,
                 "url": url,
                 "canonical_url": canonical_url,
                 "meta_description": meta_description,
+                "organization": page_organization, # Fix 1: Present at top level
                 # Phase 1: New structured data fields
                 "page_type": page_type,
                 "structured_data": structured_data,
@@ -471,6 +485,7 @@ class ContentExtractor:
                 "url": url,
                 "canonical_url": url,
                 "meta_description": "",
+                "organization": None, # Fix 1: Always present even on error
                 "page_type": {"type": "general", "confidence": 0.0, "signals": []},
                 "structured_data": None,
                 "people": [],
@@ -480,6 +495,45 @@ class ContentExtractor:
                 "word_count": 0,
                 "error": str(e)
             }
+    
+    # -------------------------------------------------------------------------
+    # ORGANIZATION DETECTION (Fix 1 & 2)
+    # -------------------------------------------------------------------------
+    
+    def _detect_organization(self, url: str, title: str, description: str) -> Optional[str]:
+        """
+        Detect organization from page context.
+        Executes once per page.
+        
+        Logic:
+        1. Domain mapping (Hardcoded or Config-driven)
+        2. Title/Meta cues
+        3. Default to None (Unknown)
+        """
+        if not url:
+            return None
+            
+        url_lower = url.lower()
+        title_common = (title or "").lower()
+        
+        # 1. Known Domains (Extensible)
+        # TODO: Move to config
+        if "polussolutions.com" in url_lower:
+            return "polus"
+        if "polus" in title_common:
+            return "polus"
+            
+        # 2. Competitors / Partners (Examples)
+        if "databricks.com" in url_lower:
+            return "databricks"
+        if "openai.com" in url_lower:
+            return "openai"
+            
+        # 3. Generic Heuristic from Title (Fallback - be careful not to over-infer)
+        # If title is "About Us - Acme Corp", extract "Acme Corp"?
+        # For now, safe default is None (Unknown) to adhere to "Unknown != External"
+        
+        return None
     
     # -------------------------------------------------------------------------
     # PAGE TYPE DETECTION

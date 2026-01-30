@@ -298,12 +298,16 @@ def _process_chat_request(
     # But fundamentally we want to pass the WHOLE state to answer methods
     prior_context = state.get("active_entity") # Backbone for Fix 1
     
+    # FIX 20: Request-Level Cache for Single-Pass Retrieval
+    request_cache = {}
+
     # Pass prior_context to retrieve_chunks
     chunks = rag_instance.retrieve_chunks(
         question, 
         top_k=top_k, 
         collection_id=effective_collection_id,
-        prior_context=prior_context
+        prior_context=prior_context,
+        request_cache=request_cache # FIX 20
     )
     logger.debug(f"[CHAT DEBUG] Retrieved {len(chunks)} chunks for query: {question}")
     logger.debug(f"[CHAT DEBUG] Vector store type: {'Qdrant' if vector_store.client else 'In-memory fallback'}")
@@ -467,7 +471,8 @@ def _process_chat_request(
                 top_k=top_k,
                 collection_id=effective_collection_id,
                 prior_context=prior_context,
-                conversation_state=state # NEW: Pass full state
+                conversation_state=state, # NEW: Pass full state
+                request_cache=request_cache # FIX 20
             )
         else:
             logger.debug("[CONTEXT] Using basic RAG without context")
@@ -476,7 +481,8 @@ def _process_chat_request(
                 top_k=top_k,
                 collection_id=effective_collection_id,
                 prior_context=prior_context,
-                conversation_state=state # NEW: Pass full state
+                conversation_state=state, # NEW: Pass full state
+                request_cache=request_cache # FIX 20
             )
         
         # Handle new dict return format from RAG (contains 'answer' and 'is_generic')
