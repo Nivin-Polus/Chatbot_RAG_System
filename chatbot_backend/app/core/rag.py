@@ -63,23 +63,224 @@ def _estimate_tokens(text: str) -> int:
 # ORG & LEADERSHIP HELPERS (FIX 1, 3, 6)
 # ============================================
 
+# RAG Answer Selection: thresholds (leadership data often has lower per-chunk scores)
+LEADERSHIP_MIN_SCORE = 0.15
+GENERAL_MIN_SCORE = 0.20
+
 ALLOWED_LEADERSHIP_TITLES = {
     "director",
     "managing director",
+    "associate director",
     "board member",
     "founder",
     "co-founder",
     "ceo",
-    "cto", 
+    "cto",
     "cfo",
+    "coo",
     "president",
     "vice president",
     "vp",
     "chairman",
     "head",
+    "head of",
     "chief",
-    "exec"
+    "exec",
 }
+
+# Canonical list for fuzzy title matching (subset + variants)
+LEADERSHIP_TITLE_KEYWORDS = [
+    "director", "chairman", "ceo", "cfo", "cto", "coo",
+    "associate director", "vice president", "vp", "president",
+    "chief", "head of", "founder", "managing director",
+]
+
+
+def normalize_title(title: Optional[str]) -> str:
+    """Normalize title for leadership check: en/em-dash to hyphen, & to 'and', lowercased."""
+    if not title:
+        return ""
+    return (
+        title.lower()
+        .replace("\u2013", "-")   # en-dash
+        .replace("\u2014", "-")   # em-dash
+        .replace("&", " and ")
+    )
+
+
+def is_leadership_role(title: Optional[str]) -> bool:
+    """Check if title indicates leadership role using fuzzy/semantic matching."""
+    if not title or not isinstance(title, str):
+        return False
+    title = normalize_title(title)
+    return any(role in title for role in LEADERSHIP_TITLE_KEYWORDS)
+
+
+# Career/job page blocker (first line of defense)
+CAREER_KEYWORDS = (
+    "job", "career", "we are looking", "about the role",
+    "responsibilities", "requirements", "preferred skills",
+    "key skills", "apply", "opening", "vacancy", "position",
+    "role description",
+)
+
+
+def is_career_chunk(chunk: Dict) -> bool:
+    """True if chunk looks like a job/career page (job descriptions, role headers, etc.)."""
+    payload = chunk.get("payload", {})
+    text = (chunk.get("text") or payload.get("text") or "").lower()
+    file_name = (chunk.get("file_name") or payload.get("file_name") or payload.get("page_title") or "").lower()
+    return any(k in text or k in file_name for k in CAREER_KEYWORDS)
+
+
+JOB_POSTING_PHRASES = [
+    "we are hiring",
+    "job description",
+    "responsibilities",
+    "requirements",
+    "apply now",
+    "experience required",
+]
+
+
+def looks_like_job_posting(text: Optional[str]) -> bool:
+    """True if the text content looks like a specific job advertisement."""
+    if not text:
+        return False
+    t = text.lower()
+    return any(p in t for p in JOB_POSTING_PHRASES)
+
+
+# Person-name validation (reject section headers, page titles, role-only labels)
+NON_PERSON_PREFIXES = (
+    "about", "brief", "getting", "meet", "our", "the",
+    "skip", "log in", "accessibility", "understanding",
+    "key skills", "preferred skills", "role description",
+)
+
+
+def is_probable_person_name(name: str) -> bool:
+    """Reject obvious non-person labels (section headers, page titles)."""
+    if not name:
+        return False
+    name = name.strip()
+    lname = name.lower()
+    if lname.startswith(NON_PERSON_PREFIXES):
+        return False
+    if len(name.split()) > 5:
+        return False
+    tokens = name.split()
+    capitalized = sum(1 for t in tokens if t[:1].isupper())
+    if capitalized < 2:
+        return False
+    return True
+
+
+def is_role_only_name(name: str) -> bool:
+    """Reject names that are just a role title with no person (e.g. 'Associate Director')."""
+    if not name:
+        return False
+    lname = name.lower()
+    return any(
+        lname == k or lname.startswith(k + " ")
+        for k in (
+            "director", "associate director", "manager",
+            "vp", "vice president", "head", "lead",
+        )
+    )
+
+
+def extract_leadership_entities(
+    chunks: List[Dict],
+    target_org: Optional[str] = None,
+    query_type: Optional[str] = None,
+) -> List[Dict]:
+    """Extract verified leadership entities (name, title) from retrieved chunks.
+    Leadership queries are org-soft: org filtering is skipped when query_type == 'leadership_list'.
+    """
+    seen_names: Set[str] = set()
+    entities: List[Dict] = []
+    for c in chunks:
+        payload = c.get("payload", {})
+        name = (payload.get("person_name") or "").strip()
+        title = (payload.get("person_title") or "").strip()
+        text = (c.get("text") or payload.get("text") or "").strip()
+        
+        # FIX 2: Correct logic for career pages vs leadership profiles
+        # Career page + leadership title -> KEEP
+        # Career page + job posting phrases -> DROP
+        if is_career_chunk(c):
+            if looks_like_job_posting(text) and not is_leadership_role(title):
+                 logger.debug("[LEADERSHIP DROP] job posting: %s", name)
+                 continue
+            if not is_leadership_role(title):
+                 logger.debug("[LEADERSHIP DROP] career chunk without leadership: %s", name)
+                 continue
+
+        if not name or name == "Unknown":
+            continue
+        if not is_leadership_role(title):
+            logger.debug("[LEADERSHIP DROP] not leadership role: %s | %s", name, title)
+            continue
+        if not is_probable_person_name(name):
+            logger.debug("[LEADERSHIP DROP] not person name: %s", name)
+            continue
+        if is_role_only_name(name):
+            continue
+        # Leadership extraction must NOT depend on organization metadata (org-soft).
+        # Only person name + leadership role + non-career chunk matter.
+        key = normalize_text(name)
+        if key in seen_names:
+            continue
+        seen_names.add(key)
+        entities.append({"name": name, "title": title})
+    return entities
+
+
+def format_entities(entities: List[Dict]) -> str:
+    """Format list of entities as 'Name (Title), Name (Title), and Name (Title)'."""
+    if not entities:
+        return ""
+    if len(entities) == 1:
+        return f"{entities[0]['name']} ({entities[0]['title']})"
+    if len(entities) == 2:
+        return f"{entities[0]['name']} ({entities[0]['title']}) and {entities[1]['name']} ({entities[1]['title']})"
+    parts = [f"{e['name']} ({e['title']})" for e in entities[:-1]]
+    return ", ".join(parts) + f", and {entities[-1]['name']} ({entities[-1]['title']})"
+
+
+def infer_org_from_chunks(chunks: List[Dict]) -> Optional[str]:
+    """Cheap fallback: infer org name from chunk text/filenames (e.g. Polus in content or 'Polus Solutions | ...')."""
+    for c in chunks:
+        payload = c.get("payload", {})
+        text = (c.get("text") or payload.get("text") or "").strip()
+        file_name = (c.get("file_name") or payload.get("file_name") or payload.get("page_title") or "").strip()
+        combined = f"{text} {file_name}"
+        if "Polus Solutions" in combined:
+            return "Polus Solutions"
+        if "Polus" in combined:
+            return "Polus"
+    return None
+
+
+def generate_leadership_response(
+    entities: List[Dict],
+    top_score: float,
+    org_name: str = "the organization",
+) -> str:
+    """Generate response with appropriate confidence language."""
+    if not entities:
+        return f"I don't have sufficient information about {org_name} leadership in the knowledge base."
+    formatted = format_entities(entities)
+    if top_score >= 0.25:
+        return f"{org_name} leadership includes {formatted}."
+    if top_score >= LEADERSHIP_MIN_SCORE:
+        return (
+            f"Based on available information, {org_name} leadership includes {formatted}. "
+            "This may not be a complete list."
+        )
+    return f"I don't have sufficient information about {org_name} leadership in the knowledge base."
+
 
 def mentions_org(chunk: Dict, target_org: str) -> bool:
     """
@@ -593,11 +794,7 @@ def rerank_results(
         filtered_results = []
         for res in results:
             meta = res.get("payload", {})
-            # Hard filter: drop chunks if org doesn't match query_org
-            chunk_org = meta.get("organization") # FIX 1: Use strictly the org field
-            if chunk_org and normalize_text(chunk_org) != normalize_text(query_org):
-                logger.info(f"[RAG FILTER] Dropped chunk due to org mismatch: {chunk_org} != {query_org}")
-                continue
+            # FIX: REMOVED org filter for leadership. Org is for display only.
             
             # Refinement 3: Strict domain allow-list for leadership_list
             allowed_domains = {"people", "about", "leadership"}
@@ -716,15 +913,9 @@ def rerank_results(
         
         if person_detection.get("query_type") == "leadership_list" or person_detection.get("query_type") == "team_list":
             
-            # 1. Org Match First (Fix 5)
+            # 2. Check Title Validity (Fix 7 + Change 4: semantic/fuzzy role matching)
             if is_internal:
-                # 2. Check Title Validity (Fix 7 - Role validation)
-                title_valid = False
-                if title:
-                    t_low = title.lower()
-                    if any(t in t_low for t in ALLOWED_LEADERSHIP_TITLES):
-                        title_valid = True
-                        
+                title_valid = is_leadership_role(title) if title else False
                 if title_valid:
                     # FIX 7: Org match + title -> leadership
                     boost *= 2.0
@@ -1398,15 +1589,16 @@ class RAG:
         if person_detection.get('is_person_query'):
             logger.info(f"[RAG PERSON] Name: {person_detection.get('person_name')}, Title: {person_detection.get('role_title')}")
             
-        # Step 2: Adjust Retrieval Parameters
-        # Base settings
+        # Step 2: Adjust Retrieval Parameters (Change 1: intent-aware thresholds)
         search_top_k = top_k
-        min_score = getattr(settings, "RAG_MIN_SCORE", 0.25)
+        min_score = getattr(settings, "RAG_MIN_SCORE", GENERAL_MIN_SCORE)
         
         # Dynamic adjustments
         if person_detection["is_person_query"]:
             search_top_k = 20 # Fetch more for person queries to ensure we find the right profile
             min_score = 0.15  # Lower threshold to capture potential matches before reranking
+        elif query_classification["query_type"] == "leadership_list":
+            min_score = getattr(settings, "RAG_LEADERSHIP_MIN_SCORE", LEADERSHIP_MIN_SCORE)  # 0.15 for leadership
         elif query_classification["query_type"] == "factual":
             min_score = 0.30  # Higher precision for facts
         elif query_classification["query_type"] == "procedural":
@@ -1754,7 +1946,7 @@ class RAG:
         avg_score = sum(c.get("score", 0) for c in chunks) / len(chunks)
         max_score = max(c.get("score", 0) for c in chunks)
         
-        # Adjust threshold based on query type
+        # Adjust threshold based on query type (Change 1: leadership uses lower bar)
         min_score_threshold = getattr(settings, "RAG_MIN_SCORE", 0.35)
         
         if query_classification:
@@ -1763,6 +1955,8 @@ class RAG:
                 min_score_threshold = 0.40  # Higher bar for factual
             elif qtype == "exploratory":
                 min_score_threshold = 0.25  # Lower bar for exploratory
+            elif qtype == "leadership_list":
+                min_score_threshold = getattr(settings, "RAG_LEADERSHIP_MIN_SCORE", LEADERSHIP_MIN_SCORE)  # 0.15
         
         if max_score < min_score_threshold:
             # Low scores + ambiguous query = follow-up needed
@@ -2818,6 +3012,46 @@ Answer:"""
             conversation_state=conversation_state 
         )
         
+        # Leadership short-circuit: ONLY return path for leadership_list. Must run BEFORE answer_mode / NO_DATA.
+        if (
+            query_classification.get("query_type") == "leadership_list"
+            and chunks_with_sources
+        ):
+            leadership_entities = extract_leadership_entities(
+                chunks_with_sources, target_org=None, query_type="leadership_list"
+            )
+            top_score_val = chunks_with_sources[0].get("score", 0)
+            if leadership_entities and top_score_val >= getattr(settings, "RAG_LEADERSHIP_MIN_SCORE", LEADERSHIP_MIN_SCORE):
+                org_from_state = (conversation_state or {}).get("scope")
+                inferred_org = org_from_state or infer_org_from_chunks(chunks_with_sources)
+                org_display = inferred_org or "the organization"
+                answer_text = generate_leadership_response(leadership_entities, top_score_val, org_display)
+                source_files_lead = {}
+                for chunk in chunks_with_sources:
+                    fn = chunk.get("file_name", "Unknown File")
+                    if fn not in source_files_lead:
+                        source_files_lead[fn] = {
+                            "file_id": chunk.get("file_id", ""),
+                            "source_type": chunk.get("source_type", "file"),
+                            "url": chunk.get("url", "") or chunk.get("canonical_url", ""),
+                            "payload": chunk.get("payload", {}),
+                        }
+                source_list = []
+                for file_name, info in sorted(source_files_lead.items()):
+                    ref = info.get("url") if info.get("source_type") == "web_crawl" else info.get("file_id", "")
+                    source_list.append(f"- [{file_name}]({ref}|{info.get('source_type', 'file')})")
+                if source_list:
+                    answer_text += "\n\n**Sources:**\n" + "\n".join(source_list)
+                final_mode = AnswerMode.PARTIAL_TRANSPARENT if top_score_val < 0.25 else AnswerMode.FULL
+                logger.info(f"[RAG LEADERSHIP] Short-circuit (score={top_score_val:.4f}, entities={len(leadership_entities)}, org={org_display})")
+                return {
+                    "answer": answer_text,
+                    "is_generic": False,
+                    "answer_mode": final_mode,
+                    "sources": list(source_files_lead.keys()),
+                    "chunk_count": len(chunks_with_sources),
+                }
+        
         # DETERMINE ANSWER MODE (Fix 4 & 8)
         person_detected = False
         leadership_detected = False
@@ -2889,10 +3123,21 @@ Answer:"""
                      answer_mode = AnswerMode.NO_DATA_CONFIRMED
 
              elif intent == "leadership_list":
-                 if has_internal_data: 
+                 # Change 1 & 2: Use top_score and accept partial leadership data
+                 top_score_val = chunks_with_sources[0].get("score", 0) if chunks_with_sources else 0
+                 leadership_entities = extract_leadership_entities(
+                     chunks_with_sources, target_org=target_org, query_type="leadership_list"
+                 ) if chunks_with_sources else []
+                 if len(leadership_entities) >= 1:
+                     if top_score_val >= 0.25:
+                         answer_mode = AnswerMode.FULL
+                     elif top_score_val >= LEADERSHIP_MIN_SCORE:
+                         answer_mode = AnswerMode.PARTIAL_TRANSPARENT
+                     else:
+                         answer_mode = AnswerMode.NO_DATA_CONFIRMED
+                 elif has_internal_data:
                      answer_mode = AnswerMode.FULL
                  elif has_results:
-                     # External results for leadership list?
                      answer_mode = AnswerMode.PARTIAL_TRANSPARENT
                  else:
                      answer_mode = AnswerMode.NO_DATA_CONFIRMED
@@ -2939,14 +3184,15 @@ Answer:"""
         # Fallback to standard generic response if chunks are missing but no follow-up triggered
         if not chunks_with_sources or answer_mode == AnswerMode.NO_DATA_CONFIRMED:
             if query_classification.get("query_type") == "leadership_list":
-                 org_name = conversation_state.get("scope", "the organization") if conversation_state else "the organization"
-                 return {
-                     "answer": f"I couldn’t find an explicit list of directors on the {org_name} site, but I can help you search for specific roles or other information.",
-                     "is_generic": True,
-                     "answer_mode": AnswerMode.PARTIAL_TRANSPARENT
-                 }
+                # Never use raw scope: can be None → "None leadership". Always fallback.
+                org_display = ((conversation_state or {}).get("scope") or "the organization")
+                return {
+                    "answer": f"I don't have information about {org_display} leadership in the knowledge base.",
+                    "is_generic": True,
+                    "answer_mode": AnswerMode.NO_DATA_CONFIRMED
+                }
             return {
-                "answer": f"I don't have any information about {query_name or 'this person'} in the knowledge base." if person_detection.get("is_person_query") else "I wasn't able to retrieve a confident answer, please refine your question.",
+                "answer": f"I don't have sufficient information about {query_name or 'this person'} in the knowledge base." if person_detection.get("is_person_query") else "I wasn't able to retrieve a confident answer, please refine your question.",
                 "is_generic": True,
                 "answer_mode": AnswerMode.NO_DATA_CONFIRMED
             }
