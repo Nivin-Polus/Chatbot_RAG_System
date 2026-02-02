@@ -667,6 +667,18 @@ def _process_chat_request(
     # Don't send sources for generic responses
     if is_generic:
         sources_payload = []
+    else:
+        # Filter sources_payload based on the sources actually used/filtered by the RAG service
+        if isinstance(rag_result, dict) and "source_files" in rag_result:
+            rag_sources = rag_result["source_files"]
+            filtered_payload = []
+            for s in sources_payload:
+                if s.get("file_name") in rag_sources:
+                    filtered_payload.append(s)
+            
+            if filtered_payload:
+                logger.info(f"[API] Filtered sources_payload from {len(sources_payload)} to {len(filtered_payload)} based on RAG service result")
+                sources_payload = filtered_payload
     
     # Debug: Log final response being sent to frontend
     logger.info(f"[API RESPONSE] Final answer length: {len(answer_text)} chars")

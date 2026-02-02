@@ -21,6 +21,7 @@ from app.models.system_prompt import SystemPrompt
 from app.models.collection import Collection
 from app.core.database import get_db
 from app.utils.text import normalize_text
+from app.core.cache import get_rag_cache, generate_cache_key
 
 # Initialize logger
 logger = logging.getLogger("rag")
@@ -156,7 +157,16 @@ NON_PERSON_PREFIXES = (
     "about", "brief", "getting", "meet", "our", "the",
     "skip", "log in", "accessibility", "understanding",
     "key skills", "preferred skills", "role description",
+    "expectations", "growth", "work details", "treasury",
 )
+
+# Additional patterns that indicate non-person strings
+NON_PERSON_PATTERNS = [
+    "for suppliers", "for employees", "for customers", "for partners",
+    "and development", "and planning", "and services",
+    "our solution", "our team", "let's talk", "get in touch",
+    "copyright", "©", "meet our", "dynamic team",
+]
 
 
 def is_probable_person_name(name: str) -> bool:
@@ -165,14 +175,29 @@ def is_probable_person_name(name: str) -> bool:
         return False
     name = name.strip()
     lname = name.lower()
+    
+    # Check prefix patterns
     if lname.startswith(NON_PERSON_PREFIXES):
         return False
+    
+    # Check pattern matches
+    if any(pattern in lname for pattern in NON_PERSON_PATTERNS):
+        return False
+    
+    # Length check
     if len(name.split()) > 5:
         return False
+    
+    # Must have at least one alphabetic character
+    if not any(c.isalpha() for c in name):
+        return False
+    
+    # Check capitalization - at least 2 capitalized words (first name + last name)
     tokens = name.split()
     capitalized = sum(1 for t in tokens if t[:1].isupper())
     if capitalized < 2:
         return False
+    
     return True
 
 
@@ -194,21 +219,60 @@ def extract_leadership_entities(
     chunks: List[Dict],
     target_org: Optional[str] = None,
     query_type: Optional[str] = None,
-) -> List[Dict]:
+) -> Tuple[List[Dict], List[Dict]]:
     """Extract verified leadership entities (name, title) from retrieved chunks.
-    Leadership queries are org-soft: org filtering is skipped when query_type == 'leadership_list'.
+    Now includes org-aware filtering to exclude external organization leaders.
+    
+    Returns:
+        Tuple of (entities, contributing_chunks) where contributing_chunks are only
+        the chunks that actually produced entities in the response.
     """
     seen_names: Set[str] = set()
     entities: List[Dict] = []
-    for c in chunks:
+    contributing_chunks: List[Dict] = []  # Track which chunks contributed
+    
+    # Normalize target org for matching
+    target_org_lower = (target_org or "polus").lower().strip()
+    
+    # External org keywords to reject
+    EXTERNAL_ORG_KEYWORDS = [
+        "mit", "massachusetts institute", "harvard", "stanford", "yale",
+        "ado travel", "edu-suite", "microsoft", "google", "amazon",
+    ]
+    
+    logger.info(f"[LEADERSHIP EXTRACT] Processing {len(chunks)} chunks for org='{target_org_lower}'")
+    
+    for i, c in enumerate(chunks):
         payload = c.get("payload", {})
         name = (payload.get("person_name") or "").strip()
         title = (payload.get("person_title") or "").strip()
         text = (c.get("text") or payload.get("text") or "").strip()
+        url = (payload.get("url") or c.get("url") or "").lower()
+        file_name = (payload.get("file_name") or c.get("file_name") or "").lower()
+        
+        # Clean up names starting with special chars (e.g., "- Charley Beerman" -> "Charley Beerman")
+        if name.startswith(("-", "•", "*", ">")):
+            name = name.lstrip("-•*> ").strip()
+        
+        # Clean up names with "Mr.", "Mrs.", "Dr." prefixes for consistency
+        for prefix in ["Mr. ", "Mrs. ", "Ms. ", "Dr. "]:
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+        
+        logger.debug(f"[LEADERSHIP EXTRACT] Chunk {i}: name='{name}', title='{title}', url='{url[:50]}...'")
+        
+        # FIX: Organization filtering based on URL/source
+        # If URL is from target org's domain, it's internal
+        is_from_target_org = target_org_lower in url or target_org_lower in file_name
+        
+        # Check if title mentions external organization
+        title_lower = title.lower()
+        mentions_external_org = any(ext in title_lower for ext in EXTERNAL_ORG_KEYWORDS)
+        
+        # Check if title mentions target org
+        mentions_target_org = target_org_lower in title_lower
         
         # FIX 2: Correct logic for career pages vs leadership profiles
-        # Career page + leadership title -> KEEP
-        # Career page + job posting phrases -> DROP
         if is_career_chunk(c):
             if looks_like_job_posting(text) and not is_leadership_role(title):
                  logger.debug("[LEADERSHIP DROP] job posting: %s", name)
@@ -218,35 +282,91 @@ def extract_leadership_entities(
                  continue
 
         if not name or name == "Unknown":
+            logger.debug(f"[LEADERSHIP DROP] empty/unknown name: '{name}'")
             continue
         if not is_leadership_role(title):
-            logger.debug("[LEADERSHIP DROP] not leadership role: %s | %s", name, title)
+            logger.debug(f"[LEADERSHIP DROP] not leadership role: name='{name}' | title='{title}'")
             continue
         if not is_probable_person_name(name):
-            logger.debug("[LEADERSHIP DROP] not person name: %s", name)
+            logger.info(f"[LEADERSHIP DROP] not person name: '{name}' (tokens={name.split()}, caps={sum(1 for t in name.split() if t[:1].isupper())})")
             continue
         if is_role_only_name(name):
+            logger.info(f"[LEADERSHIP DROP] role-only name: '{name}'")
             continue
-        # Leadership extraction must NOT depend on organization metadata (org-soft).
-        # Only person name + leadership role + non-career chunk matter.
+        
+        # KEY FIX: Organization filtering
+        # Rule 1: If title mentions external org, REJECT (unless also mentions target)
+        if mentions_external_org and not mentions_target_org:
+            logger.info(f"[LEADERSHIP DROP] external org in title: '{name}' | title='{title}'")
+            continue
+        
+        # Rule 2: If not from target org's pages AND doesn't mention target org, REJECT
+        if not is_from_target_org and not mentions_target_org:
+            # Exception: If org metadata explicitly matches
+            chunk_org = payload.get("organization", "")
+            if chunk_org and target_org_lower not in chunk_org.lower():
+                logger.info(f"[LEADERSHIP DROP] not from target org: '{name}' | org='{chunk_org}'")
+                continue
+            # For unknown org, check URL more carefully
+            if not chunk_org:
+                # Check common external domain patterns
+                external_domains = ["mit.edu", "harvard.edu", "stanford.edu", "yale.edu"]
+                if any(ext in url for ext in external_domains):
+                    logger.info(f"[LEADERSHIP DROP] external domain: '{name}' | url='{url[:60]}'")
+                    continue
+        
+        # Deduplicate
         key = normalize_text(name)
         if key in seen_names:
+            logger.debug(f"[LEADERSHIP DROP] duplicate: '{name}'")
             continue
         seen_names.add(key)
         entities.append({"name": name, "title": title})
-    return entities
+        contributing_chunks.append(c)  # Track this chunk as a source
+        logger.info(f"[LEADERSHIP ACCEPT] name='{name}', title='{title}'")
+    
+    logger.info(f"[LEADERSHIP EXTRACT] Total entities extracted: {len(entities)}, contributing chunks: {len(contributing_chunks)}")
+    return entities, contributing_chunks
 
 
 def format_entities(entities: List[Dict]) -> str:
-    """Format list of entities as 'Name (Title), Name (Title), and Name (Title)'."""
+    """Format list of entities grouped by role type with structured output."""
     if not entities:
         return ""
-    if len(entities) == 1:
-        return f"{entities[0]['name']} ({entities[0]['title']})"
-    if len(entities) == 2:
-        return f"{entities[0]['name']} ({entities[0]['title']}) and {entities[1]['name']} ({entities[1]['title']})"
-    parts = [f"{e['name']} ({e['title']})" for e in entities[:-1]]
-    return ", ".join(parts) + f", and {entities[-1]['name']} ({entities[-1]['title']})"
+    
+    # Group entities by role type
+    directors = []
+    associate_directors = []
+    executives = []  # CEO, Chairman, etc.
+    others = []
+    
+    for e in entities:
+        title_lower = (e.get("title") or "").lower()
+        name = e.get("name", "")
+        title = e.get("title", "")
+        
+        if "associate director" in title_lower:
+            associate_directors.append(f"- {name} – {title}")
+        elif "director" in title_lower:
+            directors.append(f"- {name} – {title}")
+        elif any(t in title_lower for t in ["ceo", "chairman", "president", "founder", "chief"]):
+            executives.append(f"- {name} – {title}")
+        else:
+            others.append(f"- {name} – {title}")
+    
+    # Build response
+    sections = []
+    
+    if executives:
+        sections.append("**Leadership**\n" + "\n".join(executives))
+    if directors:
+        sections.append("**Directors**\n" + "\n".join(directors))
+    if associate_directors:
+        sections.append("**Associate Directors**\n" + "\n".join(associate_directors))
+    if others:
+        sections.append("**Other Roles**\n" + "\n".join(others))
+    
+    return "\n\n".join(sections)
 
 
 def infer_org_from_chunks(chunks: List[Dict]) -> Optional[str]:
@@ -271,14 +391,20 @@ def generate_leadership_response(
     """Generate response with appropriate confidence language."""
     if not entities:
         return f"I don't have sufficient information about {org_name} leadership in the knowledge base."
+    
     formatted = format_entities(entities)
+    
+    # High confidence response
     if top_score >= 0.25:
-        return f"{org_name} leadership includes {formatted}."
+        return f"{org_name} lists the following directors and associate directors in leadership roles:\n\n{formatted}\n\nIf you'd like, I can help you find the right contact based on your need (sales, delivery, finance, etc.)."
+    
+    # Medium confidence response
     if top_score >= LEADERSHIP_MIN_SCORE:
         return (
-            f"Based on available information, {org_name} leadership includes {formatted}. "
-            "This may not be a complete list."
+            f"Based on available information, {org_name} leadership includes:\n\n{formatted}\n\n"
+            "_Note: This may not be a complete list._"
         )
+    
     return f"I don't have sufficient information about {org_name} leadership in the knowledge base."
 
 
@@ -796,12 +922,12 @@ def rerank_results(
             meta = res.get("payload", {})
             # FIX: REMOVED org filter for leadership. Org is for display only.
             
-            # Refinement 3: Strict domain allow-list for leadership_list
-            allowed_domains = {"people", "about", "leadership"}
-            chunk_domain = meta.get("domain")
-            if chunk_domain and chunk_domain not in allowed_domains:
-                logger.info(f"[RAG FILTER] Dropped chunk due to domain restriction: {chunk_domain}")
-                continue
+            # REF: Removed strict domain filter to comply with Anti-Gravity rules (preserve recall).
+            # allowed_domains = {"people", "about", "leadership"}
+            # chunk_domain = meta.get("domain")
+            # if chunk_domain and chunk_domain not in allowed_domains:
+            #     logger.info(f"[RAG FILTER] Dropped chunk due to domain restriction: {chunk_domain}")
+            #     continue
                 
             filtered_results.append(res)
         results = filtered_results
@@ -883,6 +1009,15 @@ def rerank_results(
         
         # --- FIX 4: Redefine External Org Logic ---
         detected_org = metadata.get("organization")
+        chunk_url = (metadata.get("url") or "").lower()
+        
+        # External domain detection (MIT, Harvard, etc.)
+        EXTERNAL_DOMAINS = ["mit.edu", "harvard.edu", "stanford.edu", "yale.edu"]
+        is_external_domain = any(ext in chunk_url for ext in EXTERNAL_DOMAINS)
+        
+        # Check if URL is from target org
+        target_org_lower = (target_org or "polus").lower()
+        is_target_domain = target_org_lower in chunk_url
         
         is_internal = False
         is_external = False
@@ -890,8 +1025,16 @@ def rerank_results(
         if detected_org and normalize_text(detected_org) == normalize_text(target_org):
             is_internal = True
             is_external = False
+        elif is_target_domain:
+            # URL contains target org name -> likely internal
+            is_internal = True
+            is_external = False
+        elif is_external_domain:
+            # URL from known external domain -> definitely external
+            is_internal = False
+            is_external = True
         elif detected_org is None:
-            # FIX 4: Unknown != External
+            # FIX 4: Unknown org but not external domain -> neutral
             is_internal = False
             is_external = False
         else:
@@ -908,14 +1051,17 @@ def rerank_results(
                 is_external
             )
 
+
         # --- FIX 5, 6, 7: Org-Aware Boosting & Demotion ---
         section = "secondary" # Default to secondary
         
         if person_detection.get("query_type") == "leadership_list" or person_detection.get("query_type") == "team_list":
             
-            # 2. Check Title Validity (Fix 7 + Change 4: semantic/fuzzy role matching)
+            # Check title validity first (applies to all org states)
+            title_valid = is_leadership_role(title) if title else False
+            
+            # 2. Org-aware scoring with leadership title override
             if is_internal:
-                title_valid = is_leadership_role(title) if title else False
                 if title_valid:
                     # FIX 7: Org match + title -> leadership
                     boost *= 2.0
@@ -928,16 +1074,26 @@ def rerank_results(
                     boost *= 0.8 # Slight demotion
             
             elif is_external:
-                # Fix 6: Demote, don't skip
+                # Fix 6: Demote external, don't skip
                 boost *= 0.1
                 section = "secondary"
                 logger.info(f"Demoted external leader: {name}")
                 
             else:
-                # Unknown Org (Neutral)
-                # Fix: Never primary if no org match
-                boost *= 0.5
-                section = "secondary"
+                # Unknown Org - KEY FIX: If leadership title is valid, BOOST not demote
+                # Rationale: Within a collection, people with "Director", "CEO" titles are likely from the target org
+                if title_valid:
+                    # Strong leadership signal overrides missing org metadata
+                    boost *= 1.5  # Boost (was 0.5 demotion)
+                    if "director" in title.lower() or "ceo" in title.lower() or "chairman" in title.lower():
+                        boost *= 1.3
+                    section = "primary"
+                    leadership_detected = True
+                    logger.info(f"[LEADERSHIP BOOST] Unknown org but valid title: {name} ({title})")
+                else:
+                    # No leadership title - neutral/slight demotion
+                    boost *= 0.6
+                    section = "secondary"
                 
         # --- Standard Relevance Logic (Preserved) ---
         
@@ -1468,7 +1624,26 @@ class RAG:
         # Remove trailing horizontal rule separators (---) that sometimes appear
         cleaned_response = re.sub(r'\s*-{3,}\s*$', '', cleaned_response).strip()
         
-        return {"answer": cleaned_response, "is_generic": is_generic}
+        # New: Extract referenced sources if present in a "Sources:" or "References:" section
+        referenced_sources = []
+        # Look for a Sources section at the end
+        sources_match = re.search(r'(?:Sources?|References?):\s*(.*)', raw_response, re.IGNORECASE | re.DOTALL)
+        if sources_match:
+            sources_text = sources_match.group(1).strip()
+            # Try to find [Title](URL) patterns
+            referenced_sources = re.findall(r'\[(.*?)\]', sources_text)
+            if not referenced_sources:
+                # Fallback: Find lines that look like filenames or bullet points
+                for line in sources_text.split('\n'):
+                    line = line.strip().lstrip('-*• ').strip()
+                    if line and len(line) < 100: # Avoid capturing long sentences
+                        referenced_sources.append(line)
+        
+        return {
+            "answer": cleaned_response, 
+            "is_generic": is_generic,
+            "referenced_sources": list(set(referenced_sources)) # Deduplicate
+        }
 
     def _fetch_known_people(self) -> List[str]:
         """Fetch all known person names from vector store with caching."""
@@ -1487,7 +1662,8 @@ class RAG:
             names = self.vector_store.get_all_unique_values(
                 field="person_name", 
                 filter_key="chunk_type", 
-                filter_value="person_profile"
+                filter_value="person_profile",
+                allow_unsafe_scroll=True # TEMPORARY: Exempt from safety guard until person cache is moved to background
             )
             
             # Filter valid names
@@ -1588,7 +1764,25 @@ class RAG:
         )
         if person_detection.get('is_person_query'):
             logger.info(f"[RAG PERSON] Name: {person_detection.get('person_name')}, Title: {person_detection.get('role_title')}")
-            
+
+        # --- CACHE CHECK (Retrieval) ---
+        cache = get_rag_cache()
+        cache_key = generate_cache_key(
+            collection_id=collection_id_str or "default",
+            intent=query_classification.get("query_type", "general"),
+            query=query,
+            person_name=person_detection.get("person_name"),
+            role_title=person_detection.get("role_title"),
+            query_org=target_org  # Include inferred org in key
+        )
+        
+        cached_chunks = cache.get_retrieval(cache_key)
+        if cached_chunks is not None:
+             logger.info(f"[CACHE HIT] Retrieval found for key: {cache_key}")
+             if request_cache is not None:
+                 request_cache[f"retrieve:{query}:{collection_id}:{top_k}"] = cached_chunks
+             return cached_chunks
+
         # Step 2: Adjust Retrieval Parameters (Change 1: intent-aware thresholds)
         search_top_k = top_k
         min_score = getattr(settings, "RAG_MIN_SCORE", GENERAL_MIN_SCORE)
@@ -1598,6 +1792,7 @@ class RAG:
             search_top_k = 20 # Fetch more for person queries to ensure we find the right profile
             min_score = 0.15  # Lower threshold to capture potential matches before reranking
         elif query_classification["query_type"] == "leadership_list":
+            search_top_k = 40  # FIX: Increase for leadership to get all potential directors
             min_score = getattr(settings, "RAG_LEADERSHIP_MIN_SCORE", LEADERSHIP_MIN_SCORE)  # 0.15 for leadership
         elif query_classification["query_type"] == "factual":
             min_score = 0.30  # Higher precision for facts
@@ -1705,10 +1900,12 @@ class RAG:
             if r["score"] >= min_score:
                 final_results.append(r)
                 
-        # Hard limit
-        final_results = final_results[:top_k]
+        # Hard limit - use search_top_k for leadership to get more results
+        # This ensures all potential directors are included before entity extraction
+        final_top_k = search_top_k if query_classification.get("query_type") == "leadership_list" else top_k
+        final_results = final_results[:final_top_k]
         
-        logger.info(f"[RAG FINAL] Selected {len(final_results)} chunks after reranking (Top-K: {top_k})")
+        logger.info(f"[RAG FINAL] Selected {len(final_results)} chunks after reranking (Top-K: {final_top_k})")
         if final_results:
              logger.info(f"[RAG SCORE] Top score: {final_results[0]['score']:.4f}")
              
@@ -1757,9 +1954,14 @@ class RAG:
                 }
             })
         
-        # FIX 20: Populate Cache
         if request_cache is not None:
              request_cache[cache_key] = chunks_with_sources
+
+        # --- CACHE SET (Retrieval) ---
+        if not chunks_with_sources:
+             cache.set_retrieval(cache_key, []) # Cache empty result (Short Term)
+        else:
+             cache.set_retrieval(cache_key, chunks_with_sources)
 
         return chunks_with_sources
 
@@ -2802,6 +3004,45 @@ Summary:"""
         if self._is_small_talk(query):
             return self._handle_small_talk(query)
 
+        # --- CACHE CHECK (Answer) ---
+        cache = get_rag_cache()
+        # Note: We don't have answer_mode yet, so we check for the most common "FULL" mode answer in cache
+        # or we could design a more generic key. 
+        # Requirement: Keyed by (..., answer_mode). 
+        # Since we are about to generate a FULL answer (default), we check for that.
+        cache_key = generate_cache_key(
+            collection_id=collection_id or "default",
+            intent="unknown", # We haven't classified yet, but for strict caching we should probably classify first? 
+                              # Actually, strict plan says: (collection_id, intent, normalized_query, answer_mode).
+                              # We need to run classification to get intent before checking cache if we want to be strict.
+            query=query,
+            answer_mode="FULL" # Default target mode
+        )
+        
+        # HOWEVER: Computing intent takes time (regex). 
+        # Let's peek at the classification logic. It's fast regex. 
+        # To match the plan strictness, we should lift classification up.
+        
+        try:
+             normalized_query = normalize_text(query)
+        except:
+             normalized_query = query.lower().strip()
+        
+        query_classification = classify_query(normalized_query)
+        intent = query_classification.get("query_type", "general")
+        
+        cache_key = generate_cache_key(
+            collection_id=collection_id or "default",
+            intent=intent,
+            query=query,
+            answer_mode="FULL"
+        )
+        
+        cached_answer = cache.get_answer(cache_key)
+        if cached_answer is not None:
+             logger.info(f"[CACHE HIT] Answer found for key: {cache_key}")
+             return cached_answer
+
         chunks_with_sources = self.retrieve_chunks(
             query, 
             top_k=top_k, 
@@ -2923,7 +3164,39 @@ Answer:"""
         # Remove any existing sources section (case-insensitive) - handles with or without preceding newline
         answer = re.sub(r'(?:^|\n)\s*\**\s*\bSources?\b:?\s*\**\s*(?:\n[\s\S]*)?$', '', answer, flags=re.IGNORECASE).strip()
         
-        logger.info(f"[RAG DEBUG] After sources strip length: {len(answer)} chars")
+        # NEW: Filter source_files based on AI's referenced sources
+        referenced_sources = parsed.get("referenced_sources", [])
+        if referenced_sources and not is_generic:
+            filtered_source_files = {}
+            for ref in referenced_sources:
+                ref_norm = (ref or "").lower().strip()
+                if not ref_norm: continue
+                # Match against filename and URL
+                for fn, info in source_files.items():
+                    fn_norm = fn.lower()
+                    url_norm = (info.get('url') or "").lower()
+                    if ref_norm in fn_norm or fn_norm in ref_norm or (url_norm and ref_norm in url_norm):
+                        filtered_source_files[fn] = info
+            
+            # Only use filtered list if we found matches (safety fallback)
+            if filtered_source_files:
+                logger.info(f"[RAG SOURCES] Filtered sources from {len(source_files)} to {len(filtered_source_files)} based on AI references")
+                source_files = filtered_source_files
+            else:
+                # Fallback: If AI provided sources but they don't match, 
+                # keep only the top 3 highest scoring files as a proxy for relevance
+                sorted_files = sorted(source_files.items(), 
+                                   key=lambda x: max([c.get('score', 0) for c in chunks_with_sources if c.get('file_name') == x[0]] or [0]), 
+                                   reverse=True)
+                source_files = dict(sorted_files[:3])
+                logger.info(f"[RAG SOURCES] No matching AI sources found. Falling back to top 3 files.")
+        elif not is_generic:
+            # Fallback for when AI provided NO sources segment: show top 3
+            sorted_files = sorted(source_files.items(), 
+                               key=lambda x: max([c.get('score', 0) for c in chunks_with_sources if c.get('file_name') == x[0]] or [0]), 
+                               reverse=True)
+            source_files = dict(sorted_files[:3])
+            logger.info(f"[RAG SOURCES] AI provided no sources. Showing top 3 files.")
         
         # Build and append formatted sources ONLY if not a generic response
         if True:  # Always show sources
@@ -2939,7 +3212,30 @@ Answer:"""
             if source_list:
                 answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
 
-        return {"answer": answer, "is_generic": is_generic, "tokens_used": tokens_used, "source_files": source_files}
+        result = {"answer": answer, "is_generic": is_generic, "tokens_used": tokens_used, "source_files": source_files}
+
+        # --- CACHE SET (Answer) ---
+        # Generate specific key based on the ACTUAL answer mode we got
+        final_answer_mode = parsed.get("answer_mode", "FULL")
+        
+        # If we didn't use tokens (error fallback), treat as NO_DATA
+        if tokens_used is None:
+             final_answer_mode = "NO_DATA"
+
+        set_cache_key = generate_cache_key(
+            collection_id=collection_id or "default",
+            intent=intent or "general",
+            query=query,
+            answer_mode=final_answer_mode
+        )
+        
+        is_no_data = final_answer_mode in ["NO_DATA", "NO_DATA_CONFIRMED", "GENERIC_ERROR"]
+        cache.set_answer(set_cache_key, result, is_no_data=is_no_data)
+
+        # Also, if the mode is "FULL", we assume it matches our optimistic "FULL" check at the start.
+        # So this will populate the happy path for next time.
+
+        return result
 
     def answer_with_context(
         self,
@@ -2958,6 +3254,30 @@ Answer:"""
         """
         if self._is_small_talk(query):
             return self._handle_small_talk(query)
+
+        # --- CACHE CHECK (Answer) ---
+        cache = get_rag_cache()
+        
+        # Resolve intent for key (lightweight regex)
+        try:
+             normalized_query = normalize_text(query)
+        except:
+             normalized_query = query.lower().strip()
+        
+        query_classification = classify_query(normalized_query)
+        intent = query_classification.get("query_type", "general")
+        
+        cache_key = generate_cache_key(
+            collection_id=collection_id or "default",
+            intent=intent,
+            query=query,
+            answer_mode="FULL" # Optimistic check
+        )
+        
+        cached_answer = cache.get_answer(cache_key)
+        if cached_answer is not None:
+             logger.info(f"[CACHE HIT] Answer found for key: {cache_key}")
+             return cached_answer
             
         # FIX 4: AFFIRMATION HANDLING ("Yes", "Everything")
         # Reuse last intent if available
@@ -3017,17 +3337,22 @@ Answer:"""
             query_classification.get("query_type") == "leadership_list"
             and chunks_with_sources
         ):
-            leadership_entities = extract_leadership_entities(
-                chunks_with_sources, target_org=None, query_type="leadership_list"
+            # Infer target org FIRST so we can filter entities properly
+            org_from_state = (conversation_state or {}).get("scope")
+            inferred_org = org_from_state or infer_org_from_chunks(chunks_with_sources) or "polus"
+            
+            # Extract entities AND get the chunks that contributed to them
+            leadership_entities, contributing_chunks = extract_leadership_entities(
+                chunks_with_sources, target_org=inferred_org, query_type="leadership_list"
             )
             top_score_val = chunks_with_sources[0].get("score", 0)
             if leadership_entities and top_score_val >= getattr(settings, "RAG_LEADERSHIP_MIN_SCORE", LEADERSHIP_MIN_SCORE):
-                org_from_state = (conversation_state or {}).get("scope")
-                inferred_org = org_from_state or infer_org_from_chunks(chunks_with_sources)
                 org_display = inferred_org or "the organization"
                 answer_text = generate_leadership_response(leadership_entities, top_score_val, org_display)
+                
+                # FIX: Only include sources from chunks that contributed to the answer
                 source_files_lead = {}
-                for chunk in chunks_with_sources:
+                for chunk in contributing_chunks:  # Use contributing_chunks instead of all chunks
                     fn = chunk.get("file_name", "Unknown File")
                     if fn not in source_files_lead:
                         source_files_lead[fn] = {
@@ -3043,13 +3368,13 @@ Answer:"""
                 if source_list:
                     answer_text += "\n\n**Sources:**\n" + "\n".join(source_list)
                 final_mode = AnswerMode.PARTIAL_TRANSPARENT if top_score_val < 0.25 else AnswerMode.FULL
-                logger.info(f"[RAG LEADERSHIP] Short-circuit (score={top_score_val:.4f}, entities={len(leadership_entities)}, org={org_display})")
+                logger.info(f"[RAG LEADERSHIP] Short-circuit (score={top_score_val:.4f}, entities={len(leadership_entities)}, sources={len(source_files_lead)}, org={org_display})")
                 return {
                     "answer": answer_text,
                     "is_generic": False,
                     "answer_mode": final_mode,
                     "sources": list(source_files_lead.keys()),
-                    "chunk_count": len(chunks_with_sources),
+                    "chunk_count": len(contributing_chunks),  # Report contributing chunks, not all
                 }
         
         # DETERMINE ANSWER MODE (Fix 4 & 8)
@@ -3252,6 +3577,16 @@ Answer:"""
         
         # Build context
         source_files = {}
+        # Pre-populate source_files from all retrieved chunks
+        for chunk in chunks_with_sources:
+             fn = chunk.get("file_name", "Unknown File")
+             if fn not in source_files:
+                source_files[fn] = {
+                    'file_id': chunk.get('file_id', ''),
+                    'source_type': chunk.get('source_type', 'file'),
+                    'url': chunk.get('url', '') or chunk.get('canonical_url', ''),
+                    'payload': chunk.get('payload', {})
+                }
         total_tokens = 0
         
         # Use appropriate formatter
@@ -3295,7 +3630,7 @@ Answer:"""
         # FIX 17: Parsing Logic
         parsed = self._parse_ai_response(raw_answer)
         final_answer = parsed["answer"]
-        ai_determined_mode = parsed["answer_mode"]
+        ai_determined_mode = parsed.get("answer_mode", "FULL") # Fallback to FULL
         is_generic = parsed["is_generic"]
         
         # Trust AI's "NoData" if we aren't already sure
@@ -3308,6 +3643,37 @@ Answer:"""
 
         # ALWAYS add formatted sources - remove any AI-generated sources section first
         final_answer = re.sub(r'(?:^|\n)\s*\**\s*\bSources?\b:?\s*\**\s*(?:\n[\s\S]*)?$', '', final_answer, flags=re.IGNORECASE).strip()
+        
+        # NEW: Filter source_files based on AI's referenced sources
+        referenced_sources = parsed.get("referenced_sources", [])
+        if referenced_sources and not is_generic:
+            filtered_source_files = {}
+            for ref in referenced_sources:
+                ref_norm = (ref or "").lower().strip()
+                if not ref_norm: continue
+                for fn, info in source_files.items():
+                    fn_norm = fn.lower()
+                    url_norm = (info.get('url') or "").lower()
+                    if ref_norm in fn_norm or fn_norm in ref_norm or (url_norm and ref_norm in url_norm):
+                        filtered_source_files[fn] = info
+            
+            if filtered_source_files:
+                logger.info(f"[RAG SOURCES] Filtered sources from {len(source_files)} to {len(filtered_source_files)} based on AI references")
+                source_files = filtered_source_files
+            else:
+                # Fallback: top 3 by score
+                sorted_files = sorted(source_files.items(), 
+                                   key=lambda x: max([c.get('score', 0) for c in chunks_with_sources if c.get('file_name') == x[0]] or [0]), 
+                                   reverse=True)
+                source_files = dict(sorted_files[:3])
+                logger.info(f"[RAG SOURCES] No matching AI sources found. Falling back to top 3 files.")
+        elif not is_generic:
+            # Fallback: top 3 by score
+            sorted_files = sorted(source_files.items(), 
+                               key=lambda x: max([c.get('score', 0) for c in chunks_with_sources if c.get('file_name') == x[0]] or [0]), 
+                               reverse=True)
+            source_files = dict(sorted_files[:3])
+            logger.info(f"[RAG SOURCES] AI provided no sources. Showing top 3 files.")
         
         # Build and append formatted sources ONLY if not a generic response
         if True:  # Always show sources
@@ -3329,7 +3695,7 @@ Answer:"""
         if answer_mode == AnswerMode.PARTIAL_TRANSPARENT:
             final_answer_mode = AnswerMode.FULL
 
-        return {
+        result = {
             "answer": final_answer, 
             "is_generic": is_generic, 
             "tokens_used": tokens_used, 
@@ -3342,3 +3708,20 @@ Answer:"""
                 "source_domains": list(set(c.get("payload", {}).get("domain", "general") for c in chunks_with_sources))
             } if person_detection.get("is_person_query") else None
         }
+
+        # --- CACHE SET (Answer) ---
+        cache_mode_for_key = final_answer_mode
+        if tokens_used is None:
+             cache_mode_for_key = "NO_DATA"
+
+        set_cache_key = generate_cache_key(
+            collection_id=collection_id or "default",
+            intent=intent or "general",
+            query=query,
+            answer_mode=cache_mode_for_key
+        )
+        
+        is_no_data = cache_mode_for_key in ["NO_DATA", "NO_DATA_CONFIRMED", "GENERIC_ERROR"]
+        cache.set_answer(set_cache_key, result, is_no_data=is_no_data)
+
+        return result

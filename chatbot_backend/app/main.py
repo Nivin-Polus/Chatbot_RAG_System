@@ -7,6 +7,11 @@ from pydantic import BaseModel
 from typing import Optional
 from contextlib import contextmanager
 import logging
+from starlette.middleware.base import BaseHTTPMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from app.core.rate_limiter import limiter, ConcurrencyLimiterMiddleware
 
 from app.api import (
     routes_health,
@@ -44,9 +49,32 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# 1. Register Rate Limit Exception Handler
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# 2. Add Middlewares (Order matters: Outer -> Inner)
+# Concurrency limit (outermost "seatbelt")
+app.add_middleware(ConcurrencyLimiterMiddleware, max_concurrent=settings.MAX_CONCURRENT_REQUESTS)
+
+# Rate limiting (SlowAPI)
+app.add_middleware(SlowAPIMiddleware)
+
+# Request Safety Middleware
+from app.core.request_context import enter_request_context, exit_request_context
+
+class RequestSafetyMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        enter_request_context()
+        try:
+            return await call_next(request)
+        finally:
+            exit_request_context()
+
+app.add_middleware(RequestSafetyMiddleware)
+
 # Configure request body size limit (50MB to accommodate file uploads)
 from starlette.middleware import Middleware
-from starlette.middleware.base import BaseHTTPMiddleware
 
 class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):

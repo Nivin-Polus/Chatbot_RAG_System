@@ -235,10 +235,15 @@ class VectorStore:
             logger.debug(f"Deleted {len(to_delete)} chunks for crawl job {crawl_job_id} from memory")
             return len(to_delete)
 
-    def get_documents_by_crawl_job_id(self, crawl_job_id: str, limit: int = 10000) -> list:
+    def get_documents_by_crawl_job_id(self, crawl_job_id: str, limit: int = 10000, allow_unsafe_scroll: bool = False) -> list:
         """Get all document chunks belonging to a specific crawl job"""
         if self.client:
             from qdrant_client.models import Filter, FieldCondition, MatchValue
+            
+            if not allow_unsafe_scroll:
+                from app.core.request_context import ensure_safe_qdrant_operation
+                ensure_safe_qdrant_operation("get_documents_by_crawl_job_id")
+
             try:
                 # Scroll through all points with matching crawl_job_id
                 results = []
@@ -287,7 +292,7 @@ class VectorStore:
             logger.debug(f"Retrieved {len(results)} chunks for crawl job {crawl_job_id} from memory")
             return results
 
-    def iter_documents_by_crawl_job_id(self, crawl_job_id: str, batch_size: int = 100):
+    def iter_documents_by_crawl_job_id(self, crawl_job_id: str, batch_size: int = 100, allow_unsafe_scroll: bool = False):
         """
         Generator that yields document chunks for a crawl job in batches.
         This is memory-efficient for large exports as it doesn't accumulate all results.
@@ -297,6 +302,11 @@ class VectorStore:
         """
         if self.client:
             from qdrant_client.models import Filter, FieldCondition, MatchValue
+            
+            if not allow_unsafe_scroll:
+                from app.core.request_context import ensure_safe_qdrant_operation
+                ensure_safe_qdrant_operation("iter_documents_by_crawl_job_id")
+                
             try:
                 offset = None
                 total_yielded = 0
@@ -519,7 +529,7 @@ class VectorStore:
             
             return scores[:top_k]
 
-    def get_all_unique_values(self, field: str, filter_key: str = None, filter_value: str = None) -> list:
+    def get_all_unique_values(self, field: str, filter_key: str = None, filter_value: str = None, allow_unsafe_scroll: bool = False) -> list:
         """
         Get all unique values for a specific field from documents.
         Optionally filter by another key-value pair.
@@ -528,6 +538,10 @@ class VectorStore:
         
         if self.client:
              from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+             if not allow_unsafe_scroll:
+                 from app.core.request_context import ensure_safe_qdrant_operation
+                 ensure_safe_qdrant_operation("get_all_unique_values")
              
              scroll_filter = None
              if filter_key and filter_value:

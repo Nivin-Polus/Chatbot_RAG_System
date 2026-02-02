@@ -113,6 +113,11 @@ class Settings(BaseSettings):
     SOURCE_MIN_SCORE: float = Field(0.15, validation_alias="SOURCE_MIN_SCORE")  # Minimum confidence score to show a source to users
     MAX_CONTEXT_TOKENS: int = Field(4000, validation_alias="MAX_CONTEXT_TOKENS")  # Token cap for context chunks sent to LLM
 
+    # Rate Limiting & Backpressure
+    RATE_LIMIT_ENABLED: bool = Field(True, validation_alias="RATE_LIMIT_ENABLED")
+    RATE_LIMIT_DEFAULT: str = Field("100/minute", validation_alias="RATE_LIMIT_DEFAULT")
+    MAX_CONCURRENT_REQUESTS: int = Field(20, validation_alias="MAX_CONCURRENT_REQUESTS")
+
     # Chat Widget Configuration
     CHAT_WIDGET_HOST_URL: str = Field("", validation_alias="CHAT_WIDGET_HOST_URL")
     
