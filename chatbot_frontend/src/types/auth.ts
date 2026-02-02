@@ -124,5 +124,4 @@ export interface ChatMessage {
   isGeneric?: boolean;
   isFollowup?: boolean;  // NEW: Indicates this is a follow-up question
   sources?: ChatSource[];
-  answer_mode?: 'FULL' | 'PARTIAL_TRANSPARENT' | 'FOLLOWUP'; // NEW: Track answer mode
 }

@@ -15,7 +15,7 @@ import { ChatMessage, ChatSource, Collection } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost } from '@/utils/api';
 import { saveSession, getSession, getSessions } from '@/utils/chatStorage';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useLocation } from 'react-router-dom';
 
 export default function UserAdminChat() {
   const { user } = useAuth();
@@ -44,6 +44,15 @@ export default function UserAdminChat() {
   const [accessibleFileIds, setAccessibleFileIds] = useState<string[]>([]);
   const [accessibleFileNames, setAccessibleFileNames] = useState<string[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const lastLocationRef = useRef<string>(location.pathname);
+  const lastMessagesCountRef = useRef<number>(0);
+  const messagesRef = useRef<ChatMessage[]>(messages);
+
+  // Keep messages ref in sync
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const selectedCollectionDetails = useMemo(
     () => collections.find((collection) => collection.collection_id === selectedCollection) ?? null,
@@ -175,6 +184,57 @@ export default function UserAdminChat() {
       stopStreamingRef.current = null;
     };
   }, []);
+
+  // Check for new messages when returning to chat tab or periodically while on chat page
+  useEffect(() => {
+    const isChatPage = location.pathname === '/useradmin/chat' || location.pathname.includes('/useradmin/chat');
+    const wasChatPage = lastLocationRef.current === '/useradmin/chat' || lastLocationRef.current.includes('/useradmin/chat');
+    const justReturnedToChat = !wasChatPage && isChatPage;
+
+    // Update last location
+    lastLocationRef.current = location.pathname;
+
+    // Function to check and update messages from storage
+    const checkForUpdates = () => {
+      if (sessionId && selectedCollection && user?.user_id) {
+        const storedSession = getSession(sessionId);
+        if (storedSession) {
+          // Check if stored messages are different (newer or more messages)
+          const storedCount = storedSession.messages.length;
+          const currentCount = messagesRef.current.length;
+
+          if (storedCount > currentCount ||
+            (storedCount === currentCount && storedCount > 0 &&
+              storedSession.messages[storedCount - 1]?.content !== messagesRef.current[currentCount - 1]?.content)) {
+            // New messages found in storage, update state
+            setMessages(storedSession.messages);
+            lastMessagesCountRef.current = storedCount;
+            enableAutoScroll();
+            scrollToBottom();
+          } else {
+            lastMessagesCountRef.current = currentCount;
+          }
+        }
+      }
+    };
+
+    // Check immediately if we just returned to chat
+    if (justReturnedToChat) {
+      checkForUpdates();
+    }
+
+    // Set up periodic check while on chat page (every 2 seconds)
+    let intervalId: number | null = null;
+    if (isChatPage && sessionId) {
+      intervalId = window.setInterval(checkForUpdates, 2000);
+    }
+
+    return () => {
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, [location.pathname, sessionId, selectedCollection, user?.user_id, enableAutoScroll, scrollToBottom]);
 
   const fetchCollections = useCallback(async () => {
     try {
@@ -402,6 +462,11 @@ export default function UserAdminChat() {
     setInputMessage('');
     setIsLoading(true);
     enableAutoScroll();
+
+    // Immediately save user message to storage so it's available if user switches tabs
+    if (sessionId && user?.user_id && selectedCollection) {
+      saveSession(sessionId, updatedMessages, selectedCollection, user.user_id, user.role || 'useradmin', true);
+    }
 
     // Prepare conversation history (last ~20 messages)
     const conversationHistory = updatedMessages
@@ -1175,6 +1240,42 @@ export default function UserAdminChat() {
           continue;
         }
 
+        // Check for Markdown lists (- or * for ul, 1. for ol)
+        const listMatch = trimmed.match(/^([-*]|\d+\.)\s+(.+)$/);
+        if (listMatch && !inSourcesSection) {
+          const isOrdered = /^\d+/.test(listMatch[1]);
+          const listLines: string[] = [];
+          let j = i;
+
+          while (j < lines.length) {
+            const currentTrimmed = lines[j].trim();
+            const currentMatch = currentTrimmed.match(/^([-*]|\d+\.)\s+(.+)$/);
+            if (!currentMatch) break;
+            listLines.push(currentTrimmed);
+            j++;
+          }
+
+          const ListTag = isOrdered ? 'ol' : 'ul';
+          nodes.push(
+            <ListTag
+              key={`${messageId}-list-${i}`}
+              className={`my-3 ml-6 ${isOrdered ? 'list-decimal' : 'list-disc'} space-y-1`}
+            >
+              {listLines.map((line, idx) => {
+                const itemContent = line.replace(/^([-*]|\d+\.)\s+/, '');
+                return (
+                  <li key={`${messageId}-list-${i}-item-${idx}`} className="pl-1">
+                    {createInlineElements(itemContent, false)}
+                  </li>
+                );
+              })}
+            </ListTag>
+          );
+
+          i = j - 1;
+          continue;
+        }
+
         // Wrap each line in a container to keep inline elements together
         const lineNodes = createInlineElements(rawLine, false); // block=false
         if (lineNodes.length > 0) {
@@ -1280,7 +1381,7 @@ export default function UserAdminChat() {
                     <div className="flex items-center justify-center text-muted-foreground dark:text-gray-300 h-[50vh]">
                       <div className="flex flex-col items-center gap-3 text-center">
                         <MessageSquare className="h-12 w-12 opacity-50" />
-                        <p className="text-base font-medium">How can I help you?</p>
+                        <p className="text-base font-medium">You can start the conversation by sending a message below.</p>
                       </div>
                     </div>
                   ) : (

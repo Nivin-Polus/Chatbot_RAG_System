@@ -731,15 +731,25 @@ body {
     max-width: 80%;
 }
 
-.message-content ul,
-.message-content ol {
-    padding-left: 1.5rem;
-    margin-top: 0.5rem;
-    margin-bottom: 0.5rem;
+/* List Styles */
+.message-body ul,
+.message-body ol {
+    margin: 8px 0;
+    padding-left: 24px;
 }
 
-.message-content li {
-    margin-bottom: 0.25rem;
+.message-body ul {
+    list-style-type: disc !important;
+}
+
+.message-body ol {
+    list-style-type: decimal !important;
+}
+
+.message-body li {
+    margin-bottom: 4px;
+    display: list-item !important;
+    /* Ensure markers are shown */
 }
 
 /* Message Time - Hidden per request */

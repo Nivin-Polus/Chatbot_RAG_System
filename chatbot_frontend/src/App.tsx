@@ -18,7 +18,8 @@ import SuperadminUsers from "./pages/superadmin/SuperadminUsers";
 import SuperadminChat from "./pages/superadmin/SuperadminChat";
 import SuperadminActivity from "./pages/superadmin/SuperadminActivity";
 import SuperadminSettings from "./pages/superadmin/SuperadminSettings";
-import SuperadminDeployment from "./pages/superadmin/SuperadminDeployment";
+import SuperadminPlugins from "./pages/superadmin/SuperadminPlugins";
+import SuperadminHelpPage from "./pages/superadmin/SuperadminHelpPage";
 import SuperadminCrawler from "./pages/superadmin/SuperadminCrawler";
 import KnowledgeBaseDetails from "./pages/superadmin/KnowledgeBaseDetails";
 import UserDashboard from "./pages/user/UserDashboard";
@@ -63,7 +64,8 @@ const App = () => (
                       <Route path="files" element={<SuperadminFiles />} />
                       <Route path="prompts" element={<SuperadminPrompts />} />
                       <Route path="users" element={<SuperadminUsers />} />
-                      <Route path="deployment" element={<SuperadminDeployment />} />
+                      <Route path="plugins" element={<SuperadminPlugins />} />
+                      <Route path="help-page" element={<SuperadminHelpPage />} />
                       <Route path="crawler" element={<SuperadminCrawler />} />
                       <Route path="chat" element={<SuperadminChat />} />
                       <Route path="activity" element={<SuperadminActivity />} />

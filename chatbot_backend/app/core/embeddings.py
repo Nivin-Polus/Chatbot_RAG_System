@@ -6,8 +6,8 @@ class Embeddings:
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         # Import here to avoid PyO3 initialization issues during module import
         try:
-            from app.core.model_singleton import get_embedding_model
-            self.model = get_embedding_model(model_name)
+            from sentence_transformers import SentenceTransformer
+            self.model = SentenceTransformer(model_name)
         except ImportError as e:
             print(f"Warning: Could not import sentence_transformers: {e}")
             self.model = None

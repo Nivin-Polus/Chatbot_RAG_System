@@ -43,8 +43,8 @@ class MultiTenantVectorStore:
             return
             
         try:
-            from app.core.model_singleton import get_embedding_model
-            self.embedding_model = get_embedding_model('all-MiniLM-L6-v2')
+            from sentence_transformers import SentenceTransformer
+            self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
             self._embedding_initialized = True
             logger.info("✅ Embedding model initialized")
         except Exception as e:
@@ -392,7 +392,7 @@ class MultiTenantVectorStore:
             logger.error(f"❌ Failed to get collection stats: {e}")
             return {"error": str(e)}
     
-    def get_website_stats(self, website_id: str, allow_unsafe_scroll: bool = False) -> Dict[str, Any]:
+    def get_website_stats(self, website_id: str) -> Dict[str, Any]:
         """Get statistics for a specific website"""
         self._initialize_client()
         
@@ -400,10 +400,6 @@ class MultiTenantVectorStore:
             from qdrant_client.http.models import Filter, FieldCondition, MatchValue
             
             # Count documents for this website
-            if not allow_unsafe_scroll:
-                from app.core.request_context import ensure_safe_qdrant_operation
-                ensure_safe_qdrant_operation("get_website_stats")
-            
             search_result = self.client.scroll(
                 collection_name=self.collection_name,
                 scroll_filter=Filter(

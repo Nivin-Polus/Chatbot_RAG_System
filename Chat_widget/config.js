@@ -6,7 +6,7 @@ const WIDGET_CONFIG = {
     // 'local'  = Local backend (localhost:8000)
     // 'dev'    = Dev server
     // 'prod'   = Production
-    environment: 'local',
+    environment: 'dev',
 
     // ===== Mock Mode (auto-enabled in 'design' environment) =====
     // When true, bypasses API calls and uses mock data for UI development
@@ -20,7 +20,7 @@ const WIDGET_CONFIG = {
         // The widget can be hosted anywhere; these URLs are where API calls go
         urls: {
             design: '',  // Not used in design mode
-            local: 'http://10.199.100.54:8000/rag',      // Local backend (FastAPI/Python)
+            local: 'http://localhost:8000',      // Local backend (FastAPI/Python)
             dev: 'https://dev-chatbot.polussolutions.com',
             prod: 'https://keyword-search.mit.edu',
         },

@@ -50,9 +50,7 @@ function DashboardLayoutContent({ children }: { children: ReactNode }) {
         {!isPluginUser && (
           <header className="h-14 border-b border-border bg-card flex items-center justify-between px-4 flex-none gap-2">
             <div className="flex items-center gap-2">
-              <div className="md:hidden">
-                <SidebarTrigger />
-              </div>
+              <SidebarTrigger />
               {showBackButton && (
                 <Button
                   variant="ghost"

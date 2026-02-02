@@ -7,11 +7,6 @@ from pydantic import BaseModel
 from typing import Optional
 from contextlib import contextmanager
 import logging
-from starlette.middleware.base import BaseHTTPMiddleware
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
-from app.core.rate_limiter import limiter, ConcurrencyLimiterMiddleware
 
 from app.api import (
     routes_health,
@@ -32,10 +27,6 @@ from app.config import settings
 from app.core.auth import get_token_from_credentials, get_password_hash
 from app.services.health_monitor import HealthMonitorService
 
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
-import os
-
 
 class TokenRequest(BaseModel):
     username: str
@@ -49,32 +40,9 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# 1. Register Rate Limit Exception Handler
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-# 2. Add Middlewares (Order matters: Outer -> Inner)
-# Concurrency limit (outermost "seatbelt")
-app.add_middleware(ConcurrencyLimiterMiddleware, max_concurrent=settings.MAX_CONCURRENT_REQUESTS)
-
-# Rate limiting (SlowAPI)
-app.add_middleware(SlowAPIMiddleware)
-
-# Request Safety Middleware
-from app.core.request_context import enter_request_context, exit_request_context
-
-class RequestSafetyMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        enter_request_context()
-        try:
-            return await call_next(request)
-        finally:
-            exit_request_context()
-
-app.add_middleware(RequestSafetyMiddleware)
-
 # Configure request body size limit (50MB to accommodate file uploads)
 from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -114,26 +82,6 @@ api_router.include_router(routes_plugins.router, tags=["Plugins"])
 api_router.include_router(routes_crawler.router, prefix="/crawler", tags=["Web Crawler"])
 
 app.include_router(api_router)
-
-# Mount the Chat_widget directory as a static directory
-# This allows serving the static assets (css, js, svg)
-widget_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Chat_widget"))
-if os.path.exists(widget_path):
-    app.mount("/chat-widget/assets", StaticFiles(directory=widget_path), name="widget_assets")
-
-    @app.get("/chat-widget/{token}", response_class=HTMLResponse, tags=["Widget"])
-    async def serve_chat_widget(token: str):
-        """Serve the chat widget SPA for a specific token"""
-        index_path = os.path.join(widget_path, "index.html")
-        if os.path.exists(index_path):
-            with open(index_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            # We could inject the token here if needed, but the widget implementation
-            # seems to extract it from variables or URL.
-            # Based on app.js: const widgetToken = getWidgetToken(); extract from URL path.
-            return content
-        else:
-            return HTMLResponse(content="<h1>Widget not found (index.html missing)</h1>", status_code=404)
 
 
 @contextmanager

@@ -2,7 +2,6 @@
 
 import uuid
 import logging
-import json
 from typing import Optional
 from app.config import settings
 
@@ -21,7 +20,7 @@ class VectorStore:
             # Import here to avoid PyO3 initialization issues during module import
             from qdrant_client import QdrantClient
             from qdrant_client.http.models import PointStruct, Distance
-            self.client = QdrantClient(url=self.url, timeout=30)
+            self.client = QdrantClient(url=self.url)
             self.PointStruct = PointStruct
             self.Distance = Distance
             # Ensure collection exists
@@ -72,38 +71,18 @@ class VectorStore:
                     vectors_config=VectorParams(size=384, distance=self.Distance.COSINE)
                 )
                 logger.debug(f"Qdrant collection '{self.collection_name}' created.")
-                
-                # FIX 19: Payload Indexing
-                self._create_payload_indexes()
-                
                 self._collection_verified = True
             except Exception as create_error:
                 if "already exists" in str(create_error) or "409" in str(create_error):
                     # logger.info(f"Qdrant collection '{self.collection_name}' already exists.")
                     self._collection_verified = True
-                    # Try indexing anyway just in case
-                    try:
-                        self._create_payload_indexes()
-                    except:
-                        pass
                 else:
                     logger.error(f"Failed to create collection: {create_error}")
+                    # Don't raise here if it's just a creation failure, but verified is not set
+                    # However, if we can't create and it doesn't exist, we have a problem.
+                    # But if it's a 400 Bad Request, it might mean it exists but we sent wrong params?
+                    # The user log says 400 Bad Request.
                     pass
-
-    def _create_payload_indexes(self):
-        """Create indexes for frequently filtered fields (Fix 19)."""
-        if not self.client: return
-        try:
-            fields = ["organization", "entity_type", "source_type", "file_id", "crawl_job_id", "domain"]
-            for field in fields:
-                self.client.create_payload_index(
-                    collection_name=self.collection_name,
-                    field_name=field,
-                    field_schema="keyword"
-                )
-            logger.info("Payload indexes created/verified.")
-        except Exception as e:
-            logger.warning(f"Failed to create payload indexes: {e}")
 
     def add_document(self, doc_text: str, metadata: dict = None):
         # Ensure collection exists before adding documents
@@ -235,15 +214,10 @@ class VectorStore:
             logger.debug(f"Deleted {len(to_delete)} chunks for crawl job {crawl_job_id} from memory")
             return len(to_delete)
 
-    def get_documents_by_crawl_job_id(self, crawl_job_id: str, limit: int = 10000, allow_unsafe_scroll: bool = False) -> list:
+    def get_documents_by_crawl_job_id(self, crawl_job_id: str, limit: int = 10000) -> list:
         """Get all document chunks belonging to a specific crawl job"""
         if self.client:
             from qdrant_client.models import Filter, FieldCondition, MatchValue
-            
-            if not allow_unsafe_scroll:
-                from app.core.request_context import ensure_safe_qdrant_operation
-                ensure_safe_qdrant_operation("get_documents_by_crawl_job_id")
-
             try:
                 # Scroll through all points with matching crawl_job_id
                 results = []
@@ -292,7 +266,7 @@ class VectorStore:
             logger.debug(f"Retrieved {len(results)} chunks for crawl job {crawl_job_id} from memory")
             return results
 
-    def iter_documents_by_crawl_job_id(self, crawl_job_id: str, batch_size: int = 100, allow_unsafe_scroll: bool = False):
+    def iter_documents_by_crawl_job_id(self, crawl_job_id: str, batch_size: int = 100):
         """
         Generator that yields document chunks for a crawl job in batches.
         This is memory-efficient for large exports as it doesn't accumulate all results.
@@ -302,11 +276,6 @@ class VectorStore:
         """
         if self.client:
             from qdrant_client.models import Filter, FieldCondition, MatchValue
-            
-            if not allow_unsafe_scroll:
-                from app.core.request_context import ensure_safe_qdrant_operation
-                ensure_safe_qdrant_operation("iter_documents_by_crawl_job_id")
-                
             try:
                 offset = None
                 total_yielded = 0
@@ -360,7 +329,7 @@ class VectorStore:
                 yield batch
             logger.debug(f"Streamed chunks for crawl job {crawl_job_id} from memory")
 
-    def search(self, query: str, top_k: int = 5, collection_id: Optional[str] = None, score_threshold: float = 0.0, filters: Optional[dict] = None):
+    def search(self, query: str, top_k: int = 5, collection_id: Optional[str] = None, score_threshold: float = 0.0):
         """
         Search for similar documents.
         
@@ -369,110 +338,67 @@ class VectorStore:
             top_k: Number of results to return
             collection_id: Optional collection filter
             score_threshold: Minimum similarity score (0.0 = no filtering)
-            filters: Optional Qdrant filter dictionary (overrides collection_id if provided)
         """
         query_vector = self.embeddings.encode(query)
         
         logger.info(f"[RAG SEARCH] Query: '{query}' | top_k={top_k} | collection_id={collection_id}")
         
         if self.client:
-            # Handle filter conversion
+            # Use Qdrant
             qdrant_filter = None
-            
-            try:
-                from qdrant_client.http import models as qmodels
-                
-                if filters:
-                    # Convert dict filters to Qdrant model objects if necessary
-                    if isinstance(filters, dict):
-                        must_conditions = []
-                        for m in filters.get("must", []):
-                            if "range" in m:
-                                must_conditions.append(qmodels.FieldCondition(key=m["key"], range=qmodels.Range(**m["range"])))
-                            elif "match" in m:
-                                must_conditions.append(qmodels.FieldCondition(key=m["key"], match=qmodels.MatchValue(**m["match"])))
-                        
-                        should_conditions = []
-                        for s in filters.get("should", []):
-                            if "range" in s:
-                                should_conditions.append(qmodels.FieldCondition(key=s["key"], range=qmodels.Range(**s["range"])))
-                            elif "match" in s:
-                                should_conditions.append(qmodels.FieldCondition(key=s["key"], match=qmodels.MatchValue(**s["match"])))
-                        
-                        # Only create Filter if we have conditions
-                        if must_conditions or should_conditions:
-                            qdrant_filter = qmodels.Filter(must=must_conditions, should=should_conditions)
-                            logger.info(f"[RAG SEARCH] Converted dict filters to Qdrant models")
-                    else:
-                        qdrant_filter = filters
-                
-                # If no custom filters provided, build default collection filter
-                if not qdrant_filter and collection_id:
-                    qdrant_filter = qmodels.Filter(
+            if collection_id:
+                try:
+                    try:
+                        from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+                    except ImportError:
+                        from qdrant_client.models import Filter, FieldCondition, MatchValue  # type: ignore
+
+                    qdrant_filter = Filter(
                         must=[
-                            qmodels.FieldCondition(
+                            FieldCondition(
                                 key="collection_id",
-                                match=qmodels.MatchValue(value=collection_id)
+                                match=MatchValue(value=collection_id)
                             )
                         ]
                     )
                     logger.debug(f"[RAG SEARCH] Applied collection filter: {collection_id}")
-            except Exception as filter_error:
-                logger.error(f"Failed to build search filters: {filter_error}")
-                # Fallback to no filter rather than failing
-                qdrant_filter = None
+                except Exception as filter_error:
+                    logger.warning(f"Failed to apply collection filter: {filter_error}")
 
-            # FIX 19: Connection Resilience (Retry Logic)
-            import time
-            max_retries = 3
-            last_error = None
-            
-            for attempt in range(max_retries):
-                try:
-                    # Log usage of custom filters for debugging
-                    if qdrant_filter:
-                        logger.debug(f"[RAG SEARCH] Final filter object: {qdrant_filter}")
-
-                    results = self.client.search(
-                        collection_name=self.collection_name,
-                        query_vector=query_vector.tolist(),
-                        limit=top_k * 4,  # Fetch significantly more for better Python-side reranking
-                        query_filter=qdrant_filter
-                    )
-                    
-                    # Enhanced logging for debugging retrieval issues
-                    logger.info(f"[RAG SEARCH] Qdrant returned {len(results)} raw results")
-                    
-                    # Log top results with scores and text snippets
-                    for i, r in enumerate(results[:5]):
-                        text_snippet = r.payload.get("text", "")[:100].replace("\n", " ")
-                        file_name = r.payload.get("file_name", "unknown")
-                        source_type = r.payload.get("source_type", "file")
-                        logger.info(f"[RAG SEARCH] Result {i+1}: score={r.score:.4f} | source={source_type} | file={file_name}")
-                        logger.debug(f"[RAG SEARCH] Result {i+1} text: {text_snippet}...")
-                    
-                    # Apply score threshold filter
-                    filtered_results = [r for r in results if r.score >= score_threshold]
-                    if len(filtered_results) < len(results):
-                        logger.info(f"[RAG SEARCH] Filtered {len(results) - len(filtered_results)} results below score threshold {score_threshold}")
-                    
-                    # Take top_k after filtering
-                    final_results = filtered_results[:top_k]
-                    
-                    return [{"payload": r.payload, "score": r.score, "id": str(r.id)} for r in final_results]
+            try:
+                results = self.client.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_vector.tolist(),
+                    limit=top_k * 2,  # Fetch extra to allow score filtering
+                    query_filter=qdrant_filter
+                )
                 
-                except Exception as e:
-                    last_error = e
-                    logger.warning(f"Qdrant search attempt {attempt+1}/{max_retries} failed: {e}")
-                    if attempt < max_retries - 1:
-                        time.sleep(0.5 * (2 ** attempt)) # Exponential backoff: 0.5, 1.0, 2.0
-                    else:
-                        logger.error(f"Qdrant search failed after {max_retries} attempts. Falling back locally.")
-
-            # Fallback logic after all retries failed
-            self.client = None
-            if not hasattr(self, 'documents'):
-                self._init_fallback_storage()
+                # Enhanced logging for debugging retrieval issues
+                logger.info(f"[RAG SEARCH] Qdrant returned {len(results)} raw results")
+                
+                # Log top results with scores and text snippets
+                for i, r in enumerate(results[:5]):
+                    text_snippet = r.payload.get("text", "")[:100].replace("\n", " ")
+                    file_name = r.payload.get("file_name", "unknown")
+                    source_type = r.payload.get("source_type", "file")
+                    logger.info(f"[RAG SEARCH] Result {i+1}: score={r.score:.4f} | source={source_type} | file={file_name}")
+                    logger.debug(f"[RAG SEARCH] Result {i+1} text: {text_snippet}...")
+                
+                # Apply score threshold filter
+                filtered_results = [r for r in results if r.score >= score_threshold]
+                if len(filtered_results) < len(results):
+                    logger.info(f"[RAG SEARCH] Filtered {len(results) - len(filtered_results)} results below score threshold {score_threshold}")
+                
+                # Take top_k after filtering
+                final_results = filtered_results[:top_k]
+                
+                return [{"payload": r.payload, "score": r.score} for r in final_results]
+            except Exception as search_error:
+                logger.error(f"Qdrant search failed: {search_error}. Falling back to in-memory search.")
+                # Disable client and fall through to fallback logic
+                self.client = None
+                if not hasattr(self, 'documents'):
+                    self._init_fallback_storage()
         
         if not self.client:
             # Use fallback: simple cosine similarity
@@ -528,66 +454,3 @@ class VectorStore:
                 logger.debug(f"[SEARCH DEBUG] Returning {min(len(scores), top_k)} results")
             
             return scores[:top_k]
-
-    def get_all_unique_values(self, field: str, filter_key: str = None, filter_value: str = None, allow_unsafe_scroll: bool = False) -> list:
-        """
-        Get all unique values for a specific field from documents.
-        Optionally filter by another key-value pair.
-        """
-        unique_values = set()
-        
-        if self.client:
-             from qdrant_client.models import Filter, FieldCondition, MatchValue
-
-             if not allow_unsafe_scroll:
-                 from app.core.request_context import ensure_safe_qdrant_operation
-                 ensure_safe_qdrant_operation("get_all_unique_values")
-             
-             scroll_filter = None
-             if filter_key and filter_value:
-                 scroll_filter = Filter(
-                    must=[
-                        FieldCondition(
-                            key=filter_key,
-                            match=MatchValue(value=filter_value)
-                        )
-                    ]
-                )
-             
-             try:
-                 offset = None
-                 while True:
-                     response = self.client.scroll(
-                         collection_name=self.collection_name,
-                         scroll_filter=scroll_filter,
-                         limit=100,
-                         offset=offset,
-                         with_payload=True,
-                         with_vectors=False
-                     )
-                     points, offset = response
-                     if not points:
-                         break
-                     
-                     for p in points:
-                         val = p.payload.get(field)
-                         if val:
-                             unique_values.add(val)
-                             
-                     if offset is None:
-                         break
-             except Exception as e:
-                 logger.error(f"Failed to get unique values from Qdrant: {e}")
-        else:
-            # Fallback
-            for doc_data in self.documents.values():
-                payload = doc_data["payload"]
-                if filter_key and filter_value:
-                    if payload.get(filter_key) != filter_value:
-                        continue
-                
-                val = payload.get(field)
-                if val:
-                    unique_values.add(val)
-                    
-        return list(unique_values)

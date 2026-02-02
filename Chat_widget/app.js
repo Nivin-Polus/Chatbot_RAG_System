@@ -122,6 +122,7 @@ function cacheElements() {
         errorMessage: document.getElementById('error-message'),
         chatInterface: document.getElementById('chat-interface'),
         sidebar: document.getElementById('sidebar'),
+        chatMain: document.getElementById('chat-main'),//kebin
         toggleSidebarBtn: document.getElementById('toggle-sidebar'),
         mobileMenuBtn: document.getElementById('mobile-menu-btn'),
         newChatBtn: document.getElementById('new-chat-btn'),
@@ -142,6 +143,9 @@ function cacheElements() {
 }
 
 function setupEventListeners() {
+    //kebin
+    // Initialize mobile sidebar state
+    initializeMobileSidebar();  //kebin
     // Sidebar toggle (desktop + mobile)
     // Left sidebar header button
     if (elements.toggleSidebarBtn) {
@@ -158,6 +162,16 @@ function setupEventListeners() {
             }
         });
     }
+    //kebin
+    // Close mobile sidebar when clicking on chat area on small screens
+    elements.chatMain.addEventListener('click', (e) => {
+        if (window.innerWidth <= 768 && !e.target.closest('#mobile-menu-btn')) {
+            closeMobileSidebar();
+        }
+    });
+    // Handle window resize to reset sidebar state
+    window.addEventListener('resize', handleWindowResize);
+    //kebin
 
     // New chat
     if (elements.newChatBtn) {
@@ -441,6 +455,11 @@ function startNewSession() {
     document.querySelectorAll('.history-item').forEach(item => {
         item.classList.remove('active');
     });
+
+    // Close mobile sidebar when clicking new chat on small screens
+    if (window.innerWidth <= 768) {
+        closeMobileSidebar();
+    }
 }
 
 function loadSession(sessionId) {
@@ -687,7 +706,7 @@ function renderMessages() {
                     <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                     </svg>
-                    <p class="empty-state-text">${WCFG.branding?.emptyStateMessage || 'How can I help you?'}</p>
+                    <p class="empty-state-text">${WCFG.branding?.emptyStateMessage || 'You can start the conversation by sending a message below.'}</p>
                 </div>
             </div>
         `;
@@ -815,25 +834,20 @@ function formatMessageContent(content) {
     // 5. Italic text: *text* (careful not to break bold)
     formatted = formatted.replace(/(^|[^*])\*([^*]+?)\*/g, '$1<em>$2</em>');
 
-    // 6. Unordered lists
-    //    Match lines starting with "- " or "* "
-    //    This is a simple replacement; proper nested lists would need a real parser.
-    //    We'll verify if it's part of a list and wrap items in <li>.
-    //    For a simple implementation, we can turn "- item" into "<li>item</li>".
-    //    Then, if we have consecutive <li>s, we might want a <ul> wrapper, 
-    //    but often just <li> styling is enough if CSS supports it or we rely on line breaks.
-    //    Let's try a slightly safer per-line approach for now.
-    formatted = formatted.replace(/^\s*[-*]\s+(.+)$/gm, '<li>$1</li>');
+    // 6. Lists
+    // Unordered lists: match lines starting with "- " or "* "
+    formatted = formatted.replace(/^\s*[-*]\s+(.+)$/gm, '<li data-list-type="ul">$1</li>');
 
-    // Wrap groups of <li> into <ul> (optional but better HTML)
-    // This simple regex might overlap, so let's check if we can do it effectively.
-    // If not, standard <br> separation works for now, but <li> is better.
-    // Let's stick to simple <li> replacement and rely on CSS or global <ul> structure if needed,
-    // usually raw <li> elements are invalid without `<ul>`.
-    // Valid approach for simple rich text:
-    // We can replace the whole block of <li>s with <ul>...</ul>.
-    formatted = formatted.replace(/(<li>.*<\/li>\s*)+/g, (match) => {
-        return `<ul>${match}</ul>`;
+    // Ordered lists: match lines starting with "1. " or "2. " etc.
+    formatted = formatted.replace(/^\s*(\d+)\.\s+(.+)$/gm, '<li data-list-type="ol">$2</li>');
+
+    // Wrap groups of <li> into <ul> or <ol>
+    formatted = formatted.replace(/((<li data-list-type="(ul|ol)".*?>.*?<\/li>\s*)+)/g, (match) => {
+        const isOrdered = match.includes('data-list-type="ol"');
+        const tag = isOrdered ? 'ol' : 'ul';
+        // Remove the data attribute used for detection
+        const cleanedMatch = match.replace(/\s*data-list-type="(ul|ol)"/g, '');
+        return `<${tag}>${cleanedMatch}</${tag}>`;
     });
 
     // 7. Auto-link URLs
@@ -1252,10 +1266,21 @@ async function streamAssistantResponse(messageId, fullContent) {
 }
 
 // ===== Sidebar =====
+// function toggleSidebar() {
+//     elements.sidebar.classList.toggle('collapsed');
+//     state.sidebarOpen = !elements.sidebar.classList.contains('collapsed');
+// }
+// ===== Sidebar =====
+//kebin
 function toggleSidebar() {
-    elements.sidebar.classList.toggle('collapsed');
-    state.sidebarOpen = !elements.sidebar.classList.contains('collapsed');
-}
+    // On mobile, close the sidebar instead of collapsing
+    if (window.innerWidth <= 768) {
+        closeMobileSidebar();
+    } else {
+        // On desktop, toggle collapsed state
+        elements.sidebar.classList.toggle('collapsed');
+    }
+}//kebin
 
 function toggleMobileSidebar() {
     const isOpen = elements.sidebar.classList.contains('open');
@@ -1286,6 +1311,30 @@ function closeMobileSidebar() {
         overlay.classList.remove('visible');
     }
 }
+//kebin
+// Initialize mobile sidebar state on load
+function initializeMobileSidebar() {
+    if (window.innerWidth <= 768) {
+        // Close sidebar on mobile by default
+        closeMobileSidebar();
+    }
+}
+
+// Handle window resize to properly manage sidebar state
+function handleWindowResize() {
+    if (window.innerWidth <= 768) {
+        // Mobile view: remove collapsed state and close sidebar
+        elements.sidebar.classList.remove('collapsed');
+        closeMobileSidebar();
+    } else {
+        // Desktop view: remove open state (mobile overlay)
+        elements.sidebar.classList.remove('open');
+        const overlay = document.querySelector('.sidebar-overlay');
+        if (overlay) {
+            overlay.classList.remove('visible');
+        }
+    }
+}//kebin
 
 // ===== Theme =====
 function loadTheme() {

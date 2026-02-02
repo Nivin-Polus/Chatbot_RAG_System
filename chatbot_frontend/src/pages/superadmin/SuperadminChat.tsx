@@ -10,13 +10,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Trash2, Users, Search, Loader2, MoreHorizontal, Bot, MessageSquare, User, Send, ExternalLink, FileText, Download, AlertTriangle } from 'lucide-react';
+import { Trash2, Users, Search, Loader2, MoreHorizontal, Bot, MessageSquare, User, Send, ExternalLink, FileText, Download } from 'lucide-react';
 import { ChatMessage, ChatSource } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost } from '@/utils/api';
 import { getAssetUrl } from '@/utils/assets';
 import { saveSession, getSession, getSessions } from '@/utils/chatStorage';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useLocation } from 'react-router-dom';
 
 type CollectionSummary = {
   collection_id: string;
@@ -50,6 +50,15 @@ export default function SuperadminChat() {
   const hasMessages = messages.length > 0;
   const saveTimeoutRef = useRef<number | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const lastLocationRef = useRef<string>(location.pathname);
+  const lastMessagesCountRef = useRef<number>(0);
+  const messagesRef = useRef<ChatMessage[]>(messages);
+
+  // Keep messages ref in sync
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const disableAutoScroll = useCallback(() => {
     if (!isAutoScrollRef.current) {
@@ -163,9 +172,60 @@ export default function SuperadminChat() {
     };
   }, []);
 
+  // Check for new messages when returning to chat tab or periodically while on chat page
+  useEffect(() => {
+    const isChatPage = location.pathname === '/superadmin/chat' || location.pathname.includes('/superadmin/chat');
+    const wasChatPage = lastLocationRef.current === '/superadmin/chat' || lastLocationRef.current.includes('/superadmin/chat');
+    const justReturnedToChat = !wasChatPage && isChatPage;
+
+    // Update last location
+    lastLocationRef.current = location.pathname;
+
+    // Function to check and update messages from storage
+    const checkForUpdates = () => {
+      if (sessionId && selectedCollection && user?.user_id) {
+        const storedSession = getSession(sessionId);
+        if (storedSession) {
+          // Check if stored messages are different (newer or more messages)
+          const storedCount = storedSession.messages.length;
+          const currentCount = messagesRef.current.length;
+
+          if (storedCount > currentCount ||
+            (storedCount === currentCount && storedCount > 0 &&
+              storedSession.messages[storedCount - 1]?.content !== messagesRef.current[currentCount - 1]?.content)) {
+            // New messages found in storage, update state
+            setMessages(storedSession.messages);
+            lastMessagesCountRef.current = storedCount;
+            enableAutoScroll();
+            scrollToBottom();
+          } else {
+            lastMessagesCountRef.current = currentCount;
+          }
+        }
+      }
+    };
+
+    // Check immediately if we just returned to chat
+    if (justReturnedToChat) {
+      checkForUpdates();
+    }
+
+    // Set up periodic check while on chat page (every 2 seconds)
+    let intervalId: number | null = null;
+    if (isChatPage && sessionId) {
+      intervalId = window.setInterval(checkForUpdates, 2000);
+    }
+
+    return () => {
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, [location.pathname, sessionId, selectedCollection, user?.user_id, enableAutoScroll, scrollToBottom]);
+
   // --- Updated Typing Animation ---
   const streamAssistantResponse = useCallback(
-    (rawContent: string, sources?: ChatSource[], isFollowup?: boolean, answerMode?: 'FULL' | 'PARTIAL_TRANSPARENT' | 'FOLLOWUP') => {
+    (rawContent: string, sources?: ChatSource[], isFollowup?: boolean) => {
       const content = rawContent && rawContent.trim().length > 0
         ? rawContent
         : 'I was unable to generate a response.';
@@ -188,11 +248,8 @@ export default function SuperadminChat() {
           timestamp,
           sources,
           isFollowup,
-          answer_mode: answerMode,
         },
       ]);
-
-
 
       return new Promise<void>((resolve) => {
         setIsStreaming(true);
@@ -204,7 +261,7 @@ export default function SuperadminChat() {
             if (currentStored) {
               const updatedMsgs = currentStored.messages.map(m =>
                 m.id === messageId
-                  ? { ...m, content: finalContent, sources, isFollowup, answer_mode: answerMode }
+                  ? { ...m, content: finalContent, sources, isFollowup }
                   : m
               );
 
@@ -215,10 +272,8 @@ export default function SuperadminChat() {
                   content: finalContent,
                   timestamp,
                   sources,
-                  isFollowup,
-                  answer_mode: answerMode
+                  isFollowup
                 });
-
               }
 
               saveSession(targetSessionId, updatedMsgs, selectedCollection, user.user_id, user.role || 'superadmin', true);
@@ -235,7 +290,7 @@ export default function SuperadminChat() {
           if (sessionIdRef.current === targetSessionId) {
             setMessages((prev) =>
               prev.map((msg) =>
-                msg.id === messageId ? { ...msg, content, sources, isFollowup, answer_mode: answerMode } : msg
+                msg.id === messageId ? { ...msg, content, sources, isFollowup } : msg
               )
             );
             if (isStreaming) {
@@ -278,7 +333,7 @@ export default function SuperadminChat() {
           index += 1;
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.id === messageId ? { ...msg, content: content.slice(0, index), sources, isFollowup, answer_mode: answerMode } : msg
+              msg.id === messageId ? { ...msg, content: content.slice(0, index), sources, isFollowup } : msg
             )
           );
           scrollToBottom();
@@ -368,6 +423,11 @@ export default function SuperadminChat() {
     setInputMessage('');
     setIsLoading(true);
     enableAutoScroll();
+
+    // Immediately save user message to storage so it's available if user switches tabs
+    if (sessionId && user?.user_id && selectedCollection) {
+      saveSession(sessionId, updatedMessages, selectedCollection, user.user_id, user.role || 'superadmin', true);
+    }
 
     // Prepare conversation history (last ~20 messages)
     const conversationHistory = updatedMessages
@@ -460,12 +520,10 @@ export default function SuperadminChat() {
       // NEW: Handle follow-up responses
       if (dataResponse.is_followup) {
         const followupContent = dataResponse.followup_questions || 'Could you please clarify your question?';
-        await streamAssistantResponse(followupContent, undefined, true, 'FOLLOWUP');
+        await streamAssistantResponse(followupContent, undefined, true);
         setIsLoading(false);
         return;
       }
-
-      const answerMode = dataResponse.answer_mode;
 
       let assistantContent =
         dataResponse.response || dataResponse.answer || dataResponse.content || 'I was unable to generate a response.';
@@ -525,7 +583,7 @@ export default function SuperadminChat() {
         });
       }
 
-      await streamAssistantResponse(assistantContent, sources, false, answerMode);
+      await streamAssistantResponse(assistantContent, sources);
       setIsLoading(false);
 
       if (user?.access_token && selectedCollection) {
@@ -615,9 +673,8 @@ export default function SuperadminChat() {
   );
 
   const renderMessageContent = useCallback(
-    (content: string, messageId: string, messageSources?: ChatSource[], answerMode?: 'FULL' | 'PARTIAL_TRANSPARENT' | 'FOLLOWUP') => {
+    (content: string, messageId: string, messageSources?: ChatSource[]) => {
       const nodes: ReactNode[] = [];
-
       const lines = content.split('\n');
       let inSourcesSection = false;
       let keyCounter = 0;
@@ -1084,6 +1141,42 @@ export default function SuperadminChat() {
           continue;
         }
 
+        // Check for Markdown lists (- or * for ul, 1. for ol)
+        const listMatch = trimmed.match(/^([-*]|\d+\.)\s+(.+)$/);
+        if (listMatch && !inSourcesSection) {
+          const isOrdered = /^\d+/.test(listMatch[1]);
+          const listLines: string[] = [];
+          let j = i;
+
+          while (j < lines.length) {
+            const currentTrimmed = lines[j].trim();
+            const currentMatch = currentTrimmed.match(/^([-*]|\d+\.)\s+(.+)$/);
+            if (!currentMatch) break;
+            listLines.push(currentTrimmed);
+            j++;
+          }
+
+          const ListTag = isOrdered ? 'ol' : 'ul';
+          nodes.push(
+            <ListTag
+              key={`${messageId}-list-${i}`}
+              className={`my-3 ml-6 ${isOrdered ? 'list-decimal' : 'list-disc'} space-y-1`}
+            >
+              {listLines.map((line, idx) => {
+                const itemContent = line.replace(/^([-*]|\d+\.)\s+/, '');
+                return (
+                  <li key={`${messageId}-list-${i}-item-${idx}`} className="pl-1">
+                    {createInlineElements(itemContent, false)}
+                  </li>
+                );
+              })}
+            </ListTag>
+          );
+
+          i = j - 1;
+          continue;
+        }
+
         // Wrap each line in a container to keep inline elements together
         const lineNodes = createInlineElements(rawLine, false); // block=false
         if (lineNodes.length > 0) {
@@ -1195,7 +1288,7 @@ export default function SuperadminChat() {
                     <div className="flex items-center justify-center text-muted-foreground dark:text-gray-300 h-[50vh]">
                       <div className="flex flex-col items-center gap-3 text-center">
                         <MessageSquare className="h-12 w-12 opacity-50" />
-                        <p className="text-base font-medium">How can I help you?</p>
+                        <p className="text-base font-medium">You can start the conversation by sending a message below.</p>
                       </div>
                     </div>
                   ) : (
@@ -1244,7 +1337,7 @@ export default function SuperadminChat() {
                               </p>
                             </div>
                             <div className="flex flex-col gap-0.5 text-sm leading-snug">
-                              {renderMessageContent(message.content, message.id, message.sources, message.answer_mode)}
+                              {renderMessageContent(message.content, message.id, message.sources)}
                             </div>
                           </div>
                         </div>

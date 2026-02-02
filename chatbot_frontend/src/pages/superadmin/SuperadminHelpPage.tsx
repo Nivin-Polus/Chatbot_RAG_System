@@ -15,7 +15,7 @@ import { Collection, PluginIntegration } from '@/types/auth';
 import { apiGet, apiPost, apiPut } from '@/utils/api';
 import { toast } from 'sonner';
 
-export function HelpPageContent() {
+export default function SuperadminHelpPage() {
   const { user } = useAuth();
   const [collections, setCollections] = useState<Collection[]>([]);
   const [isCollectionsLoading, setIsCollectionsLoading] = useState(true);
@@ -180,198 +180,6 @@ export function HelpPageContent() {
   );
 
   return (
-    <div className="space-y-6">
-
-      <Card>
-        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-2xl">
-              <HelpCircle className="h-5 w-5" /> Help Page URLs
-            </CardTitle>
-            <CardDescription>View and manage standalone help pages for each knowledge base.</CardDescription>
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-            <Select
-              value={pluginFilterCollection}
-              onValueChange={setPluginFilterCollection}
-              disabled={collections.length === 0}
-            >
-              <SelectTrigger className="w-[220px]">
-                <SelectValue placeholder="Filter by knowledge base" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All knowledge bases</SelectItem>
-                {collections.map((collection) => (
-                  <SelectItem key={collection.collection_id} value={collection.collection_id}>
-                    {collection.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              onClick={() => {
-                const targetCollection = pluginFilterCollection === 'all' ? undefined : pluginFilterCollection;
-                refreshPlugins(targetCollection);
-              }}
-              variant="outline"
-            >
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {isPluginLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            </div>
-          ) : visibleCollections.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              {collections.length === 0
-                ? 'Create a knowledge base before setting up help pages.'
-                : 'No knowledge bases available for help pages.'}
-            </div>
-          ) : (
-            <TooltipProvider delayDuration={150}>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Knowledge Base</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Help Page URL</TableHead>
-                    <TableHead>Created</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {visibleCollections.map((collection) => {
-                    const plugin = plugins.find(
-                      (p) => p.collection_id === collection.collection_id && p.widget_token
-                    );
-                    const widgetUrl = plugin?.widget_token
-                      ? `${import.meta.env.VITE_CHAT_WIDGET_BASE_URL}/${plugin.widget_token}`
-                      : '';
-
-                    return (
-                      <TableRow key={collection.collection_id}>
-                        <TableCell className="font-medium">{collection.name}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            {plugin ? (
-                              <>
-                                <Switch
-                                  checked={plugin.is_widget_active}
-                                  onCheckedChange={() => handleToggleWidgetStatus(plugin)}
-                                />
-                                <Badge
-                                  variant="outline"
-                                  className={
-                                    plugin.is_widget_active
-                                      ? 'bg-green-50 text-green-700 border-green-200'
-                                      : 'bg-gray-50 text-gray-700 border-gray-200'
-                                  }
-                                >
-                                  {plugin.is_widget_active ? (
-                                    <>
-                                      <CheckCircle2 className="h-3 w-3 mr-1" />
-                                      Active
-                                    </>
-                                  ) : (
-                                    <>
-                                      <XCircle className="h-3 w-3 mr-1" />
-                                      Inactive
-                                    </>
-                                  )}
-                                </Badge>
-                              </>
-                            ) : (
-                              <Badge
-                                variant="outline"
-                                className="bg-gray-50 text-gray-700 border-gray-200"
-                              >
-                                Not configured
-                              </Badge>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {plugin ? (
-                            <>
-                              <div className="flex items-center gap-2 max-w-md">
-                                <Input
-                                  readOnly
-                                  value={widgetUrl}
-                                  className="bg-muted font-mono text-xs"
-                                />
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Button
-                                      size="icon"
-                                      variant="outline"
-                                      onClick={() => handleCopyWidgetUrl(widgetUrl)}
-                                    >
-                                      <Copy className="h-4 w-4" />
-                                    </Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent side="top">Copy URL</TooltipContent>
-                                </Tooltip>
-                              </div>
-                              <p className="text-[10px] text-muted-foreground italic mt-1">
-                                * This URL is permanent and does not expire
-                              </p>
-                            </>
-                          ) : (
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              className="w-fit"
-                              onClick={() => handleGenerateWidgetUrl(collection)}
-                              disabled={generatingWidgetUrl === collection.collection_id}
-                            >
-                              {generatingWidgetUrl === collection.collection_id ? (
-                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                              ) : null}
-                              Generate Help Page URL
-                            </Button>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {plugin?.created_at ? new Date(plugin.created_at).toLocaleString() : '—'}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </TooltipProvider>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Info Card */}
-      <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
-        <CardContent className="pt-6">
-          <div className="flex gap-3">
-            <HelpCircle className="h-5 w-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
-                About Help Pages
-              </p>
-              <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1 list-disc list-inside">
-                <li>Help pages provide a standalone chatbot interface accessible via a unique URL</li>
-                <li>Each URL is automatically generated when a plugin is created and never expires</li>
-                <li>Share the URL with users to give them direct access to your knowledge base</li>
-                <li>Toggle the status to enable or disable access without changing the URL</li>
-              </ul>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-export default function SuperadminHelpPage() {
-  return (
     <DashboardLayout>
       <div className="space-y-6">
         <div className="flex flex-col gap-2">
@@ -380,7 +188,191 @@ export default function SuperadminHelpPage() {
             Manage standalone help page URLs for all knowledge bases.
           </p>
         </div>
-        <HelpPageContent />
+
+        <Card>
+          <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-2xl">
+                <HelpCircle className="h-5 w-5" /> Help Page URLs
+              </CardTitle>
+              <CardDescription>View and manage standalone help pages for each knowledge base.</CardDescription>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <Select
+                value={pluginFilterCollection}
+                onValueChange={setPluginFilterCollection}
+                disabled={collections.length === 0}
+              >
+                <SelectTrigger className="w-[220px]">
+                  <SelectValue placeholder="Filter by knowledge base" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All knowledge bases</SelectItem>
+                  {collections.map((collection) => (
+                    <SelectItem key={collection.collection_id} value={collection.collection_id}>
+                      {collection.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                onClick={() => {
+                  const targetCollection = pluginFilterCollection === 'all' ? undefined : pluginFilterCollection;
+                  refreshPlugins(targetCollection);
+                }}
+                variant="outline"
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {isPluginLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : visibleCollections.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                {collections.length === 0
+                  ? 'Create a knowledge base before setting up help pages.'
+                  : 'No knowledge bases available for help pages.'}
+              </div>
+            ) : (
+              <TooltipProvider delayDuration={150}>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Knowledge Base</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Help Page URL</TableHead>
+                      <TableHead>Created</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {visibleCollections.map((collection) => {
+                      const plugin = plugins.find(
+                        (p) => p.collection_id === collection.collection_id && p.widget_token
+                      );
+                      const widgetUrl = plugin?.widget_token
+                        ? `${import.meta.env.VITE_CHAT_WIDGET_BASE_URL}/${plugin.widget_token}`
+                        : '';
+
+                      return (
+                        <TableRow key={collection.collection_id}>
+                          <TableCell className="font-medium">{collection.name}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              {plugin ? (
+                                <>
+                                  <Switch
+                                    checked={plugin.is_widget_active}
+                                    onCheckedChange={() => handleToggleWidgetStatus(plugin)}
+                                  />
+                                  <Badge
+                                    variant="outline"
+                                    className={
+                                      plugin.is_widget_active
+                                        ? 'bg-green-50 text-green-700 border-green-200'
+                                        : 'bg-gray-50 text-gray-700 border-gray-200'
+                                    }
+                                  >
+                                    {plugin.is_widget_active ? (
+                                      <>
+                                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                                        Active
+                                      </>
+                                    ) : (
+                                      <>
+                                        <XCircle className="h-3 w-3 mr-1" />
+                                        Inactive
+                                      </>
+                                    )}
+                                  </Badge>
+                                </>
+                              ) : (
+                                <Badge
+                                  variant="outline"
+                                  className="bg-gray-50 text-gray-700 border-gray-200"
+                                >
+                                  Not configured
+                                </Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {plugin ? (
+                              <>
+                                <div className="flex items-center gap-2 max-w-md">
+                                  <Input
+                                    readOnly
+                                    value={widgetUrl}
+                                    className="bg-muted font-mono text-xs"
+                                  />
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        size="icon"
+                                        variant="outline"
+                                        onClick={() => handleCopyWidgetUrl(widgetUrl)}
+                                      >
+                                        <Copy className="h-4 w-4" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top">Copy URL</TooltipContent>
+                                  </Tooltip>
+                                </div>
+                                <p className="text-[10px] text-muted-foreground italic mt-1">
+                                  * This URL is permanent and does not expire
+                                </p>
+                              </>
+                            ) : (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                className="w-fit"
+                                onClick={() => handleGenerateWidgetUrl(collection)}
+                                disabled={generatingWidgetUrl === collection.collection_id}
+                              >
+                                {generatingWidgetUrl === collection.collection_id ? (
+                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                ) : null}
+                                Generate Help Page URL
+                              </Button>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {plugin?.created_at ? new Date(plugin.created_at).toLocaleString() : '—'}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TooltipProvider>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Info Card */}
+        <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+          <CardContent className="pt-6">
+            <div className="flex gap-3">
+              <HelpCircle className="h-5 w-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                  About Help Pages
+                </p>
+                <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1 list-disc list-inside">
+                  <li>Help pages provide a standalone chatbot interface accessible via a unique URL</li>
+                  <li>Each URL is automatically generated when a plugin is created and never expires</li>
+                  <li>Share the URL with users to give them direct access to your knowledge base</li>
+                  <li>Toggle the status to enable or disable access without changing the URL</li>
+                </ul>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </DashboardLayout>
   );

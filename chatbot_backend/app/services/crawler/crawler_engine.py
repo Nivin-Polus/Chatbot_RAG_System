@@ -29,14 +29,12 @@ except ImportError:
     RAPIDFUZZ_AVAILABLE = False
 
 from .config import CrawlConfig, CrawlStats, USER_AGENTS
-from .content_extractor import ContentExtractor, reset_template_registry
-from .chunker import TextChunker, ContentChunk, SemanticChunker, EnhancedContentChunk
+from .content_extractor import ContentExtractor
+from .chunker import TextChunker, ContentChunk
 from .duplicate_detector import DuplicateDetector
 from .sitemap_parser import SitemapParser
 from .html_fetcher import fetch_static, is_empty_static, close_playwright
 from .document_extractor import download_document, extract_text_from_document, is_document_url
-from .image_analyzer import ImageAnalyzer
-from .ocr_extractor import OCRExtractor
 
 logger = logging.getLogger("crawler_engine")
 
@@ -70,17 +68,38 @@ def is_invalid_url(url: str) -> bool:
     except Exception:
         return True
     
-    # Reject each path segment for common bot-trap patterns (e.g., repeating chars)
+    # Reject 3+ repeated characters anywhere (e.g., "ttime" has "ttt" pattern is wrong, 
+    # but we check for any char repeated 3+ times like "aaa", "bbb")
+    if re.search(r"(.)\1{2,}", path):
+        return True
+    
+    # Check each path segment for malformed patterns
     segments = path.strip("/").split("/")
     for segment in segments:
         if not segment:
             continue
-            
-        # Reject 3+ repeated characters in a segment (usually a bot trap or typo)
-        if re.search(r"(.)\1{2,}", segment):
-            return True
-
-    return False
+        
+        # Reject segments starting with repeated letter (e.g., "ppolicies", "aapple", "bbenefits")
+        if len(segment) >= 2 and segment[0] == segment[1]:
+            # Very few English words start with doubled letters
+            valid_double_starts = {"aa", "ee", "oo"}
+            if segment[:2] not in valid_double_starts:
+                logger.debug(f"🚫 Rejecting URL with doubled start: {segment} in {url}")
+                return True
+        
+        # Reject unusual double-letter patterns within segment
+        # Common valid double letters in English
+        common_doubles = {
+            "ss", "tt", "ll", "oo", "ee", "ff", "rr", "nn", 
+            "pp", "cc", "mm", "dd", "gg", "bb", "aa", "ii", "zz", "ww"
+        }
+        
+        double_matches = re.findall(r"([a-z])\1", segment)
+        for match in double_matches:
+            double = match + match
+            if double not in common_doubles:
+                logger.debug(f"🚫 Rejecting URL with unusual double: {double} in {url}")
+                return True
     
     return False
 
@@ -220,38 +239,14 @@ class CrawlerEngine:
         
         # Initialize components
         self.content_extractor = ContentExtractor()
-        
-        # Phase 2: Enhanced Chunking
-        if getattr(config, 'ENABLE_SEMANTIC_CHUNKING', False):
-            self.chunker = SemanticChunker(config)
-            self.legacy_chunker = TextChunker(
-                chunk_size=config.chunk_size,
-                chunk_overlap=config.chunk_overlap
-            )
-            logger.info("Using SemanticChunker (Phase 2)")
-        else:
-            self.chunker = TextChunker(
-                chunk_size=config.chunk_size,
-                chunk_overlap=config.chunk_overlap
-            )
-            self.legacy_chunker = None
-            logger.info("Using TextChunker (Legacy)")
+        self.chunker = TextChunker(
+            chunk_size=config.chunk_size,
+            chunk_overlap=config.chunk_overlap
+        )
         self.duplicate_detector = DuplicateDetector(
             similarity_threshold=config.similarity_threshold
         )
         self.sitemap_parser = SitemapParser(config.target_url)
-        
-        # OCR components (if enabled)
-        if config.enable_ocr:
-            self.image_analyzer = ImageAnalyzer()
-            self.ocr_extractor = OCRExtractor(
-                cache_dir=config.ocr_cache_dir,
-                use_gpu=config.ocr_use_gpu
-            )
-            logger.info(f"OCR enabled. Cache: {config.ocr_cache_dir}, GPU: {config.ocr_use_gpu}")
-        else:
-            self.image_analyzer = None
-            self.ocr_extractor = None
         
         # URL tracking
         self.visited_urls: Set[str] = set()
@@ -370,9 +365,6 @@ class CrawlerEngine:
         self._notify_progress()
         
         try:
-            # Reset template registry for fresh detection in this crawl job
-            reset_template_registry()
-            
             # 1. Load robots.txt
             self._load_robots()
             
@@ -478,36 +470,18 @@ class CrawlerEngine:
         except Exception as e:
             logger.warning(f"Sitemap discovery failed: {e}")
     
-    def _is_same_domain(self, url: str) -> bool:
-        """Check if URL is on the same domain as target_url (handling www. alias)."""
-        try:
-            parsed = urlparse(url)
-            if not parsed.netloc:
-                return True # Relative URL
-                
-            if parsed.netloc.lower() == self.parsed_url.netloc.lower():
-                return True
-            
-            # Handle www. vs non-www. comparison
-            net1 = parsed.netloc.lower().replace('www.', '')
-            net2 = self.parsed_url.netloc.lower().replace('www.', '')
-            
-            return net1 == net2 if net1 and net2 else False
-        except Exception:
-            return False
-
     def _should_crawl_url(self, url: str) -> bool:
         """Check if URL should be crawled based on config and validation."""
         # First, reject obviously malformed URLs (typos, bad schemes, etc.)
         if is_invalid_url(url):
             return False
         
-        # Check if internal (handling www. aliases)
-        if not self._is_same_domain(url):
+        # Check if internal
+        parsed = urlparse(url)
+        if parsed.netloc and parsed.netloc != self.parsed_url.netloc:
             return False
         
         # Check extension
-        parsed = urlparse(url)
         path = parsed.path.lower()
         for ext in self.config.skip_extensions:
             if path.endswith(ext):
@@ -822,15 +796,8 @@ class CrawlerEngine:
                     pass
                 return False
             
-            # Create chunks with fallback mechanism
-            try:
-                page_chunks = self.chunker.chunk_page(extracted, job_id=self.stats.job_id, collection_id=self.config.collection_id, crawl_depth=depth)
-            except Exception as e:
-                if getattr(self, 'legacy_chunker', None):
-                    logger.warning(f"Phase 2 chunking failed for document {url}, falling back: {e}")
-                    page_chunks = self.legacy_chunker.chunk_page(extracted, job_id=self.stats.job_id, collection_id=self.config.collection_id, crawl_depth=depth)
-                else:
-                    raise e
+            # Create chunks
+            page_chunks = self.chunker.chunk_page(extracted, job_id=self.stats.job_id, collection_id=self.config.collection_id, crawl_depth=depth)
             
             # Process chunks
             for chunk in page_chunks:
@@ -1009,51 +976,7 @@ class CrawlerEngine:
             
             # Extract content
             extracted = self.content_extractor.extract(html_content, url)
-            
-            # -------------------------------------------------------------------------
-            # OCR Processing (Team/Person Pages only)
-            # -------------------------------------------------------------------------
-            if (self.config.enable_ocr and 
-                self.image_analyzer and 
-                self.ocr_extractor):
-                
-                # Check metrics from extract() result
-                page_type_data = extracted.get('page_type', {})
-                page_type = page_type_data.get('type', 'general') if isinstance(page_type_data, dict) else 'general'
-                
-                # Only run on relevant page types
-                if page_type in ["team_page", "person_profile"]:
-                    try:
-                        # Parse with BS4 again if needed (or reuse if accessible)
-                        # We use the html_content we already have
-                        soup = BeautifulSoup(html_content, 'html.parser')
-                        people_data = extracted.get('people', [])
-                        
-                        ocr_results = await self._process_images_with_ocr(
-                            soup=soup,
-                            url=url,
-                            page_type=page_type,
-                            people_data=people_data
-                        )
-                        
-                        if ocr_results:
-                            # Merge back into extracted data
-                            enhanced_people = self._merge_ocr_with_people(people_data, ocr_results)
-                            extracted['people'] = enhanced_people
-                            
-                            # Update raw text if significantly new text was found
-                            new_text = []
-                            for res in ocr_results:
-                                if res.get('text'):
-                                    new_text.append(res['text'])
-                            
-                            if new_text and len(extracted.get('raw_text', '')) < 5000:
-                                # Append OCR text to raw_text for valid chunks
-                                extracted['raw_text'] += "\n\n=== OCR Extracted Content ===\n" + "\n".join(new_text)
-                                
-                    except Exception as e:
-                        logger.error(f"OCR processing failed for {url}: {e}")
-            
+
             # Always attempt link extraction, even if content is thin.
             # This prevents early termination on landing pages that have sparse text but valid links.
             if not use_static_html and page:
@@ -1105,26 +1028,13 @@ class CrawlerEngine:
                 self.stats.skipped_urls.append({"url": url, "reason": f"Duplicate: {reason}"})
                 return False
             
-            # Create chunks with fallback mechanism
-            try:
-                page_chunks = self.chunker.chunk_page(
-                    extracted,
-                    job_id=self.stats.job_id,
-                    collection_id=self.config.collection_id,
-                    crawl_depth=depth
-                )
-            except Exception as e:
-                # Fallback to legacy chunker if available and SemanticChunker failed
-                if getattr(self, 'legacy_chunker', None):
-                    logger.warning(f"Phase 2 chunking failed for {url}, falling back to legacy: {e}")
-                    page_chunks = self.legacy_chunker.chunk_page(
-                        extracted,
-                        job_id=self.stats.job_id,
-                        collection_id=self.config.collection_id,
-                        crawl_depth=depth
-                    )
-                else:
-                    raise e
+            # Create chunks
+            page_chunks = self.chunker.chunk_page(
+                extracted,
+                job_id=self.stats.job_id,
+                collection_id=self.config.collection_id,
+                crawl_depth=depth
+            )
             
             # Process chunks
             for chunk in page_chunks:
@@ -1282,8 +1192,9 @@ class CrawlerEngine:
                     absolute_url = urljoin(current_url, href)
                     normalized = self._normalize_url(absolute_url)
                     
-                    # Check if internal
-                    if self._is_same_domain(normalized):
+                    # Check if internal (same domain only)
+                    parsed = urlparse(normalized)
+                    if parsed.netloc == self.parsed_url.netloc:
                         links.add(normalized)
                         # Log each discovered link for debugging
                         logger.debug(f"  → Found: {normalized}")
@@ -1326,7 +1237,8 @@ class CrawlerEngine:
                 normalized = self._normalize_url(absolute_url)
                 
                 # Check if internal
-                if self._is_same_domain(normalized):
+                parsed = urlparse(normalized)
+                if parsed.netloc == self.parsed_url.netloc:
                     links.add(normalized)
                     logger.debug(f"  → Found (static): {normalized}")
                 else:
@@ -1382,186 +1294,3 @@ class CrawlerEngine:
     def get_stats(self) -> CrawlStats:
         """Get current statistics."""
         return self.stats
-
-    async def _process_images_with_ocr(
-        self,
-        soup: BeautifulSoup,
-        url: str,
-        page_type: str,
-        people_data: List[Dict]
-    ) -> List[Dict]:
-        """
-        Find and OCR relevant images on the page.
-        """
-        ocr_results = []
-        
-        # Limit total images on page to analyze to avoid checking hundreds of icons
-        images = soup.find_all('img', limit=100)
-        
-        # Analyze each image
-        images_to_ocr = []
-        people_count = len(people_data) if people_data else 0
-        
-        for img in images:
-            context = {
-                "page_type": page_type,
-                "page_url": url,
-                "people_count": people_count
-            }
-            
-            # Determine if image should be OCR'd
-            analysis = self.image_analyzer.should_ocr_image(img, context)
-            
-            if analysis["should_ocr"] and analysis["priority"] >= self.config.ocr_priority_threshold:
-                images_to_ocr.append((img, analysis))
-        
-        # Sort by priority (highest first)
-        images_to_ocr.sort(key=lambda x: x[1]["priority"], reverse=True)
-        
-        # Limit number of images to OCR per page
-        images_to_ocr = images_to_ocr[:self.config.ocr_max_images_per_page]
-        
-        if not images_to_ocr:
-            return []
-            
-        logger.info(f"OCR: Processing {len(images_to_ocr)} images on {url} (Type: {page_type})")
-        
-        # Process images
-        loop = asyncio.get_event_loop()
-        start_time = time.time()
-        
-        for img, analysis in images_to_ocr:
-            # Check global timeout (max 30 seconds total OCR time per page)
-            if time.time() - start_time > 30:
-                logger.warning(f"OCR timeout reached for page {url}")
-                break
-            
-            try:
-                # Run OCR in executor to avoid blocking the event loop
-                # The extract_text_from_image method performs I/O (download) and CPU work (OCR)
-                # It is synchronous, so we offload it.
-                ocr_result = await loop.run_in_executor(
-                    None,
-                    self.ocr_extractor.extract_text_from_image,
-                    analysis["image_url"],
-                    analysis,
-                    self.config.ocr_timeout_seconds
-                )
-                
-                self.stats.images_ocr_attempted += 1
-                
-                if ocr_result["success"]:
-                    # Add metadata
-                    ocr_result["image_url"] = analysis["image_url"]
-                    ocr_result["image_alt"] = analysis["image_alt"]
-                    ocr_result["context_type"] = analysis["context_type"]
-                    
-                    ocr_results.append(ocr_result)
-                    
-                    # Update statistics
-                    self.stats.images_ocr_succeeded += 1
-                    self.stats.ocr_text_extracted += len(ocr_result["text"])
-                    self.stats.total_ocr_time += ocr_result["processing_time"]
-                    
-                    logger.debug(
-                        f"OCR success: {analysis['image_url'][:30]}... | "
-                        f"Conf: {ocr_result['confidence']:.2f}"
-                    )
-                else:
-                    self.stats.images_ocr_failed += 1
-                    # logger.warning(f"OCR failed: {ocr_result.get('error')}")
-            
-            except Exception as e:
-                self.stats.images_ocr_failed += 1
-                logger.error(f"OCR exception for {analysis['image_url']}: {e}")
-                continue
-        
-        return ocr_results
-
-    def _merge_ocr_with_people(
-        self,
-        people_data: List[Dict],
-        ocr_results: List[Dict]
-    ) -> List[Dict]:
-        """
-        Merge OCR-extracted data with HTML-extracted person data.
-        """
-        enhanced_count = 0
-        new_count = 0
-        
-        for ocr_result in ocr_results:
-            # Enforce confidence threshold strictly per USER REQUEST
-            if ocr_result["confidence"] < self.config.ocr_min_confidence:
-                continue
-                
-            structured = ocr_result.get("structured", {})
-            ocr_name = structured.get("person_name")
-            ocr_title = structured.get("person_title")
-            
-            if not ocr_name and not ocr_title:
-                continue
-            
-            # Try to match with existing person
-            matched = False
-            for person in people_data:
-                # Match by name similarity if we have an OCR name
-                if ocr_name and person.get("name"):
-                    similarity = self._calculate_name_similarity(
-                        ocr_name,
-                        person["name"]
-                    )
-                    
-                    if similarity > 0.8:  # 80% similar
-                        matched = True
-                        
-                        # Add OCR data if missing
-                        if not person.get("title") and ocr_title:
-                            person["title"] = ocr_title
-                            person["ocr_enhanced"] = True
-                            enhanced_count += 1
-                        elif ocr_title and person.get("title") and len(ocr_title) > len(person["title"]):
-                             # Replace with longer title from OCR? risky, maybe just append
-                             pass
-                        
-                        break
-            
-            # If no match found and we have a high-confidence name, create new person
-            if not matched and ocr_name:
-                # Double check confidence for NEW people
-                if ocr_result["confidence"] > 0.7:  # Higher bar for creating new entities
-                    new_person = {
-                        "name": ocr_name,
-                        "title": ocr_title or "",
-                        "description": structured.get("other_text", ""),
-                        "image_url": ocr_result.get("image_url"),
-                        "source_url": ocr_result.get("image_url"), # extraction source
-                        "extraction_method": "ocr",
-                        "ocr_confidence": ocr_result["confidence"]
-                    }
-                    people_data.append(new_person)
-                    self.stats.ocr_people_found += 1
-                    new_count += 1
-        
-        if enhanced_count or new_count:
-            logger.info(f"OCR Merge: Enhanced {enhanced_count}, Found New {new_count}")
-            
-        return people_data
-
-    def _calculate_name_similarity(self, name1: str, name2: str) -> float:
-        """
-        Calculate similarity between two names (0-1).
-        Simple Jaccard similarity of lowercased words.
-        """
-        if not name1 or not name2:
-            return 0.0
-            
-        words1 = set(name1.lower().split())
-        words2 = set(name2.lower().split())
-        
-        if not words1 or not words2:
-            return 0.0
-        
-        intersection = len(words1 & words2)
-        union = len(words1 | words2)
-        
-        return intersection / union if union > 0 else 0.0

@@ -5,7 +5,7 @@ Production-ready configuration for the web crawler with per-domain rules.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Set, Tuple
+from typing import List, Optional, Dict, Set
 from datetime import datetime
 import json
 
@@ -31,26 +31,6 @@ class CrawlConfig:
     chunk_size: int = 1000  # tokens per chunk for RAG
     chunk_overlap: int = 500  # overlap between chunks
     
-    # Phase 2: Enhanced Chunking Configuration
-    ENABLE_HIERARCHICAL_CHUNKING: bool = True
-    ENABLE_PERSON_CHUNKING: bool = True
-    ENABLE_SEMANTIC_CHUNKING: bool = True
-    
-    # Phase 2: Chunk sizes by content type (min, max tokens)
-    CHUNK_SIZES: Dict[str, Tuple[int, int]] = field(default_factory=lambda: {
-        "narrative": (800, 1200),
-        "reference": (600, 800),
-        "code": (400, 600),
-        "person_profile": (200, 800),  # Flexible for complete profiles
-    })
-    
-    # Phase 2: Hierarchical chunking settings
-    PARENT_CHUNK_SIZE: int = 1500  # tokens
-    CHILD_CHUNK_SIZE_RANGE: Tuple[int, int] = (400, 600)  # tokens
-    
-    # Phase 2: Semantic overlap
-    SEMANTIC_OVERLAP_RATIO: float = 0.25  # 25% overlap
-
     # Filtering
     # NOTE:
     # - Use segment-specific patterns (e.g., "/admin/") to avoid
@@ -109,15 +89,6 @@ class CrawlConfig:
     max_backoff_seconds: float = 60.0          # Maximum backoff delay in seconds
     stale_heartbeat_seconds: int = 300         # Consider stuck if no activity for 5 min
     
-    # OCR Configuration
-    enable_ocr: bool = False
-    ocr_max_images_per_page: int = 20
-    ocr_timeout_seconds: int = 15
-    ocr_priority_threshold: int = 5
-    ocr_min_confidence: float = 0.5
-    ocr_cache_dir: str = "./ocr_cache"
-    ocr_use_gpu: bool = False
-    
     def to_dict(self) -> dict:
         """Convert to dictionary for storage."""
         return {
@@ -139,12 +110,7 @@ class CrawlConfig:
             "circuit_breaker_threshold": self.circuit_breaker_threshold,
             "circuit_breaker_reset_seconds": self.circuit_breaker_reset_seconds,
             "max_backoff_seconds": self.max_backoff_seconds,
-            "circuit_breaker_reset_seconds": self.circuit_breaker_reset_seconds,
-            "max_backoff_seconds": self.max_backoff_seconds,
-            "stale_heartbeat_seconds": self.stale_heartbeat_seconds,
-            "enable_ocr": self.enable_ocr,
-            "ocr_max_images_per_page": self.ocr_max_images_per_page,
-            "ocr_min_confidence": self.ocr_min_confidence
+            "stale_heartbeat_seconds": self.stale_heartbeat_seconds
         }
     
     @classmethod
@@ -170,15 +136,6 @@ class CrawlStats:
     # Content stats
     chunks_created: int = 0
     total_characters: int = 0
-    
-    # OCR Statistics
-    images_analyzed: int = 0
-    images_ocr_attempted: int = 0
-    images_ocr_succeeded: int = 0
-    images_ocr_failed: int = 0
-    ocr_text_extracted: int = 0
-    ocr_people_found: int = 0
-    total_ocr_time: float = 0.0
     
     # Timing
     started_at: Optional[datetime] = None

@@ -41,7 +41,6 @@ Pillow>=9.5.0,<11.0.0
 requests>=2.31.0,<2.33.0
 httpx>=0.25.0,<0.28.0
 httpcore>=1.0.0,<1.1.0
-slowapi>=0.1.9,<0.2.0
  
 # Data validation
 pydantic>=2.5.0,<2.7.0
@@ -66,7 +65,3 @@ playwright>=1.40.0,<2.0.0
 beautifulsoup4>=4.12.0,<5.0.0
 rapidfuzz>=3.5.0,<4.0.0
 
-
-# OCR
-easyocr>=1.7.1,<1.8.0
-opencv-python-headless>=4.8.0,<5.0.0
