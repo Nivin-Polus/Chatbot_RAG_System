@@ -18,13 +18,39 @@ import pandas as pd
 
 # Chunk size (number of words per chunk)
 CHUNK_SIZE = 200
+# Overlap between chunks to preserve context at boundaries
+CHUNK_OVERLAP = 50
 
 
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE) -> List[str]:
+def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
+    """
+    Split text into overlapping chunks for better context preservation.
+    
+    Args:
+        text: The text to chunk
+        chunk_size: Number of words per chunk
+        overlap: Number of words to overlap between consecutive chunks
+    
+    Returns:
+        List of text chunks with overlap
+    """
     words = text.split()
     chunks = []
-    for i in range(0, len(words), chunk_size):
-        chunks.append(" ".join(words[i:i + chunk_size]))
+    
+    if not words:
+        return chunks
+    
+    # Calculate step size (chunk_size - overlap)
+    step = max(1, chunk_size - overlap)
+    
+    for i in range(0, len(words), step):
+        chunk = " ".join(words[i:i + chunk_size])
+        if chunk:
+            chunks.append(chunk)
+        # Stop if we've reached the end
+        if i + chunk_size >= len(words):
+            break
+    
     return chunks
 
 
@@ -39,11 +65,11 @@ def parse_file(filename: str, content: bytes, chunk_size: int = CHUNK_SIZE) -> L
     ext = filename.split('.')[-1].lower()
     text = ""
     
-    logger.info(f"[FILE PARSER] Processing file: {filename}, extension: {ext}, size: {len(content)} bytes")
+    logger.debug(f"[FILE PARSER] Processing file: {filename}, extension: {ext}, size: {len(content)} bytes")
 
     try:
         if ext == "pdf":
-            logger.info(f"[FILE PARSER] Processing PDF file")
+            logger.debug(f"[FILE PARSER] Processing PDF file")
             reader = PdfReader(BytesIO(content))
             page_count = 0
             for page in reader.pages:
@@ -51,20 +77,20 @@ def parse_file(filename: str, content: bytes, chunk_size: int = CHUNK_SIZE) -> L
                 if page_text:
                     text += page_text + "\n"
                     page_count += 1
-            logger.info(f"[FILE PARSER] PDF: Extracted text from {page_count} pages")
+            logger.debug(f"[FILE PARSER] PDF: Extracted text from {page_count} pages")
 
         elif ext == "docx":
-            logger.info(f"[FILE PARSER] Processing DOCX file")
+            logger.debug(f"[FILE PARSER] Processing DOCX file")
             doc = Document(BytesIO(content))
             para_count = 0
             for para in doc.paragraphs:
                 if para.text:
                     text += para.text + "\n"
                     para_count += 1
-            logger.info(f"[FILE PARSER] DOCX: Extracted {para_count} paragraphs")
+            logger.debug(f"[FILE PARSER] DOCX: Extracted {para_count} paragraphs")
 
         elif ext == "pptx":
-            logger.info(f"[FILE PARSER] Processing PPTX file")
+            logger.debug(f"[FILE PARSER] Processing PPTX file")
             prs = Presentation(BytesIO(content))
             slide_count = 0
             shape_count = 0
@@ -74,10 +100,10 @@ def parse_file(filename: str, content: bytes, chunk_size: int = CHUNK_SIZE) -> L
                     if hasattr(shape, "text") and shape.text.strip():
                         text += shape.text + "\n"
                         shape_count += 1
-            logger.info(f"[FILE PARSER] PPTX: Processed {slide_count} slides, {shape_count} text shapes")
+            logger.debug(f"[FILE PARSER] PPTX: Processed {slide_count} slides, {shape_count} text shapes")
 
         elif ext in ["xls", "xlsx"]:
-            logger.info(f"[FILE PARSER] Processing Excel file")
+            logger.debug(f"[FILE PARSER] Processing Excel file")
             xls = pd.ExcelFile(BytesIO(content))
             sheet_count = len(xls.sheet_names)
             row_count = 0
@@ -88,19 +114,19 @@ def parse_file(filename: str, content: bytes, chunk_size: int = CHUNK_SIZE) -> L
                     if row_text.strip():
                         text += row_text + "\n"
                         row_count += 1
-            logger.info(f"[FILE PARSER] Excel: Processed {sheet_count} sheets, {row_count} rows")
+            logger.debug(f"[FILE PARSER] Excel: Processed {sheet_count} sheets, {row_count} rows")
 
         elif ext == "txt":
-            logger.info(f"[FILE PARSER] Processing TXT file")
+            logger.debug(f"[FILE PARSER] Processing TXT file")
             try:
                 text = content.decode("utf-8")
-                logger.info(f"[FILE PARSER] TXT: Decoded with UTF-8")
+                logger.debug(f"[FILE PARSER] TXT: Decoded with UTF-8")
             except UnicodeDecodeError:
                 text = content.decode("latin-1")
-                logger.info(f"[FILE PARSER] TXT: Decoded with Latin-1")
+                logger.debug(f"[FILE PARSER] TXT: Decoded with Latin-1")
 
         elif ext == "csv":
-            logger.info(f"[FILE PARSER] Processing CSV file")
+            logger.debug(f"[FILE PARSER] Processing CSV file")
             try:
                 # First try basic text decoding to ensure file is readable
                 try:
@@ -136,19 +162,19 @@ def parse_file(filename: str, content: bytes, chunk_size: int = CHUNK_SIZE) -> L
                         text_lines.append(f"... and {row_count - max_rows} more rows")
                     
                     text = "\n".join(text_lines)
-                    logger.info(f"[FILE PARSER] CSV: Processed {min(max_rows, row_count)} of {row_count} rows, {col_count} columns")
+                    logger.debug(f"[FILE PARSER] CSV: Processed {min(max_rows, row_count)} of {row_count} rows, {col_count} columns")
                     
                 except Exception as pandas_error:
                     logger.warning(f"[FILE PARSER] CSV pandas parsing failed: {pandas_error}")
                     # Fallback: treat as plain text
                     text = decoded_content
-                    logger.info(f"[FILE PARSER] CSV: Using fallback text parsing")
+                    logger.debug(f"[FILE PARSER] CSV: Using fallback text parsing")
                 
             except Exception as csv_error:
                 logger.error(f"[FILE PARSER] CSV processing failed: {csv_error}")
                 # Last resort: return minimal text
                 text = f"CSV file content (parsing failed): {filename}"
-                logger.info(f"[FILE PARSER] CSV: Using minimal fallback")
+                logger.debug(f"[FILE PARSER] CSV: Using minimal fallback")
 
         else:
             logger.error(f"[FILE PARSER] Unsupported file type: {ext}")
@@ -159,10 +185,10 @@ def parse_file(filename: str, content: bytes, chunk_size: int = CHUNK_SIZE) -> L
         raise ValueError(f"Error parsing file {filename}: {str(e)}")
 
     # Log extracted text info
-    logger.info(f"[FILE PARSER] Extracted text length: {len(text)} characters")
+    logger.debug(f"[FILE PARSER] Extracted text length: {len(text)} characters")
     
     # Split text into chunks
     chunks = chunk_text(text, chunk_size)
-    logger.info(f"[FILE PARSER] Created {len(chunks)} chunks from {filename}")
+    logger.debug(f"[FILE PARSER] Created {len(chunks)} chunks from {filename}")
     
     return chunks

@@ -10,12 +10,13 @@ import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Link as ExternalLinkIcon, Loader2, Pencil, Plus, Plug, Trash2 } from 'lucide-react';
+import { Check, Code, Copy, Link as ExternalLinkIcon, Loader2, Pencil, Plus, Plug, Trash2 } from 'lucide-react';
 import { Collection, PluginIntegration } from '@/types/auth';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { toast } from 'sonner';
+import { useConfirmAction } from '@/hooks/useConfirmAction';
 
-export default function SuperadminPlugins() {
+export function PluginsContent() {
   const { user } = useAuth();
   const [collections, setCollections] = useState<Collection[]>([]);
   const [isCollectionsLoading, setIsCollectionsLoading] = useState(true);
@@ -27,6 +28,13 @@ export default function SuperadminPlugins() {
   const [pluginFormData, setPluginFormData] = useState({ website_url: '', display_name: '' });
   const [editingPlugin, setEditingPlugin] = useState<PluginIntegration | null>(null);
   const [isPluginSaving, setIsPluginSaving] = useState(false);
+  const [widgetUrls, setWidgetUrls] = useState<Record<string, string>>({});
+  const { confirm: confirmAction, dialog: confirmDialog } = useConfirmAction();
+
+  // Embed code configuration
+  const [embedBaseUrl, setEmbedBaseUrl] = useState<string>('');
+  const [copiedCss, setCopiedCss] = useState(false);
+  const [copiedJs, setCopiedJs] = useState(false);
 
   const refreshCollections = useCallback(async () => {
     if (!user?.access_token) {
@@ -98,11 +106,62 @@ export default function SuperadminPlugins() {
     }
   }, [collections, pluginCollectionId]);
 
-  const filteredPlugins = useMemo(() => {
-    if (pluginFilterCollection === 'all') {
-      return plugins;
+  // Fetch embed code configuration
+  const fetchEmbedConfig = useCallback(async () => {
+    if (!user?.access_token) return;
+
+    try {
+      const response = await apiGet(
+        `${import.meta.env.VITE_API_BASE_URL}/plugins/embed-config`,
+        user.access_token,
+        false,
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setEmbedBaseUrl(data.base_url);
+      }
+    } catch (error) {
+      console.debug('Failed to fetch embed config', error);
     }
-    return plugins.filter((plugin) => plugin.collection_id === pluginFilterCollection);
+  }, [user?.access_token]);
+
+  useEffect(() => {
+    void fetchEmbedConfig();
+  }, [fetchEmbedConfig]);
+
+  // Copy handlers for embed code
+  const copyToClipboard = async (text: string, type: 'css' | 'js') => {
+    try {
+      await navigator.clipboard.writeText(text);
+      if (type === 'css') {
+        setCopiedCss(true);
+        setTimeout(() => setCopiedCss(false), 2000);
+      } else {
+        setCopiedJs(true);
+        setTimeout(() => setCopiedJs(false), 2000);
+      }
+      toast.success('Copied to clipboard!');
+    } catch {
+      toast.error('Failed to copy to clipboard');
+    }
+  };
+
+  // Generate embed code snippets
+  const cssSnippet = embedBaseUrl
+    ? `<link rel="stylesheet" href="${embedBaseUrl}/chatbot.css">`
+    : '';
+  const jsSnippet = embedBaseUrl
+    ? `<script src="${embedBaseUrl}/chatbot.min.js"></script>`
+    : '';
+
+  const filteredPlugins = useMemo(() => {
+    // Filter out widget:// plugins (internal widgets should not be displayed)
+    const visiblePlugins = plugins.filter((plugin) => !plugin.website_url.startsWith('widget://'));
+
+    if (pluginFilterCollection === 'all') {
+      return visiblePlugins;
+    }
+    return visiblePlugins.filter((plugin) => plugin.collection_id === pluginFilterCollection);
   }, [pluginFilterCollection, plugins]);
 
   const handleOpenPluginDialog = (collectionId?: string, plugin?: PluginIntegration) => {
@@ -157,18 +216,25 @@ export default function SuperadminPlugins() {
   };
 
   const handleDeletePlugin = async (plugin: PluginIntegration) => {
-    if (!confirm('Are you sure you want to delete this plugin integration?')) return;
-    try {
-      const response = await apiDelete(`${import.meta.env.VITE_API_BASE_URL}/plugins/${plugin.id}`, user?.access_token);
-      if (!response.ok) {
-        throw new Error('Failed to delete plugin integration');
-      }
-      toast.success('Plugin integration deleted');
-      const targetCollection = pluginFilterCollection === 'all' ? undefined : pluginFilterCollection;
-      await refreshPlugins(targetCollection);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete plugin');
-    }
+    confirmAction({
+      title: 'Delete plugin integration?',
+      description: 'This will remove the plugin integration from this knowledge base.',
+      confirmText: 'Delete',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          const response = await apiDelete(`${import.meta.env.VITE_API_BASE_URL}/plugins/${plugin.id}`, user?.access_token);
+          if (!response.ok) {
+            throw new Error('Failed to delete plugin integration');
+          }
+          toast.success('Plugin integration deleted');
+          const targetCollection = pluginFilterCollection === 'all' ? undefined : pluginFilterCollection;
+          await refreshPlugins(targetCollection);
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : 'Failed to delete plugin');
+        }
+      },
+    });
   };
 
   const handleTogglePluginStatus = async (plugin: PluginIntegration) => {
@@ -197,147 +263,229 @@ export default function SuperadminPlugins() {
   };
 
   return (
-    <DashboardLayout>
-      <div className="space-y-6">
-        <div className="flex flex-col gap-2">
-          <h1 className="text-3xl font-bold">Plugins</h1>
-          <p className="text-muted-foreground">
-            Manage website integrations for plugin users across all knowledge bases.
-          </p>
-        </div>
+    <div className="space-y-6">
+      {confirmDialog}
 
+      <Card>
+        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-2xl">
+              <Plug className="h-5 w-5" /> Plugin Integrations
+            </CardTitle>
+            <CardDescription>Link external websites to collections and control plugin availability.</CardDescription>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+            <Select
+              value={pluginFilterCollection}
+              onValueChange={setPluginFilterCollection}
+              disabled={collections.length === 0}
+            >
+              <SelectTrigger className="w-[220px]">
+                <SelectValue placeholder="Filter by knowledge base" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All knowledge bases</SelectItem>
+                {collections.map((collection) => (
+                  <SelectItem key={collection.collection_id} value={collection.collection_id}>
+                    {collection.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              onClick={() => handleOpenPluginDialog(pluginFilterCollection === 'all' ? undefined : pluginFilterCollection)}
+              disabled={collections.length === 0}
+              className="shadow-glow"
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add Plugin
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {isPluginLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : filteredPlugins.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              {collections.length === 0
+                ? 'Create a knowledge base before adding plugins.'
+                : 'No plugin integrations yet. Add your first one!'}
+            </div>
+          ) : (
+            <TooltipProvider delayDuration={150}>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Website</TableHead>
+                    <TableHead>Display Name</TableHead>
+                    <TableHead>Knowledge Base</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredPlugins.map((plugin) => (
+                    <TableRow key={plugin.id}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium break-all">{plugin.website_url}</span>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button variant="ghost" size="icon" asChild>
+                                <a href={plugin.website_url} target="_blank" rel="noreferrer">
+                                  <ExternalLinkIcon className="h-4 w-4" />
+                                </a>
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">Open website</TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <div className="text-xs text-muted-foreground">{plugin.normalized_url}</div>
+                      </TableCell>
+                      <TableCell>{plugin.display_name || '—'}</TableCell>
+                      <TableCell>{plugin.collection_name}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Switch checked={plugin.is_active} onCheckedChange={() => handleTogglePluginStatus(plugin)} />
+                          <span className="text-sm text-muted-foreground">
+                            {plugin.is_active ? 'Active' : 'Paused'}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {plugin.created_at ? new Date(plugin.created_at).toLocaleString() : '—'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end space-x-1">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleOpenPluginDialog(plugin.collection_id, plugin)}
+                                aria-label="Edit plugin"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">Edit plugin</TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDeletePlugin(plugin)}
+                                className="text-destructive hover:text-destructive"
+                                aria-label="Delete plugin"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">Delete plugin</TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TooltipProvider>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Embed Code Section */}
+      {embedBaseUrl && (
         <Card>
-          <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <CardHeader>
             <div>
               <CardTitle className="flex items-center gap-2 text-2xl">
-                <Plug className="h-5 w-5" /> Plugin Integrations
+                <Code className="h-5 w-5" /> Embed Code
               </CardTitle>
-              <CardDescription>Link external websites to collections and control plugin availability.</CardDescription>
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-              <Select
-                value={pluginFilterCollection}
-                onValueChange={setPluginFilterCollection}
-                disabled={collections.length === 0}
-              >
-                <SelectTrigger className="w-[220px]">
-                  <SelectValue placeholder="Filter by knowledge base" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All knowledge bases</SelectItem>
-                  {collections.map((collection) => (
-                    <SelectItem key={collection.collection_id} value={collection.collection_id}>
-                      {collection.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                onClick={() => handleOpenPluginDialog(pluginFilterCollection === 'all' ? undefined : pluginFilterCollection)}
-                disabled={collections.length === 0}
-                className="shadow-glow"
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Plugin
-              </Button>
+              <CardDescription>
+                Add these code snippets to your website to embed the chatbot plugin.
+              </CardDescription>
             </div>
           </CardHeader>
-          <CardContent>
-            {isPluginLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <CardContent className="space-y-6">
+            {/* CSS Snippet */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">
+                Add this inside the <code className="bg-muted px-1.5 py-0.5 rounded text-xs">&lt;head&gt;</code> tag:
+              </Label>
+              <div className="relative">
+                <div className="flex items-center gap-2 p-3 pr-12 rounded-md bg-muted/50 border font-mono text-sm break-all">
+                  <code className="flex-1 text-foreground">{cssSnippet}</code>
+                </div>
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8"
+                        onClick={() => copyToClipboard(cssSnippet, 'css')}
+                      >
+                        {copiedCss ? (
+                          <Check className="h-4 w-4 text-green-500" />
+                        ) : (
+                          <Copy className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {copiedCss ? 'Copied!' : 'Copy to clipboard'}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
-            ) : filteredPlugins.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                {collections.length === 0
-                  ? 'Create a knowledge base before adding plugins.'
-                  : 'No plugin integrations yet. Add your first one!'}
+            </div>
+
+            {/* JS Snippet */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">
+                Add this just before the closing <code className="bg-muted px-1.5 py-0.5 rounded text-xs">&lt;/body&gt;</code> tag:
+              </Label>
+              <div className="relative">
+                <div className="flex items-center gap-2 p-3 pr-12 rounded-md bg-muted/50 border font-mono text-sm break-all">
+                  <code className="flex-1 text-foreground">{jsSnippet}</code>
+                </div>
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8"
+                        onClick={() => copyToClipboard(jsSnippet, 'js')}
+                      >
+                        {copiedJs ? (
+                          <Check className="h-4 w-4 text-green-500" />
+                        ) : (
+                          <Copy className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {copiedJs ? 'Copied!' : 'Copy to clipboard'}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
-            ) : (
-              <TooltipProvider delayDuration={150}>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Website</TableHead>
-                      <TableHead>Display Name</TableHead>
-                      <TableHead>Knowledge Base</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Created</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredPlugins.map((plugin) => (
-                      <TableRow key={plugin.id}>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium break-all">{plugin.website_url}</span>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" asChild>
-                                  <a href={plugin.website_url} target="_blank" rel="noreferrer">
-                                    <ExternalLinkIcon className="h-4 w-4" />
-                                  </a>
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent side="top">Open website</TooltipContent>
-                            </Tooltip>
-                          </div>
-                          <div className="text-xs text-muted-foreground">{plugin.normalized_url}</div>
-                        </TableCell>
-                        <TableCell>{plugin.display_name || '—'}</TableCell>
-                        <TableCell>{plugin.collection_name}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Switch checked={plugin.is_active} onCheckedChange={() => handleTogglePluginStatus(plugin)} />
-                            <span className="text-sm text-muted-foreground">
-                              {plugin.is_active ? 'Active' : 'Paused'}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {plugin.created_at ? new Date(plugin.created_at).toLocaleString() : '—'}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end space-x-1">
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleOpenPluginDialog(plugin.collection_id, plugin)}
-                                  aria-label="Edit plugin"
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent side="top">Edit plugin</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleDeletePlugin(plugin)}
-                                  className="text-destructive hover:text-destructive"
-                                  aria-label="Delete plugin"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent side="top">Delete plugin</TooltipContent>
-                            </Tooltip>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TooltipProvider>
-            )}
+            </div>
+
+            {/* Base URL Info */}
+            <div className="text-xs text-muted-foreground pt-2 border-t">
+              <span className="font-medium">Base URL:</span>{' '}
+              <code className="bg-muted px-1.5 py-0.5 rounded">{embedBaseUrl}</code>
+            </div>
           </CardContent>
         </Card>
-      </div>
+      )}
 
       <Dialog
         open={pluginDialogOpen}
@@ -404,6 +552,22 @@ export default function SuperadminPlugins() {
           </form>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+export default function SuperadminPlugins() {
+  return (
+    <DashboardLayout>
+      <div className="space-y-6">
+        <div className="flex flex-col gap-2">
+          <h1 className="text-3xl font-bold">Plugins</h1>
+          <p className="text-muted-foreground">
+            Manage website integrations for plugin users across all knowledge bases.
+          </p>
+        </div>
+        <PluginsContent />
+      </div>
     </DashboardLayout>
   );
 }

@@ -1,6 +1,6 @@
 # app/api/routes_chat.py
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -17,11 +17,13 @@ from app.services.chat_tracking import ChatTrackingService
 from app.services.activity_tracker import activity_tracker
 from app.utils.chat_history_logger import log_chat_interaction
 from app.models.collection import Collection, CollectionUser
-import redis
+from app.models.query_log import QueryLog
+from app.utils.rate_limiter import rate_limiter
 import logging
 import json
 import time
 import uuid
+import re
 
 # Initialize FastAPI router
 router = APIRouter()
@@ -33,11 +35,6 @@ logging.basicConfig(level=logging.INFO)
 # Initialize services
 chat_service = ChatTrackingService()
 
-# Initialize Redis if enabled
-r = None
-if settings.USE_REDIS:
-    r = redis.Redis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB)
-
 # Request / Response models
 class ConversationMessage(BaseModel):
     role: str  # "user" or "assistant"
@@ -46,17 +43,23 @@ class ConversationMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str
-    top_k: int = 8  # optional, number of chunks to retrieve
+    top_k: int = 12  # optional, number of chunks to retrieve
     session_id: Optional[str] = None  # optional, for session tracking
     conversation_history: List[ConversationMessage] = []  # optional, for context
     maintain_context: bool = False  # optional, flag to maintain context
     collection_id: Optional[str] = None
 
 class ChatResponse(BaseModel):
-    answer: str
+    answer: Optional[str] = None  # Made optional for follow-up responses
     session_id: Optional[str] = None
     is_generic: bool = False
+    is_followup: bool = False  # NEW: Indicates this is a follow-up question
+    followup_questions: Optional[str] = None  # NEW: The follow-up question text
+    followup_reason: Optional[str] = None  # NEW: Reason for follow-up
     sources: Optional[List[Dict]] = None
+    chunk_count: int = 0  # NEW: Number of chunks retrieved
+    answer_mode: Optional[str] = "FULL"  # NEW: Answer mode (FULL, PARTIAL_TRANSPARENT, FOLLOWUP)
+    person_presence: Optional[Dict] = None
 
 
 class PublicChatRequest(ChatRequest):
@@ -97,6 +100,9 @@ def _is_generic_response(answer: str) -> bool:
         "i couldn't find",
         "i don't have information",
         "i don't have enough information",
+        "i don't have any information",
+        "i do not have any information",
+        "i do not have information",
         "i cannot find",
         "unfortunately, i don't",
         "unfortunately i don't",
@@ -110,6 +116,22 @@ def _is_generic_response(answer: str) -> bool:
         "could you provide more",
         "i'm here to help with questions about your knowledge base",
         "let me know what you'd like to learn",
+        # Patterns for "no information in context" responses
+        "the provided context does not contain",
+        "does not contain any information",
+        "do not have enough details",
+        "do not have enough context",
+        "without any relevant information",
+        "there are no sources that discuss",
+        "i do not have enough details to provide",
+        "my role is to assist based on the provided information",
+        # Apology patterns for inability to answer
+        "i apologize, but i do not have",
+        "i apologize but i do not have",
+        "i apologize, but i don't have",
+        "i apologize but i don't have",
+        "is not relevant to answering",
+        "that is relevant to answering",
     ]
     
     for pattern in generic_patterns:
@@ -117,6 +139,67 @@ def _is_generic_response(answer: str) -> bool:
             return True
     
     return False
+
+
+def _infer_conversation_state(history: List[ConversationMessage]) -> Dict[str, Any]:
+    """
+    Infer the full conversation state (Scope, Entity, Intent) from history.
+    Implements the 4-State Machine:
+    0: No entity/scope
+    1: Scope resolved (Org known)
+    2: Entity resolved (Person/Leadership)
+    3: Follow-up on resolved entity
+    """
+    state = {
+        "scope": None,
+        "active_entity": None,
+        "last_intent": None
+    }
+    
+    if not history:
+        return state
+        
+    # Scan backwards to build state
+    # We look at the last 3 turns
+    recent_history = history[-6:] 
+    
+    for msg in reversed(recent_history):
+        content = msg.content
+        
+        # 1. SCOPE DETECTION (Organization)
+        # Check for explicit scope mentions in assistant or user text
+        if not state["scope"]:
+            if "Polus" in content or "Polus Solutions" in content:
+                state["scope"] = "Polus Solutions"
+        
+        # 2. ENTITY & INTENT DETECTION (From Assistant Responses)
+        if msg.role == "assistant":
+            # Header Pattern: ## [Name] -> Person Entity
+            match_person = re.search(r'^##\s+([A-Z][a-zA-Z\s\-\.]+?)$', content, re.MULTILINE)
+            if match_person and not state["active_entity"]:
+                name = match_person.group(1).strip()
+                if len(name) < 40 and " " in name:
+                    state["active_entity"] = {"person_name": name}
+                    if not state["last_intent"]:
+                        state["last_intent"] = "person_profile"
+
+            # Leadership Pattern: "Polus Solutions Leadership" or list of names
+            if not state["last_intent"]:
+                if "Leadership" in content and ("Chairman" in content or "Director" in content):
+                     state["last_intent"] = "leadership_list"
+                     # If we found a leadership list, the "Active Entity" is the Team, 
+                     # but we key it as a special entity type if needed, or just rely on last_intent.
+                     state["active_entity"] = {"type": "team", "name": "Leadership Team"}
+
+    # Default Scope Fallback (If deep history implies it, or we assume it for this specific bot instance)
+    if not state["scope"]:
+        # Optimization: Scan older history if needed, or default if allowed. 
+        # For now, let's look deeper unique case? 
+        # Actually, let's hardcode "Polus Solutions" if we see "Leadership" to fix the "Which company" bug forcefully
+        # if the user asks about leadership without company name.
+        pass
+
+    return state
 
 
 def _process_chat_request(
@@ -197,20 +280,7 @@ def _process_chat_request(
 
     start_time = time.time()
 
-    cache_key_parts = ["faq", question.lower()]
-    if effective_collection_id:
-        cache_key_parts.append(f"collection:{effective_collection_id}")
-    cache_key = ":".join(cache_key_parts)
-
-    if r:
-        cached_answer = r.get(cache_key)
-        if cached_answer:
-            answer_text = cached_answer.decode("utf-8")
-            logger.info(f"[CACHE HIT] User: {identity_username}, Question: {question}")
-            is_generic = _is_generic_query(question) or _is_generic_response(answer_text)
-            return ChatResponse(answer=answer_text, session_id=effective_session_id, is_generic=is_generic, sources=[])
-
-    logger.info(f"[RAG QUERY] User: {identity_username}, Question: {question}, top_k: {top_k}")
+    logger.debug(f"[RAG QUERY] User: {identity_username}, Question: {question}, top_k: {top_k}")
 
     # Import here to avoid PyO3 initialization issues during module import
     from app.core.vector_singleton import get_vector_store
@@ -218,24 +288,50 @@ def _process_chat_request(
     
     vector_store = get_vector_store()
     rag_instance = RAG(db_session=db)
-    chunks = rag_instance.retrieve_chunks(question, top_k=top_k, collection_id=effective_collection_id)
-    logger.info(f"[CHAT DEBUG] Retrieved {len(chunks)} chunks for query: {question}")
-    logger.info(f"[CHAT DEBUG] Vector store type: {'Qdrant' if vector_store.client else 'In-memory fallback'}")
+    
+    
+    # --- CONTEXT EXTRACTION (Stateful Logic) ---
+    state = _infer_conversation_state(conversation_history)
+    logger.info(f"[STATE] Inferred State: {state}")
+    
+    # Pass prior_context (active_entity) to retrieve_chunks for legacy compatibility/logic
+    # But fundamentally we want to pass the WHOLE state to answer methods
+    prior_context = state.get("active_entity") # Backbone for Fix 1
+    
+    # FIX 20: Request-Level Cache for Single-Pass Retrieval
+    request_cache = {}
+
+    # Pass prior_context to retrieve_chunks
+    chunks = rag_instance.retrieve_chunks(
+        question, 
+        top_k=top_k, 
+        collection_id=effective_collection_id,
+        prior_context=prior_context,
+        request_cache=request_cache # FIX 20
+    )
+    logger.debug(f"[CHAT DEBUG] Retrieved {len(chunks)} chunks for query: {question}")
+    logger.debug(f"[CHAT DEBUG] Vector store type: {'Qdrant' if vector_store.client else 'In-memory fallback'}")
 
     if vector_store.client is None:
-        logger.info(f"[CHAT DEBUG] Fallback storage has {len(vector_store.documents)} documents")
+        logger.debug(f"[CHAT DEBUG] Fallback storage has {len(vector_store.documents)} documents")
 
     source_records: dict[str, dict] = {}
     for chunk in chunks:
         file_id = chunk.get("file_id")
         file_name = chunk.get("file_name") or "Unknown File"
         chunk_index = chunk.get("chunk_index")
+        chunk_score = chunk.get("score", 0.0)  # Get confidence score
         # Get source type and URL for web crawl sources
         source_type = chunk.get("source_type", "file")
         url = chunk.get("url") or chunk.get("canonical_url", "")
 
         record_key = file_id or file_name
         if not record_key:
+            continue
+            
+        # REQUIREMENT: if it can't be downloaded (no file_id) and isn't a link (no url), don't show
+        if not file_id and not url:
+            logger.info(f"[SOURCE FILTER] Skipping source with no file_id or url: {file_name}")
             continue
 
         record = source_records.get(record_key)
@@ -246,16 +342,44 @@ def _process_chat_request(
                 "chunk_indices": [],
                 "source_type": source_type,
                 "url": url,
+                "max_score": chunk_score,  # Track max confidence score for this source
+                "scores": [chunk_score],  # Track all scores for averaging if needed
+                "payload": chunk.get("payload", {}) # Store full payload for later extraction
             }
             source_records[record_key] = record
+        else:
+            # Update max score if this chunk has higher confidence
+            record["max_score"] = max(record.get("max_score", 0.0), chunk_score)
+            record["scores"].append(chunk_score)
+            # Update payload if this chunk is a person profile (prioritize profile chunk)
+            if chunk.get("payload", {}).get("chunk_type") == "person_profile":
+                record["payload"] = chunk.get("payload", {})
 
         if chunk_index is not None:
             record["chunk_indices"].append(chunk_index)
 
+    # Lower threshold slightly for the frontend display
+    # Note: RAG uses its own internal RAG_MIN_SCORE for LLM context, but we need to pass weaker matches 
+    # to the frontend if they were deemed relevant by the RAG service (e.g. person matches)
+    from app.config import settings
+    # Force permissive threshold (0.15) to ensure RAG results are shown, ignoring stricter env vars
+    source_min_score = 0.15
+    
     sources_payload = []
+    filtered_sources_count = 0
+    
     for record in source_records.values():
+        max_score = record.get("max_score", 0.0)
+        
+        # Filter out extremely low confidence sources
+        if max_score < source_min_score:
+            filtered_sources_count += 1
+            logger.info(f"[SOURCE FILTER] Excluding '{record.get('file_name')}' (score: {max_score:.4f} < threshold: {source_min_score})")
+            continue
+        
         payload = {
-            "file_name": record.get("file_name", "Unknown File"),
+            "file_name": record.get("file_name") or "Source",
+            "confidence": round(max_score, 4),  # Add confidence score to payload
         }
         if record.get("file_id"):
             payload["file_id"] = record["file_id"]
@@ -266,33 +390,129 @@ def _process_chat_request(
             payload["source_type"] = record["source_type"]
         if record.get("url"):
             payload["url"] = record["url"]
+            
+        # Add person metadata if available (Conservative addition)
+        rec_payload = record.get("payload", {})
+        if rec_payload.get("chunk_type") == "person_profile":
+            payload["person"] = {
+                "name": rec_payload.get("person_name"),
+                "title": rec_payload.get("person_title"),
+                "image": rec_payload.get("person_image_url"),
+                "social_links": rec_payload.get("person_social_links", {})
+            }
+            
         sources_payload.append(payload)
+    
+    if filtered_sources_count > 0:
+        logger.info(f"[SOURCE FILTER] Filtered out {filtered_sources_count} low-confidence sources (threshold: {source_min_score})")
 
-    if not chunks:
-        logger.warning(f"[CHAT DEBUG] No chunks found for query: {question}")
+    # Step 2: Check if follow-up is needed (BEFORE answer generation)
+    # Use normalized query for consistency
+    followup_result = rag_instance.needs_followup(
+        query=question,
+        chunks=chunks,
+        conversation_history=[m.dict() for m in conversation_history] if conversation_history else None
+    )
+    
+    needs_followup = followup_result.get("needs_followup", False)
+    followup_reason = followup_result.get("reason")
+    suggested_topics = followup_result.get("suggested_topics", [])
+    
+    # Step 3: If follow-up needed, generate and return early
+    if needs_followup:
+        followup_text = rag_instance.generate_followup_questions(
+            query=question,
+            chunks=chunks,
+            followup_result=followup_result,
+            conversation_history=[m.dict() for m in conversation_history] if conversation_history else None
+        )
+        
+        # If generation returns a list of strings, join them
+        if isinstance(followup_text, list):
+            followup_text = "\n\n".join(followup_text)
+            
+        # Log the follow-up event
+        try:
+            activity_tracker.log_activity(
+                activity_type="chat_followup_triggered",
+                user=identity_username,
+                details={
+                    "question": question[:100],
+                    "reason": followup_reason,
+                    "chunk_count": len(chunks),
+                    "session_id": effective_session_id
+                }
+            )
+        except Exception as e:
+            logger.error(f"Failed to log follow-up activity: {str(e)}")
+        
+        logger.info(f"[FOLLOWUP RESPONSE] Returning follow-up for reason: {followup_reason}")
+        
+        # Return follow-up response (SKIP answer generation)
         return ChatResponse(
-            answer="I wasn't able to retrieve a confident answer, please refine your question.",
+            answer=None,
             session_id=effective_session_id,
-            is_generic=True,
+            is_followup=True,
+            followup_questions=followup_text,
+            followup_reason=followup_reason,
             sources=[],
+            chunk_count=len(chunks),
+            answer_mode="FOLLOWUP"
         )
 
     try:
         if maintain_context and conversation_history:
-            logger.info(f"[CONTEXT] Using context with {len(conversation_history)} messages")
-            answer_text = rag_instance.answer_with_context(
+            logger.debug(f"[CONTEXT] Using context with {len(conversation_history)} messages")
+            # Convert Pydantic models to dicts for RAG
+            history_dicts = [m.dict() for m in conversation_history]
+            rag_result = rag_instance.answer_with_context(
                 question,
-                conversation_history,
+                history_dicts,
                 top_k=top_k,
                 collection_id=effective_collection_id,
+                prior_context=prior_context,
+                conversation_state=state, # NEW: Pass full state
+                request_cache=request_cache # FIX 20
             )
         else:
-            logger.info("[CONTEXT] Using basic RAG without context")
-            answer_text = rag_instance.answer(
+            logger.debug("[CONTEXT] Using basic RAG without context")
+            rag_result = rag_instance.answer(
                 question,
                 top_k=top_k,
                 collection_id=effective_collection_id,
+                prior_context=prior_context,
+                conversation_state=state, # NEW: Pass full state
+                request_cache=request_cache # FIX 20
             )
+        
+        # Handle new dict return format from RAG (contains 'answer' and 'is_generic')
+        tokens_used = None
+        model_name = None
+        answer_mode = "FULL"
+        if isinstance(rag_result, dict):
+            answer_text = rag_result.get("answer", "")
+            is_generic_from_ai = rag_result.get("is_generic", False)
+            tokens_used = rag_result.get("tokens_used")
+            model_name = rag_result.get("model_name")
+            answer_mode = rag_result.get("answer_mode", "FULL")
+        else:
+            # Fallback for string return (shouldn't happen with updated RAG)
+            answer_text = rag_result
+            is_generic_from_ai = _is_generic_query(question) or _is_generic_response(answer_text)
+        
+        # If model_name not in rag_result, get from settings
+        if not model_name:
+            from app.config import settings
+            if settings.AI_PROVIDER == "bedrock":
+                model_name = settings.AWS_MODEL
+            else:
+                model_name = settings.CLAUDE_MODEL
+        
+        # Safety check: Remove any "Sources:" section from answer text (should be in sources field only)
+        # Use word boundary \b to avoid matching "Sources" inside words like "resources"
+        # Require newline or start of string, optional markdown formatting, then "Sources:" as a header
+        answer_text = re.sub(r'(?:^|\n)\s*\**\s*\bSources?\b:?\s*\**\s*(?:\n[\s\S]*)?$', '', answer_text, flags=re.IGNORECASE).strip()
+        
     except Exception as e:
         logger.error(f"[RAG ERROR] Failed to generate answer: {str(e)}")
         return ChatResponse(
@@ -300,24 +520,23 @@ def _process_chat_request(
             session_id=effective_session_id,
             is_generic=True,
             sources=sources_payload,
+            answer_mode="GENERIC_ERROR"
         )
-
-    if r:
-        r.set(cache_key, answer_text, ex=60 * 60 * 24)
-        logger.info(f"[CACHE STORE] User: {identity_username}, Question: {question}")
 
     processing_time = int((time.time() - start_time) * 1000)
 
-    logger.info(f"User: {identity_username}, Question: {question}, Answer: {answer_text}")
+    logger.debug(f"User: {identity_username}, Question: {question}, Answer: {answer_text}")
+
+    context_info = {
+        "chunks_retrieved": len(chunks),
+        "maintain_context": maintain_context,
+        "conversation_history_length": len(conversation_history),
+        "top_k": top_k,
+        "answer_mode": answer_mode # Log answer_mode
+    }
 
     if effective_session_id:
         try:
-            context_info = {
-                "chunks_retrieved": len(chunks),
-                "maintain_context": maintain_context,
-                "conversation_history_length": len(conversation_history),
-                "top_k": top_k,
-            }
             chat_service.log_query(
                 session_id=effective_session_id,
                 collection_id=effective_collection_id,
@@ -329,6 +548,72 @@ def _process_chat_request(
             )
         except Exception as e:
             logger.error(f"Failed to track query: {str(e)}")
+
+    # Log token and query usage into QueryLog for analytics
+    try:
+        website_id = identity.get("website_id")
+
+        # For super admins or contexts without website_id, derive it from the collection
+        if not website_id and effective_collection_id:
+            try:
+                collection_obj = (
+                    db.query(Collection)
+                    .filter(Collection.collection_id == effective_collection_id)
+                    .first()
+                )
+                if collection_obj and getattr(collection_obj, "website_id", None):
+                    website_id = collection_obj.website_id
+            except Exception as e:
+                logger.error(f"Failed to resolve website_id from collection {effective_collection_id}: {e}")
+        
+        # Fallback: If website_id is still None, try to find a default one to ensure logging works
+        if not website_id:
+            try:
+                from app.models.website import Website
+                # Try specific default first, then any
+                fallback_site = db.query(Website).filter(Website.domain == "default.local").first()
+                if not fallback_site:
+                    fallback_site = db.query(Website).first()
+                
+                if fallback_site:
+                    website_id = fallback_site.website_id
+                    logger.info(f"Using fallback website_id {website_id} for logging")
+            except Exception as e:
+                logger.error(f"Failed to resolve fallback website_id: {e}")
+
+        if website_id and user_id:
+            # Build list of accessed file IDs from sources
+            file_ids = [
+                s.get("file_id")
+                for s in sources_payload or []
+                if isinstance(s, dict) and s.get("file_id")
+            ]
+
+            ql = QueryLog(
+                user_id=user_id,
+                website_id=website_id,
+                session_id=effective_session_id,
+                user_query=question,
+                ai_response=answer_text,
+                query_type="chat",
+                processing_time_ms=processing_time,
+                tokens_used=tokens_used,
+                chunks_retrieved=len(chunks),
+                model_name=model_name,
+                status="success",
+            )
+
+            # Attach context and files metadata using helpers
+            if context_info:
+                ql.set_context_data(context_info)
+            if file_ids:
+                ql.set_files_accessed_list(file_ids)
+
+            db.add(ql)
+            db.commit()
+    except Exception as e:
+        logger.error(f"Failed to log query usage: {str(e)}")
+        db.rollback()
 
     try:
         if effective_session_id and not conversation_history:
@@ -352,7 +637,6 @@ def _process_chat_request(
                 "has_context": maintain_context and len(conversation_history) > 0,
             },
             metadata={
-                "cache_hit": False,
                 "vector_db_type": "qdrant" if vector_store.client else "in_memory",
             },
         )
@@ -376,14 +660,48 @@ def _process_chat_request(
     except Exception as e:
         logger.error(f"Failed to log chat history to file: {str(e)}")
 
-    # Determine if response is generic (greeting or "I don't know" type)
-    is_generic = _is_generic_query(question) or _is_generic_response(answer_text)
+    # Use AI-provided is_generic flag (set by RAG via classification instruction in prompt)
+    # Falls back to regex-based detection only if RAG returned a string (legacy behavior)
+    is_generic = is_generic_from_ai
     
-    return ChatResponse(answer=answer_text, session_id=effective_session_id, is_generic=is_generic, sources=sources_payload)
+    # Don't send sources for generic responses
+    if is_generic:
+        sources_payload = []
+    else:
+        # Filter sources_payload based on the sources actually used/filtered by the RAG service
+        if isinstance(rag_result, dict) and "source_files" in rag_result:
+            rag_sources = rag_result["source_files"]
+            filtered_payload = []
+            for s in sources_payload:
+                if s.get("file_name") in rag_sources:
+                    filtered_payload.append(s)
+            
+            if filtered_payload:
+                logger.info(f"[API] Filtered sources_payload from {len(sources_payload)} to {len(filtered_payload)} based on RAG service result")
+                sources_payload = filtered_payload
+    
+    # Debug: Log final response being sent to frontend
+    logger.info(f"[API RESPONSE] Final answer length: {len(answer_text)} chars")
+    logger.info(f"[API RESPONSE] Final answer content:\n{answer_text}")
+    logger.info(f"[API RESPONSE] is_generic: {is_generic}, sources count: {len(sources_payload)}")
+    
+    return ChatResponse(
+        answer=answer_text, 
+        session_id=effective_session_id, 
+        is_generic=is_generic, 
+        sources=sources_payload, 
+        chunk_count=len(chunks), 
+        answer_mode=answer_mode,
+        person_presence=rag_result.get("person_presence")
+    )
 
 
 # Chat endpoint
-@router.post("/ask", response_model=ChatResponse)
+@router.post(
+    "/ask",
+    response_model=ChatResponse,
+    dependencies=[Depends(rate_limiter(limit=60, window_seconds=60))],
+)
 async def ask_question(request: ChatRequest, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     resolved_collection_id = request.collection_id or current_user.get("collection_id")
     resolved_session_id = request.session_id or current_user.get("session_id")
@@ -400,7 +718,11 @@ async def ask_question(request: ChatRequest, current_user: dict = Depends(get_cu
     )
 
 
-@router.post("/public/ask", response_model=ChatResponse)
+@router.post(
+    "/public/ask",
+    response_model=ChatResponse,
+    dependencies=[Depends(rate_limiter(limit=120, window_seconds=60))],
+)
 async def public_chat(request: PublicChatRequest, db: Session = Depends(get_db)):
     domain = normalize_domain(request.website_url)
 

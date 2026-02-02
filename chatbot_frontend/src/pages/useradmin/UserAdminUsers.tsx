@@ -32,6 +32,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Plus, Pencil, Trash2, Users, Search, Loader2, MoreHorizontal, Power, PowerOff } from 'lucide-react';
 import { Collection, User, UserRole } from '@/types/auth';
 import { toast } from 'sonner';
+import { useConfirmAction } from '@/hooks/useConfirmAction';
 
 export default function UserAdminUsers() {
   const { user } = useAuth();
@@ -52,6 +53,7 @@ export default function UserAdminUsers() {
     collection_ids: [] as string[],
   });
   const [showPassword, setShowPassword] = useState(false);
+  const { confirm: confirmAction, dialog: confirmDialog } = useConfirmAction();
 
   useEffect(() => {
     fetchCollections();
@@ -212,54 +214,69 @@ export default function UserAdminUsers() {
       return;
     }
 
-    if (!confirm('Are you sure you want to delete this user?')) return;
+    confirmAction({
+      title: 'Delete user?',
+      description: `User "${username}" will be removed.`,
+      confirmText: 'Delete',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/users/${userId}`, {
+            method: 'DELETE',
+            headers: {
+              Authorization: `Bearer ${user?.access_token}`,
+            },
+          });
 
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/users/${userId}`, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${user?.access_token}`,
-        },
-      });
-
-      if (response.ok) {
-        toast.success('User deleted successfully');
-        fetchUsers();
-      } else {
-        throw new Error('Delete failed');
-      }
-    } catch (error) {
-      toast.error('Failed to delete user');
-    }
+          if (response.ok) {
+            toast.success('User deleted successfully');
+            fetchUsers();
+          } else {
+            throw new Error('Delete failed');
+          }
+        } catch (error) {
+          toast.error('Failed to delete user');
+        }
+      },
+    });
   };
 
   const handleToggleUserStatus = async (userId: string, isActive: boolean, userRole?: string) => {
+    const performToggle = async () => {
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/users/${userId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${user?.access_token}`,
+          },
+          body: JSON.stringify({
+            is_active: !isActive,
+          }),
+        });
+
+        if (!response.ok) throw new Error('Failed to update user status');
+
+        toast.success(`User ${!isActive ? 'activated' : 'deactivated'} successfully`);
+        fetchUsers();
+      } catch (error) {
+        toast.error('Failed to update user status');
+      }
+    };
+
     // Add confirmation for plugin user deactivation
     if (isActive && userRole === 'plugin_user') {
-      if (!confirm('Deactivating this plugin user will stop the plugin from working. Are you sure you want to proceed?')) {
-        return;
-      }
-    }
-
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/users/${userId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${user?.access_token}`,
-        },
-        body: JSON.stringify({
-          is_active: !isActive,
-        }),
+      confirmAction({
+        title: 'Deactivate plugin user?',
+        description: 'Deactivating this plugin user will stop the plugin from working.',
+        confirmText: 'Deactivate',
+        destructive: true,
+        onConfirm: performToggle,
       });
-
-      if (!response.ok) throw new Error('Failed to update user status');
-
-      toast.success(`User ${!isActive ? 'activated' : 'deactivated'} successfully`);
-      fetchUsers();
-    } catch (error) {
-      toast.error('Failed to update user status');
+      return;
     }
+
+    await performToggle();
   };
 
   const openEditDialog = (user: User) => {
@@ -344,6 +361,8 @@ export default function UserAdminUsers() {
         return 'bg-green-100 text-green-800';
       case 'plugin_user':
         return 'bg-orange-100 text-orange-800';
+      case 'user':
+        return 'bg-indigo-100 text-indigo-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
@@ -367,6 +386,7 @@ export default function UserAdminUsers() {
 
   return (
     <DashboardLayout>
+      {confirmDialog}
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
@@ -644,9 +664,8 @@ export default function UserAdminUsers() {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          user.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                        }`}>
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${user.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          }`}>
                           {user.is_active ? 'Active' : 'Inactive'}
                         </span>
                       </TableCell>

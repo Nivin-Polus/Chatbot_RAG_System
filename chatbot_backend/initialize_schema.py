@@ -143,6 +143,34 @@ def _perform_schema_migrations(engine) -> None:
                     conn.execute(text(f"ALTER TABLE system_prompts ADD COLUMN {name} {ddl}"))
                 LOGGER.info("Added column '%s' to system_prompts", name)
 
+    # Ensure plugin_integrations table has widget_token column for Chat Widget feature
+    if inspector.has_table("plugin_integrations"):
+        plugin_columns = {col["name"] for col in inspector.get_columns("plugin_integrations")}
+        if "widget_token" not in plugin_columns:
+            LOGGER.info("Adding 'widget_token' column to 'plugin_integrations'")
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE plugin_integrations ADD COLUMN widget_token VARCHAR(36) NULL UNIQUE"))
+                conn.commit()
+            LOGGER.info("✅ Added 'widget_token' column to 'plugin_integrations' for Chat Widget feature")
+        
+        if "is_widget_active" not in plugin_columns:
+            LOGGER.info("Adding 'is_widget_active' column to 'plugin_integrations'")
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE plugin_integrations ADD COLUMN is_widget_active TINYINT(1) NOT NULL DEFAULT 1"))
+                conn.commit()
+            LOGGER.info("✅ Added 'is_widget_active' column to 'plugin_integrations'")
+        
+        # Add index on widget_token if not exists
+        try:
+            existing_indexes = {idx["name"] for idx in inspector.get_indexes("plugin_integrations")}
+            if "idx_plugin_integrations_widget_token" not in existing_indexes:
+                with engine.connect() as conn:
+                    conn.execute(text("CREATE INDEX idx_plugin_integrations_widget_token ON plugin_integrations(widget_token)"))
+                    conn.commit()
+                LOGGER.info("Added index 'idx_plugin_integrations_widget_token'")
+        except Exception as e:
+            LOGGER.warning(f"Could not create widget_token index (may already exist): {e}")
+
     # Ensure plugin integrations table exists (created via ORM metadata). Nothing else yet.
 
     # Add crawler_jobs table if missing
@@ -187,6 +215,7 @@ def _perform_schema_migrations(engine) -> None:
                     INDEX idx_crawler_jobs_status (status),
                     INDEX idx_crawler_jobs_scheduled (is_scheduled),
                     INDEX idx_crawler_jobs_next_run (next_run_at),
+                    INDEX idx_crawler_jobs_created (created_at),
                     FOREIGN KEY (collection_id) REFERENCES collections(collection_id) ON DELETE CASCADE,
                     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
                 )
@@ -363,6 +392,16 @@ def _migrate_crawler_jobs_table(engine, inspector):
                 index_additions.append("idx_crawler_jobs_next_run")
             except Exception as e:
                 LOGGER.warning(f"Could not create index idx_crawler_jobs_next_run: {e}")
+
+        # Ensure index on created_at for efficient ORDER BY created_at DESC LIMIT queries
+        if "idx_crawler_jobs_created" not in existing_indexes:
+            try:
+                with engine.connect() as conn:
+                    conn.execute(text("CREATE INDEX idx_crawler_jobs_created ON crawler_jobs(created_at)"))
+                    conn.commit()
+                index_additions.append("idx_crawler_jobs_created")
+            except Exception as e:
+                LOGGER.warning(f"Could not create index idx_crawler_jobs_created: {e}")
         
         if index_additions:
             LOGGER.info(f"✅ Added {len(index_additions)} indexes to 'crawler_jobs' table")

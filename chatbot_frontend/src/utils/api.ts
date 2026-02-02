@@ -56,7 +56,6 @@ export const apiRequest = async (
           toast.error('Session expired. Please login again.');
           globalLogout();
         } else {
-          console.error('401 Unauthorized - logout function not available');
           // Fallback: redirect to login manually
           window.location.href = '/login';
         }
@@ -226,10 +225,9 @@ export const apiUpload = async (
       const errorText = await response.text();
       errorMessage = errorText || `HTTP ${response.status}: ${response.statusText}`;
     }
-    
-    console.error('Upload failed:', { status: response.status, statusText: response.statusText, errorMessage });
+
     toast.error(`Upload failed: ${errorMessage}`);
-    
+
     if (response.status === 401 && logoutOn401) {
       // handle logout
     }

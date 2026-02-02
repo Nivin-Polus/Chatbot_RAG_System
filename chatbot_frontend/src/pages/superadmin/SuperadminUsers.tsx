@@ -32,6 +32,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Plus, Pencil, Trash2, Users, Search, Loader2, MoreHorizontal, Power, PowerOff } from 'lucide-react';
 import { Collection, User, UserRole, UserWithPermissions } from '@/types/auth';
 import { toast } from 'sonner';
+import { useConfirmAction } from '@/hooks/useConfirmAction';
 
 export default function SuperadminUsers() {
   const { user: authUser } = useAuth();
@@ -53,6 +54,7 @@ export default function SuperadminUsers() {
   });
   const [showPassword, setShowPassword] = useState(false);
   const [isRegeneratingToken, setIsRegeneratingToken] = useState(false);
+  const { confirm: confirmAction, dialog: confirmDialog } = useConfirmAction();
 
   useEffect(() => {
     fetchCollections();
@@ -134,7 +136,6 @@ export default function SuperadminUsers() {
 
       toast.success('Plugin token copied to clipboard');
     } catch (error) {
-      console.error('Failed to copy plugin token', error);
       toast.error('Failed to copy plugin token');
     }
   };
@@ -242,54 +243,69 @@ export default function SuperadminUsers() {
       return;
     }
 
-    if (!confirm('Are you sure you want to delete this user?')) return;
+    confirmAction({
+      title: 'Delete user?',
+      description: `User "${username}" will be removed.`,
+      confirmText: 'Delete',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/users/${userId}`, {
+            method: 'DELETE',
+            headers: {
+              Authorization: `Bearer ${authUser?.access_token}`,
+            },
+          });
 
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/users/${userId}`, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${authUser?.access_token}`,
-        },
-      });
-
-      if (response.ok) {
-        toast.success('User deleted successfully');
-        fetchUsers();
-      } else {
-        throw new Error('Delete failed');
-      }
-    } catch (error) {
-      toast.error('Failed to delete user');
-    }
+          if (response.ok) {
+            toast.success('User deleted successfully');
+            fetchUsers();
+          } else {
+            throw new Error('Delete failed');
+          }
+        } catch (error) {
+          toast.error('Failed to delete user');
+        }
+      },
+    });
   };
 
   const handleToggleUserStatus = async (userId: string, isActive: boolean, userRole?: string) => {
+    const performToggle = async () => {
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/users/${userId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authUser?.access_token}`,
+          },
+          body: JSON.stringify({
+            is_active: !isActive,
+          }),
+        });
+
+        if (!response.ok) throw new Error('Failed to update user status');
+
+        toast.success(`User ${!isActive ? 'activated' : 'deactivated'} successfully`);
+        fetchUsers();
+      } catch (error) {
+        toast.error('Failed to update user status');
+      }
+    };
+
     // Add confirmation for plugin user deactivation
     if (isActive && userRole === 'plugin_user') {
-      if (!confirm('Deactivating this plugin user will stop the plugin from working. Are you sure you want to proceed?')) {
-        return;
-      }
-    }
-
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/users/${userId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authUser?.access_token}`,
-        },
-        body: JSON.stringify({
-          is_active: !isActive,
-        }),
+      confirmAction({
+        title: 'Deactivate plugin user?',
+        description: 'Deactivating this plugin user will stop the plugin from working.',
+        confirmText: 'Deactivate',
+        destructive: true,
+        onConfirm: performToggle,
       });
-
-      if (!response.ok) throw new Error('Failed to update user status');
-
-      toast.success(`User ${!isActive ? 'activated' : 'deactivated'} successfully`);
-      fetchUsers();
-    } catch (error) {
-      toast.error('Failed to update user status');
+      return;
     }
+
+    await performToggle();
   };
 
   const openEditDialog = async (selectedUser: User) => {
@@ -328,7 +344,6 @@ export default function SuperadminUsers() {
           );
         }
       } catch (error) {
-        console.error('Failed to load plugin token', error);
         toast.error('Failed to load plugin token');
       }
     }
@@ -356,7 +371,6 @@ export default function SuperadminUsers() {
         ),
       );
     } catch (error) {
-      console.error(error);
       toast.error('Failed to regenerate plugin token');
     } finally {
       setIsRegeneratingToken(false);
@@ -379,6 +393,22 @@ export default function SuperadminUsers() {
     }));
   };
 
+  const formatRoleLabel = (role: string) => {
+    switch (role) {
+      case 'super_admin':
+        return 'Super Admin';
+      case 'superadmin':
+        return 'Superadmin';
+      case 'useradmin':
+      case 'user_admin':
+        return 'User Admin';
+      case 'plugin_user':
+        return 'Plugin User';
+      default:
+        return role.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+    }
+  };
+
   const roleOptions = Array.from(
     new Set(
       users
@@ -395,10 +425,13 @@ export default function SuperadminUsers() {
     const email = candidate.email?.toLowerCase() ?? '';
     const collectionsForUser = candidate.collection_ids ?? [];
 
+    const formattedRole = formatRoleLabel(candidate.role).toLowerCase();
+
     const matchesSearch =
       normalizedSearch.length === 0 ||
       username.includes(normalizedSearch) ||
       role.includes(normalizedSearch) ||
+      formattedRole.includes(normalizedSearch) ||
       fullName.includes(normalizedSearch) ||
       email.includes(normalizedSearch);
 
@@ -431,34 +464,20 @@ export default function SuperadminUsers() {
         return 'bg-green-100 text-green-800';
       case 'plugin_user':
         return 'bg-orange-100 text-orange-800';
+      case 'user':
+        return 'bg-indigo-100 text-indigo-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
   };
-
-  const formatRoleLabel = (role: string) => {
-    switch (role) {
-      case 'super_admin':
-        return 'Super Admin';
-      case 'superadmin':
-        return 'Superadmin';
-      case 'useradmin':
-      case 'user_admin':
-        return 'User Admin';
-      case 'plugin_user':
-        return 'Plugin User';
-      default:
-        return role.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
-    }
-  };
-
   return (
     <DashboardLayout>
+      {confirmDialog}
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">Users Management</h1>
-           
+
           </div>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
@@ -474,8 +493,8 @@ export default function SuperadminUsers() {
                     {editingUser ? 'Edit User' : 'Create New User'}
                   </DialogTitle>
                   <DialogDescription>
-                    {editingUser 
-                      ? 'Update user details and permissions' 
+                    {editingUser
+                      ? 'Update user details and permissions'
                       : 'Create a new user account'
                     }
                   </DialogDescription>
@@ -553,8 +572,8 @@ export default function SuperadminUsers() {
                         <span className="text-sm text-muted-foreground">(Cannot change your own role)</span>
                       )}
                     </Label>
-                    <Select 
-                      value={formData.role} 
+                    <Select
+                      value={formData.role}
                       onValueChange={(value: UserRole) => setFormData({ ...formData, role: value })}
                       disabled={editingUser?.user_id === authUser?.user_id}
                     >
@@ -639,8 +658,8 @@ export default function SuperadminUsers() {
                     Cancel
                   </Button>
                   {editingUser && editingUser.role === 'plugin_user' && (
-                    <Button 
-                      type="button" 
+                    <Button
+                      type="button"
                       variant={editingUser.is_active ? "destructive" : "default"}
                       onClick={() => handleToggleUserStatus(editingUser.user_id, editingUser.is_active, editingUser.role)}
                     >
@@ -750,9 +769,8 @@ export default function SuperadminUsers() {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          user.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                        }`}>
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${user.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          }`}>
                           {user.is_active ? 'Active' : 'Inactive'}
                         </span>
                       </TableCell>

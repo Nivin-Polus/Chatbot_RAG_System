@@ -51,6 +51,16 @@ class Collection(Base):
         back_populates="collection",
         cascade="all, delete-orphan"
     )
+    crawler_jobs = relationship(
+        "CrawlerJob",
+        back_populates="collection",
+        cascade="all, delete-orphan"
+    )
+    message_history = relationship(
+        "ChatMessageHistory",
+        back_populates="collection",
+        cascade="all, delete-orphan"
+    )
     
     def __repr__(self):
         return f"<Collection(id='{self.collection_id}', name='{self.name}')>"

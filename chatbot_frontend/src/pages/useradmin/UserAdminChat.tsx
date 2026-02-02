@@ -10,11 +10,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { MessageSquare, Send, Loader2, User } from 'lucide-react';
+import { MessageSquare, Send, Loader2, User, ExternalLink, FileText, Download } from 'lucide-react';
 import { ChatMessage, ChatSource, Collection } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost } from '@/utils/api';
-import { saveChatHistory, loadChatHistory, clearChatHistory } from '@/utils/chatStorage';
+import { saveSession, getSession, getSessions } from '@/utils/chatStorage';
+import { useSearchParams } from 'react-router-dom';
 
 export default function UserAdminChat() {
   const { user } = useAuth();
@@ -22,6 +23,13 @@ export default function UserAdminChat() {
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null); // NEW: Ref to track current session ID
+
+  // Keep ref in sync
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
   const [collections, setCollections] = useState<Collection[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<string>('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -35,6 +43,7 @@ export default function UserAdminChat() {
   const saveTimeoutRef = useRef<number | null>(null);
   const [accessibleFileIds, setAccessibleFileIds] = useState<string[]>([]);
   const [accessibleFileNames, setAccessibleFileNames] = useState<string[]>([]);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const selectedCollectionDetails = useMemo(
     () => collections.find((collection) => collection.collection_id === selectedCollection) ?? null,
@@ -95,40 +104,48 @@ export default function UserAdminChat() {
     });
   }, []);
 
-  // Initialize sessionId if not set
+  // Handle Session Loading
   useEffect(() => {
-    if (!sessionId) {
-      const newSessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-      setSessionId(newSessionId);
-    }
-  }, [sessionId]);
+    const urlSessionId = searchParams.get('session');
 
-  // Load chat history from localStorage when collection changes
-  useEffect(() => {
-    if (selectedCollection && user?.user_id) {
-      const localStored = loadChatHistory(selectedCollection, user.user_id, user.role || 'useradmin');
-      if (localStored && localStored.messages.length > 0) {
-        setMessages(localStored.messages);
-        if (localStored.sessionId) {
-          setSessionId(localStored.sessionId);
+    if (urlSessionId) {
+      if (sessionId !== urlSessionId) {
+        const storedFn = getSession(urlSessionId);
+        if (storedFn) {
+          setMessages(storedFn.messages);
+          setSessionId(urlSessionId);
+          if (storedFn.collectionId && storedFn.collectionId !== selectedCollection) {
+            const collectionExists = collections.some(c => c.collection_id === storedFn.collectionId);
+            if (collectionExists) {
+              setSelectedCollection(storedFn.collectionId);
+            }
+          }
+        } else {
+          setSearchParams({});
         }
-      } else {
+      }
+    } else {
+      if (!sessionId || sessionId !== 'new_session_placeholder') {
+        const newId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+        setSessionId(newId);
         setMessages([]);
       }
-    } else if (!selectedCollection) {
-      // Clear messages when no collection is selected
-      setMessages([]);
     }
-  }, [selectedCollection, user?.user_id, user?.role]);
+  }, [searchParams, user?.user_id]); // Removed sessionId dependency
 
   // Save chat history to localStorage once after assistant finishes streaming
+  // Modified to use shouldTouch=false
   useEffect(() => {
     if (!isStreaming && selectedCollection && user?.user_id && messages.length > 0 && sessionId) {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
       saveTimeoutRef.current = window.setTimeout(() => {
-        saveChatHistory(messages, sessionId, selectedCollection, user.user_id, user.role || 'useradmin');
+        saveSession(sessionId, messages, selectedCollection, user.user_id, user.role || 'useradmin', false);
+
+        if (!searchParams.get('session')) {
+          setSearchParams({ session: sessionId }, { replace: true });
+        }
       }, 1000);
     }
     return () => {
@@ -136,7 +153,7 @@ export default function UserAdminChat() {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [isStreaming, messages, sessionId, selectedCollection, user?.user_id, user?.role]);
+  }, [isStreaming, messages, sessionId, selectedCollection, user?.user_id, user?.role, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (isAutoScrollRef.current) {
@@ -164,7 +181,7 @@ export default function UserAdminChat() {
       const response = await apiGet(
         `${import.meta.env.VITE_API_BASE_URL}/collections/`,
         user?.access_token,
-        false // Don't show error toast for this call
+        false
       );
 
       if (response.ok) {
@@ -241,12 +258,14 @@ export default function UserAdminChat() {
   }, [selectedCollection, user?.access_token]);
 
   const streamAssistantResponse = useCallback(
-    (rawContent: string, sources?: ChatSource[]) => {
+    (rawContent: string, sources?: ChatSource[], isFollowup?: boolean) => {
       const content = rawContent && rawContent.trim().length > 0
         ? rawContent
         : 'I was unable to generate a response.';
       const messageId = `assistant_${Date.now()}`;
       const timestamp = new Date();
+
+      const targetSessionId = sessionIdRef.current; // Capture current session ID
 
       if (typingTimeoutRef.current) {
         window.clearTimeout(typingTimeoutRef.current);
@@ -261,25 +280,59 @@ export default function UserAdminChat() {
           content: '',
           timestamp,
           sources,
+          isFollowup,
         },
       ]);
 
       return new Promise<void>((resolve) => {
         setIsStreaming(true);
 
+        // Helper to save current state to storage even if unmounted/switched
+        const saveProgressToStorage = (finalContent: string) => {
+          if (user?.user_id && selectedCollection && targetSessionId) {
+            const currentStored = getSession(targetSessionId);
+            if (currentStored) {
+              const updatedMsgs = currentStored.messages.map(m =>
+                m.id === messageId
+                  ? { ...m, content: finalContent, sources, isFollowup }
+                  : m
+              );
+
+              if (!updatedMsgs.find(m => m.id === messageId)) {
+                updatedMsgs.push({
+                  id: messageId,
+                  role: 'assistant',
+                  content: finalContent,
+                  timestamp,
+                  sources,
+                  isFollowup
+                });
+              }
+
+              saveSession(targetSessionId, updatedMsgs, selectedCollection, user.user_id, user.role || 'useradmin', true);
+            }
+          }
+        };
+
         const completeStream = () => {
           if (typingTimeoutRef.current) {
             window.clearTimeout(typingTimeoutRef.current);
             typingTimeoutRef.current = null;
           }
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === messageId ? { ...msg, content, sources } : msg
-            )
-          );
-          scrollToBottom();
+
+          if (sessionIdRef.current === targetSessionId) {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === messageId ? { ...msg, content, sources, isFollowup } : msg
+              )
+            );
+            scrollToBottom();
+            setIsStreaming(false);
+          } else {
+            saveProgressToStorage(content);
+          }
+
           stopStreamingRef.current = null;
-          setIsStreaming(false);
           resolve();
         };
 
@@ -296,7 +349,12 @@ export default function UserAdminChat() {
 
         const typeNext = () => {
           if (!document.hasFocus()) {
-            completeStream();
+            // Optional logic for background
+          }
+
+          if (sessionIdRef.current !== targetSessionId) {
+            saveProgressToStorage(content);
+            resolve();
             return;
           }
 
@@ -304,7 +362,7 @@ export default function UserAdminChat() {
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === messageId
-                ? { ...msg, content: content.slice(0, index), sources }
+                ? { ...msg, content: content.slice(0, index), sources, isFollowup }
                 : msg
             )
           );
@@ -320,7 +378,7 @@ export default function UserAdminChat() {
         typeNext();
       });
     },
-    [scrollToBottom]
+    [scrollToBottom, user?.user_id, user?.role, selectedCollection]
   );
 
   const sendMessage = async (e: React.FormEvent) => {
@@ -345,9 +403,9 @@ export default function UserAdminChat() {
     setIsLoading(true);
     enableAutoScroll();
 
-    // Prepare conversation history (last ~10 messages)
+    // Prepare conversation history (last ~20 messages)
     const conversationHistory = updatedMessages
-      .slice(-10)
+      .slice(-20)
       .map(msg => ({
         role: msg.role,
         content: msg.content,
@@ -375,6 +433,9 @@ export default function UserAdminChat() {
         detail?: string;
         message?: string;
         error?: string;
+        is_generic?: boolean;
+        is_followup?: boolean;
+        followup_questions?: string;
       };
       let data: ChatApiResponse | null = null;
       try {
@@ -442,32 +503,70 @@ export default function UserAdminChat() {
 
       const dataResponse: ChatApiResponse = data ?? {};
 
-      const assistantContent =
+      // NEW: Handle follow-up responses
+      if (dataResponse.is_followup) {
+        const followupContent = dataResponse.followup_questions || 'Could you please clarify your question?';
+        await streamAssistantResponse(followupContent, undefined, true);
+        setIsLoading(false);
+        return;
+      }
+
+      let assistantContent =
         dataResponse.response || dataResponse.answer || dataResponse.content || 'I was unable to generate a response.';
 
-      const sources: ChatSource[] | undefined = Array.isArray(dataResponse.sources)
-        ? dataResponse.sources
-          .map<ChatSource | null>((item: { file_name?: unknown; file_id?: unknown; source_type?: unknown; url?: unknown } | null | undefined) => {
-            if (!item || typeof item !== 'object') {
-              return null;
-            }
-            const fileName = typeof item.file_name === 'string' ? item.file_name : undefined;
-            const fileId = typeof item.file_id === 'string' ? item.file_id : undefined;
-            const sourceType = typeof item.source_type === 'string' ? item.source_type as 'file' | 'web_crawl' : undefined;
-            const url = typeof item.url === 'string' ? item.url : undefined;
+      // Helper to detect generic responses locally if API flag is missing
+      const isGenericResponse = (text: string) => {
+        if (!text) return false;
+        const normalized = text.trim();
+        const genericPattern = /I apologize|I'm limited to providing information|not have any information|outside of my scope|I'm afraid I don't have enough information|I don't have access to information|I don't have any information about|I'm here to help with questions about your knowledge base documents|the provided context does not contain|does not contain any information|do not have enough details|without any relevant information|there are no sources that discuss|i do not have enough details to provide|my role is to assist based on the provided information|I do not have enough context|I have no relevant information|I don't have enough context|I do not have any relevant information|provide a meaningful response/i;
+        return genericPattern.test(normalized);
+      };
 
-            if (!fileName) {
-              return null;
-            }
-            return {
-              file_name: fileName,
-              file_id: fileId,
-              source_type: sourceType,
-              url: url,
-            } satisfies ChatSource;
-          })
-          .filter((value): value is ChatSource => value !== null)
-        : undefined;
+      // Check if response is marked as generic (no relevant info found) - if so, don't show sources
+      const isGeneric = Boolean(dataResponse.is_generic) || isGenericResponse(assistantContent);
+
+      // ALWAYS strip embedded sources section from answer text to prevent duplicates/baked-in sources
+      assistantContent = assistantContent
+        .replace(/\r?\n+[\s>*-]*\*{0,2}\s*Sources?\s*:?\s*\*{0,2}\s*[\s\S]*$/i, '')
+        .replace(/\r?\n+Sources?\s*:[\s\S]*$/i, '')
+        .trim();
+
+      const sources: ChatSource[] | undefined = isGeneric
+        ? undefined
+        : Array.isArray(dataResponse.sources)
+          ? dataResponse.sources
+            .map<ChatSource | null>((item: { file_name?: unknown; file_id?: unknown; source_type?: unknown; url?: unknown } | null | undefined) => {
+              if (!item || typeof item !== 'object') {
+                return null;
+              }
+              const fileName = typeof item.file_name === 'string' ? item.file_name : undefined;
+              const fileId = typeof item.file_id === 'string' ? item.file_id : undefined;
+              const sourceType = typeof item.source_type === 'string' ? item.source_type as 'file' | 'web_crawl' : undefined;
+              const url = typeof item.url === 'string' ? item.url : undefined;
+
+              if (!fileName) {
+                return null;
+              }
+              return {
+                file_name: fileName,
+                file_id: fileId,
+                source_type: sourceType,
+                url: url,
+              } satisfies ChatSource;
+            })
+            .filter((value): value is ChatSource => value !== null)
+            .slice(0, 4) // Limit to 4 most relevant sources
+          : undefined;
+
+      // Re-append the cleaned and limited sources to the text so the renderer can pick them up
+      if (!isGeneric && sources && sources.length > 0) {
+        assistantContent += '\n\n**Sources:**';
+        sources.forEach((source) => {
+          // Format as markdown link [- filename](id/url) which the renderer understands
+          const ref = source.url || source.file_id || 'source';
+          assistantContent += `\n- [${source.file_name}](${ref})`;
+        });
+      }
 
       await streamAssistantResponse(assistantContent, sources);
       setIsLoading(false);
@@ -496,14 +595,8 @@ export default function UserAdminChat() {
       stopStreamingRef.current();
     }
 
-    // Clear from localStorage
-    if (selectedCollection && user?.user_id) {
-      clearChatHistory(selectedCollection, user.user_id, user.role || 'useradmin');
-    }
-
     setMessages([]);
-    const newSessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-    setSessionId(newSessionId);
+    setSearchParams({});
     enableAutoScroll();
   };
 
@@ -600,7 +693,6 @@ export default function UserAdminChat() {
           if (!sourceIdLookup.has(normalized) && source.file_id) {
             sourceIdLookup.set(normalized, source.file_id);
           }
-          // Store full metadata for the source
           if (!sourceMetadataLookup.has(normalized)) {
             sourceMetadataLookup.set(normalized, {
               url: source.url,
@@ -625,7 +717,6 @@ export default function UserAdminChat() {
           displayText = linkMatch[1].trim() || displayText;
           let linkTarget = linkMatch[2].trim();
 
-          // Parse source_type from format: reference|source_type
           if (linkTarget.includes('|')) {
             const parts = linkTarget.split('|');
             linkTarget = parts[0];
@@ -647,7 +738,7 @@ export default function UserAdminChat() {
         }
 
         if (!downloadName) {
-          const withoutPrefix = raw.replace(/^source\s*\d+[:-]?\s*/i, '').trim();
+          const withoutPrefix = raw.replace(/^source\s*\d+[:\-]?\s*/i, '').trim();
           if (withoutPrefix && withoutPrefix !== raw.trim() && looksLikeFileName(withoutPrefix)) {
             downloadName = withoutPrefix;
           }
@@ -672,7 +763,6 @@ export default function UserAdminChat() {
         const normalizedDisplay = displayText.trim().toLowerCase();
         const matchedFileId = normalizedDisplay ? sourceIdLookup.get(normalizedDisplay) : undefined;
 
-        // Detect web_crawl from URL pattern if not already set
         if (sourceRef && sourceRef.startsWith('http') && sourceType === 'file') {
           sourceType = 'web_crawl';
         }
@@ -705,11 +795,14 @@ export default function UserAdminChat() {
 
       const createInlineElements = (line: string, block: boolean = true): ReactNode[] => {
         const elements: ReactNode[] = [];
-        const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+        const tokenRegex = /(\[.*?\]\(.*?\))|(\*\*.*?\*\*)/g;
         let lastIndex = 0;
         let match: RegExpExecArray | null;
 
         const pushText = (text: string) => {
+          if (block && !text.trim()) {
+            return;
+          }
           elements.push(
             <span key={nextKey()} className={`${block ? 'block ' : ''}whitespace-pre-wrap`}>
               {text || (block ? ' ' : '\u00a0')}
@@ -717,57 +810,73 @@ export default function UserAdminChat() {
           );
         };
 
-        while ((match = linkRegex.exec(line)) !== null) {
+        const commonClasses = "inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-[rgba(17,24,39,0.15)] rounded-md bg-white text-[#1f2937] shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-[linear-gradient(135deg,rgba(69,98,187,0.1),rgba(2,241,124,0.1))] hover:border-[rgba(69,98,187,0.3)] hover:shadow-[0_3px_8px_rgba(69,98,187,0.15)] hover:-translate-y-[1px] transition-all no-underline mx-1 dark:bg-gray-800 dark:text-gray-100 dark:border-gray-700 dark:hover:bg-gray-700";
+
+        while ((match = tokenRegex.exec(line)) !== null) {
           if (match.index > lastIndex) {
             pushText(line.slice(lastIndex, match.index));
           }
 
-          const [, label, rawLinkTarget] = match;
-          const { displayText, downloadName, matchedFileId, sourceType } = extractSourceInfo(`[${label}](${rawLinkTarget})`);
+          const fullMatch = match[0];
 
-          // Parse source_type from linkTarget if present
-          let linkTarget = rawLinkTarget;
-          let detectedSourceType = sourceType;
-          if (rawLinkTarget.includes('|')) {
-            const parts = rawLinkTarget.split('|');
-            linkTarget = parts[0];
-            if (parts[1] === 'web_crawl') {
-              detectedSourceType = 'web_crawl';
+          if (fullMatch.startsWith('**')) {
+            const content = fullMatch.slice(2, -2);
+            elements.push(
+              <strong key={nextKey()} className="font-bold">
+                {content}
+              </strong>
+            );
+          } else {
+            const linkMatch = fullMatch.match(/\[([^\]]+)\]\(([^)]+)\)/);
+            if (linkMatch) {
+              const [, label, rawLinkTarget] = linkMatch;
+              const { displayText, downloadName, matchedFileId, sourceType } = extractSourceInfo(`[${label}](${rawLinkTarget})`);
+
+              let linkTarget = rawLinkTarget;
+              let detectedSourceType = sourceType;
+              if (rawLinkTarget.includes('|')) {
+                const parts = rawLinkTarget.split('|');
+                linkTarget = parts[0];
+                if (parts[1] === 'web_crawl') {
+                  detectedSourceType = 'web_crawl';
+                }
+              }
+
+              const fileId = matchedFileId ?? linkTarget;
+              const fileName = downloadName || displayText || label;
+
+              if (detectedSourceType === 'web_crawl') {
+                elements.push(
+                  <a
+                    key={nextKey()}
+                    href={linkTarget.startsWith('http') ? linkTarget : `https://${linkTarget}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={commonClasses}
+                  >
+                    <ExternalLink className="w-3 h-3 text-[rgba(107,114,128,0.7)]" />
+                    {displayText.trim() || 'View source'}
+                  </a>
+                );
+              } else if (canDownloadSource(fileId, fileName)) {
+                elements.push(
+                  <button
+                    key={nextKey()}
+                    type="button"
+                    className={commonClasses}
+                    onClick={() => handleDownloadSource(fileId, fileName)}
+                  >
+                    <FileText className="w-3 h-3 text-[rgba(107,114,128,0.7)]" />
+                    {displayText.trim() || 'Download source'}
+                  </button>
+                );
+              } else {
+                pushText(displayText.trim() || label);
+              }
             }
           }
 
-          const fileId = matchedFileId ?? linkTarget;
-          const fileName = downloadName || displayText || label;
-
-          if (detectedSourceType === 'web_crawl') {
-            // Web crawl source - open URL in new tab (no access check needed for web links)
-            elements.push(
-              <a
-                key={nextKey()}
-                href={linkTarget.startsWith('http') ? linkTarget : `https://${linkTarget}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer`}
-              >
-                {displayText.trim() || 'View source'} ↗
-              </a>
-            );
-          } else if (canDownloadSource(fileId, fileName)) {
-            elements.push(
-              <button
-                key={nextKey()}
-                type="button"
-                className={`${block ? 'block' : 'inline-flex'} text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer`}
-                onClick={() => handleDownloadSource(fileId, fileName)}
-              >
-                {displayText.trim() || 'Download source'}
-              </button>
-            );
-          } else {
-            pushText(displayText.trim() || label);
-          }
-
-          lastIndex = match.index + match[0].length;
+          lastIndex = match.index + fullMatch.length;
         }
 
         const remaining = line.slice(lastIndex);
@@ -781,7 +890,7 @@ export default function UserAdminChat() {
       const isTableLine = (line: string): boolean => {
         const trimmed = line.trim();
         if (!trimmed) return false;
-        if (/^sources?:\s*$/i.test(trimmed)) return false;
+        if (/^\**\s*sources?\s*:?\s*\**$/i.test(trimmed)) return false;
         if (/^-\s+/.test(trimmed)) return false;
         const pipeCount = (trimmed.match(/\|/g) || []).length;
         if (pipeCount < 2) return false;
@@ -865,42 +974,24 @@ export default function UserAdminChat() {
         );
       };
 
+      const sourcesNodes: ReactNode[] = [];
+
       for (let i = 0; i < lines.length; i += 1) {
         const rawLine = lines[i];
         const trimmed = rawLine.trim();
         const isSourcesHeading = /^\**\s*sources?\s*:?\s*\**$/i.test(trimmed);
 
         if (isSourcesHeading) {
-          nodes.push(
-            <span
-              key={nextKey()}
-              className="block text-xs font-semibold uppercase text-muted-foreground"
-            >
-              Sources:
-            </span>
-          );
           inSourcesSection = true;
           continue;
         }
 
-        if (inSourcesSection) {
-          if (trimmed.length === 0) {
-            nodes.push(
-              <span key={nextKey()} className="block whitespace-pre-wrap">
-                {' '}
-              </span>
-            );
-            continue;
-          }
-
+        if (inSourcesSection && /^-\s*(.+)$/.test(trimmed)) {
           const bulletPattern = /^[-•\u2022]\s*/;
           const normalizedLabel = trimmed.replace(bulletPattern, '').trim();
           const label = normalizedLabel.length > 0 ? normalizedLabel : trimmed;
-
-          // Parse markdown link format: [filename](file_id)
           const linkMatch = label.match(/\[([^\]]+)\]\(([^)]+)\)/);
 
-          // Extract source name for metadata lookup
           let sourceName = label;
           if (linkMatch) {
             sourceName = linkMatch[1];
@@ -908,38 +999,38 @@ export default function UserAdminChat() {
           const normalizedName = sourceName.trim().toLowerCase();
           const metadata = sourceMetadataLookup.get(normalizedName);
 
-          // Check if we have metadata from API response
+          const commonButtonClass = "flex items-center justify-between gap-2 px-3 py-2 text-sm font-medium border border-[rgba(17,24,39,0.15)] rounded-md bg-white text-[#1f2937] shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-[linear-gradient(135deg,rgba(69,98,187,0.1),rgba(2,241,124,0.1))] hover:border-[rgba(69,98,187,0.3)] hover:shadow-[0_3px_8px_rgba(69,98,187,0.15)] hover:-translate-y-[1px] transition-all cursor-pointer no-underline w-full dark:bg-gray-800 dark:text-gray-100 dark:border-gray-700 dark:hover:bg-gray-700";
+
           if (metadata && (metadata.source_type === 'web_crawl' || metadata.url)) {
-            // Web crawl source - open URL in new tab (no access check needed for web links)
             const url = metadata.url || '';
-            nodes.push(
+            sourcesNodes.push(
               <a
                 key={nextKey()}
                 href={url.startsWith('http') ? url : `https://${url}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                className={commonButtonClass}
               >
-                {sourceName} ↗
+                <span className="truncate text-left flex-1">{sourceName}</span>
+                <ExternalLink className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
               </a>
             );
           } else if (metadata && metadata.file_id && canDownloadSource(metadata.file_id, sourceName)) {
-            // File source with known file_id - trigger download
-            nodes.push(
+            sourcesNodes.push(
               <button
                 key={nextKey()}
                 type="button"
-                className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                className={commonButtonClass}
                 onClick={() => handleDownloadSource(metadata.file_id!, sourceName)}
               >
-                {sourceName}
+                <span className="truncate text-left flex-1">{sourceName}</span>
+                <Download className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
               </button>
             );
           } else if (linkMatch) {
             const [, fileName, rawLinkTarget] = linkMatch;
             const matchedFileId = normalizedName ? sourceIdLookup.get(normalizedName) : undefined;
 
-            // Parse source_type from linkTarget
             let linkTarget = rawLinkTarget;
             let sourceType: 'file' | 'web_crawl' = 'file';
             if (rawLinkTarget.includes('|')) {
@@ -949,7 +1040,6 @@ export default function UserAdminChat() {
                 sourceType = 'web_crawl';
               }
             }
-            // Also detect from URL pattern
             if (linkTarget.startsWith('http')) {
               sourceType = 'web_crawl';
             }
@@ -957,88 +1047,93 @@ export default function UserAdminChat() {
             const resolvedFileId = matchedFileId ?? linkTarget;
 
             if (sourceType === 'web_crawl') {
-              // Web crawl source - open URL in new tab
-              nodes.push(
+              sourcesNodes.push(
                 <a
                   key={nextKey()}
                   href={linkTarget.startsWith('http') ? linkTarget : `https://${linkTarget}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                  className={commonButtonClass}
                 >
-                  {fileName} ↗
+                  <span className="truncate text-left flex-1">{fileName}</span>
+                  <ExternalLink className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
                 </a>
               );
             } else if (canDownloadSource(resolvedFileId, fileName)) {
-              nodes.push(
+              sourcesNodes.push(
                 <button
                   key={nextKey()}
                   type="button"
-                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                  className={commonButtonClass}
                   onClick={() => handleDownloadSource(resolvedFileId, fileName)}
                 >
-                  {fileName}
+                  <span className="truncate text-left flex-1">{fileName}</span>
+                  <Download className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
                 </button>
               );
             } else {
-              nodes.push(
-                <span key={nextKey()} className="block whitespace-pre-wrap">
+              sourcesNodes.push(
+                <span key={nextKey()} className="block whitespace-pre-wrap text-sm text-muted-foreground px-1">
                   {fileName}
                 </span>
               );
             }
           } else {
-            // Plain text source - try to find in metadata lookup
-            const plainMetadata = sourceMetadataLookup.get(label.trim().toLowerCase());
-            if (plainMetadata && (plainMetadata.source_type === 'web_crawl' || plainMetadata.url)) {
-              const url = plainMetadata.url || '';
-              nodes.push(
-                <a
-                  key={nextKey()}
-                  href={url.startsWith('http') ? url : `https://${url}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
-                >
-                  {label} ↗
-                </a>
-              );
-            } else if (plainMetadata && plainMetadata.file_id && canDownloadSource(plainMetadata.file_id, label)) {
-              nodes.push(
-                <button
-                  key={nextKey()}
-                  type="button"
-                  className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
-                  onClick={() => handleDownloadSource(plainMetadata.file_id!, label)}
-                >
-                  {label}
-                </button>
-              );
-            } else {
-              // Fallback for old format
-              const { displayText, downloadName, sourceRef, matchedFileId } = extractSourceInfo(label);
-              const reference = matchedFileId ?? sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
-              if (reference && canDownloadSource(reference, downloadName)) {
-                nodes.push(
+            const { displayText, downloadName, sourceRef, matchedFileId, sourceType } = extractSourceInfo(label);
+            const reference = matchedFileId ?? sourceRef ?? downloadName ?? (looksLikeFileName(label) ? label : null);
+
+            if (reference) {
+              const isWebCrawl = sourceType === 'web_crawl' || (typeof reference === 'string' && reference.startsWith('http'));
+
+              if (isWebCrawl) {
+                sourcesNodes.push(
+                  <a
+                    key={nextKey()}
+                    href={reference.startsWith('http') ? reference : `https://${reference}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={commonButtonClass}
+                  >
+                    <span className="truncate text-left flex-1">{label}</span>
+                    <ExternalLink className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
+                  </a>
+                );
+              } else if (canDownloadSource(reference, downloadName)) {
+                sourcesNodes.push(
                   <button
                     key={nextKey()}
                     type="button"
-                    className="block text-left text-primary underline underline-offset-2 hover:text-primary/80 cursor-pointer"
+                    className={commonButtonClass}
                     onClick={() => handleDownloadSource(reference, downloadName ?? displayText)}
                   >
-                    {displayText}
+                    <span className="truncate text-left flex-1">{label}</span>
+                    <Download className="w-4 h-4 text-[rgba(107,114,128,0.7)] shrink-0" />
                   </button>
                 );
               } else {
-                nodes.push(
-                  <span key={nextKey()} className="block whitespace-pre-wrap">
+                sourcesNodes.push(
+                  <span key={nextKey()} className="block whitespace-pre-wrap text-sm text-muted-foreground px-1">
                     {label}
                   </span>
                 );
               }
+            } else {
+              sourcesNodes.push(
+                <span key={nextKey()} className="block whitespace-pre-wrap text-sm text-muted-foreground px-1">
+                  {label}
+                </span>
+              );
             }
           }
           continue;
+        }
+
+        if (inSourcesSection && trimmed.length === 0) {
+          continue;
+        }
+
+        if (inSourcesSection && trimmed.length > 0 && !trimmed.startsWith('-')) {
+          inSourcesSection = false;
         }
 
         if (!inSourcesSection && isTableLine(rawLine)) {
@@ -1058,12 +1153,58 @@ export default function UserAdminChat() {
           continue;
         }
 
-        nodes.push(...createInlineElements(rawLine));
+        // Check for Markdown headings (# to ######)
+        const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
+        if (headingMatch && !inSourcesSection) {
+          const level = headingMatch[1].length;
+          const headingContent = headingMatch[2];
+          const headingClasses: Record<number, string> = {
+            1: 'text-2xl font-bold mt-2 mb-1',
+            2: 'text-xl font-bold mt-1.5 mb-1',
+            3: 'text-lg font-semibold mt-1 mb-0.5',
+            4: 'text-base font-semibold mt-1 mb-0.5',
+            5: 'text-sm font-semibold mt-1 mb-0.5',
+            6: 'text-sm font-medium mt-1 mb-0.5',
+          };
+          const HeadingTag = `h${level}` as keyof JSX.IntrinsicElements;
+          nodes.push(
+            <HeadingTag key={`${messageId}-heading-${i}`} className={headingClasses[level]}>
+              {createInlineElements(headingContent, false)}
+            </HeadingTag>
+          );
+          continue;
+        }
+
+        // Wrap each line in a container to keep inline elements together
+        const lineNodes = createInlineElements(rawLine, false); // block=false
+        if (lineNodes.length > 0) {
+          nodes.push(
+            <div key={`${messageId}-line-${i}`} className="min-h-[1.5em]">
+              {lineNodes}
+            </div>
+          );
+        } else {
+          // Empty line
+          nodes.push(<div key={`${messageId}-line-${i}`} className="h-1" />);
+        }
+      }
+
+      if (sourcesNodes.length > 0) {
+        nodes.push(
+          <div key={`${messageId}-sources-container`} className="mt-2 pt-2 border-t border-border/40 bg-muted/30 rounded-lg p-2 space-y-1">
+            <span className="block text-xs font-bold uppercase text-muted-foreground/80 mb-1">
+              Sources:
+            </span>
+            <div className="flex flex-col gap-1 w-full">
+              {sourcesNodes}
+            </div>
+          </div>
+        );
       }
 
       return nodes;
     },
-    [handleDownloadSource, accessibleIdsSet, accessibleNamesSet]
+    [accessibleIdsSet, accessibleNamesSet, handleDownloadSource]
   );
 
   const handleMessageScroll = useCallback(() => {
@@ -1139,7 +1280,7 @@ export default function UserAdminChat() {
                     <div className="flex items-center justify-center text-muted-foreground dark:text-gray-300 h-[50vh]">
                       <div className="flex flex-col items-center gap-3 text-center">
                         <MessageSquare className="h-12 w-12 opacity-50" />
-                        <p className="text-base font-medium">You can start the conversation by sending a message below.</p>
+                        <p className="text-base font-medium">How can I help you?</p>
                       </div>
                     </div>
                   ) : (
@@ -1153,7 +1294,7 @@ export default function UserAdminChat() {
                           <div
                             className={`rounded-xl px-4 py-3 shadow-sm ${isUser
                               ? 'bg-primary text-primary-foreground max-w-[65%] dark:text-white'
-                              : 'bg-muted border border-border/60 text-foreground max-w-[80%] dark:bg-gray-800 dark:text-gray-100'
+                              : 'rounded-xl px-4 py-3 shadow-sm bg-muted border border-border/60 text-foreground max-w-[80%] dark:bg-gray-800 dark:text-gray-100'
                               }`}
                           >
                             <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
@@ -1186,7 +1327,7 @@ export default function UserAdminChat() {
                                 {formatTime(message.timestamp)}
                               </p>
                             </div>
-                            <div className="space-y-2 text-sm leading-relaxed">
+                            <div className="space-y-0.5 text-sm leading-snug">
                               {renderMessageContent(message.content, message.id, message.sources)}
                             </div>
                           </div>
@@ -1195,15 +1336,19 @@ export default function UserAdminChat() {
                     })
                   )}
                   {isLoading && !isStreaming && (
-                    <div className="flex justify-start">
-                      <div className="bg-muted border rounded-lg px-4 py-3 dark:bg-gray-800 dark:text-gray-300">
+                    <div className="flex justify-start pt-2">
+                      <div className="bg-muted border border-border/60 rounded-xl px-4 py-3 shadow-sm dark:bg-gray-800 dark:text-gray-100 max-w-[80%]">
                         <div className="flex items-center space-x-2">
                           <img src="/chatbot/leto.svg" alt="Leto logo" className="h-4 w-4" />
-                          <div className="flex items-center space-x-2">
-                            <Loader2 className="h-4 w-4 animate-spin" />
+                          <div className="flex items-center space-x-1">
                             <span className="text-sm text-muted-foreground dark:text-gray-300">
-                              Leto is thinking...
+                              Leto is thinking
                             </span>
+                            <div className="typing-dots">
+                              <span className="dot"></span>
+                              <span className="dot"></span>
+                              <span className="dot"></span>
+                            </div>
                           </div>
                         </div>
                       </div>

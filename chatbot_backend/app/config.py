@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     CLAUDE_API_KEY: str = Field(default="", validation_alias="CLAUDE_API_KEY")
     CLAUDE_API_URL: str = Field("https://api.anthropic.com/v1/messages", validation_alias="CLAUDE_API_URL")
     CLAUDE_MODEL: str = Field("claude-3-haiku-20240307", validation_alias="CLAUDE_MODEL")
-    CLAUDE_MAX_TOKENS: int = Field(1000, validation_alias="CLAUDE_MAX_TOKENS")
+    CLAUDE_MAX_TOKENS: int = Field(4096, validation_alias="CLAUDE_MAX_TOKENS")
     CLAUDE_TEMPERATURE: float = Field(0.0, validation_alias="CLAUDE_TEMPERATURE")
     SYSTEM_PROMPT: str = Field("", validation_alias="SYSTEM_PROMPT")  # Empty means use default
     
@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(30, validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES")
     PLUGIN_TOKEN_EXPIRE_DAYS: int = Field(30, validation_alias="PLUGIN_TOKEN_EXPIRE_DAYS")
     
+    # Frontend URL for auto-login redirects
+    FRONTEND_URL: str = Field("https://dev-chatbot.polussolutions.com/chatbot", validation_alias="FRONTEND_URL")
+    
     # App mode
     APP_MODE: str = Field("api", validation_alias="APP_MODE")  # "api" or "ui"
     
@@ -103,6 +106,23 @@ class Settings(BaseSettings):
     # Activity Tracking
     ACTIVITY_LOG_DIR: str = Field("activity_logs", validation_alias="ACTIVITY_LOG_DIR")
     ACTIVITY_RETENTION_DAYS: int = Field(30, validation_alias="ACTIVITY_RETENTION_DAYS")
+
+    # RAG Configuration
+    RAG_MIN_SCORE: float = Field(0.25, validation_alias="RAG_MIN_SCORE")  # Minimum similarity threshold to filter low-confidence chunks (lowered due to hybrid scoring)
+    RAG_LEADERSHIP_MIN_SCORE: float = Field(0.15, validation_alias="RAG_LEADERSHIP_MIN_SCORE")  # Lower threshold for leadership-list queries (data often distributed across chunks)
+    SOURCE_MIN_SCORE: float = Field(0.15, validation_alias="SOURCE_MIN_SCORE")  # Minimum confidence score to show a source to users
+    MAX_CONTEXT_TOKENS: int = Field(4000, validation_alias="MAX_CONTEXT_TOKENS")  # Token cap for context chunks sent to LLM
+
+    # Rate Limiting & Backpressure
+    RATE_LIMIT_ENABLED: bool = Field(True, validation_alias="RATE_LIMIT_ENABLED")
+    RATE_LIMIT_DEFAULT: str = Field("100/minute", validation_alias="RATE_LIMIT_DEFAULT")
+    MAX_CONCURRENT_REQUESTS: int = Field(20, validation_alias="MAX_CONCURRENT_REQUESTS")
+
+    # Chat Widget Configuration
+    CHAT_WIDGET_HOST_URL: str = Field("", validation_alias="CHAT_WIDGET_HOST_URL")
+    
+    # Plugin Embed Code Configuration (base URL for CSS/JS assets)
+    PLUGIN_EMBED_BASE_URL: str = Field("https://keyword-search.mit.edu/dist/", validation_alias="PLUGIN_EMBED_BASE_URL")
 
     # API credentials
     API_USERNAME: str = Field("your_username", validation_alias="API_USERNAME")

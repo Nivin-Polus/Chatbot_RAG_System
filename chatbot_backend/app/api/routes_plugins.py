@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import secrets
 import re
+import uuid
 from typing import List, Optional
 from urllib.parse import urlparse
 
@@ -35,6 +36,7 @@ class PluginIntegrationUpdate(BaseModel):
     website_url: Optional[str] = None
     display_name: Optional[str] = None
     is_active: Optional[bool] = None
+    is_widget_active: Optional[bool] = None
 
 
 class PluginIntegrationResponse(BaseModel):
@@ -45,11 +47,13 @@ class PluginIntegrationResponse(BaseModel):
     normalized_url: str
     display_name: Optional[str]
     is_active: bool
+    is_widget_active: bool
     created_at: Optional[str]
     created_by: Optional[str]
     plugin_username: Optional[str] = None
     plugin_password: Optional[str] = None
     plugin_token: Optional[str] = None
+    widget_token: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -118,11 +122,13 @@ def _to_response(plugin: PluginIntegration) -> PluginIntegrationResponse:
         normalized_url=plugin.normalized_url,
         display_name=plugin.display_name,
         is_active=plugin.is_active,
+        is_widget_active=plugin.is_widget_active,
         created_at=plugin.created_at.isoformat() if plugin.created_at else None,
         created_by=plugin.created_by,
         plugin_username=None,
         plugin_password=None,
         plugin_token=None,
+        widget_token=plugin.widget_token,
     )
 
 
@@ -335,6 +341,8 @@ async def create_plugin_integration(
         normalized_url=normalized,
         display_name=payload.display_name.strip() if payload.display_name else None,
         is_active=True,
+        is_widget_active=True,
+        widget_token=str(uuid.uuid4()),
         created_by=current_user.user_id,
     )
 
@@ -494,6 +502,9 @@ async def update_plugin(
     if payload.is_active is not None:
         plugin.is_active = payload.is_active
 
+    if payload.is_widget_active is not None:
+        plugin.is_widget_active = payload.is_widget_active
+
     plugin_user, generated_password, plugin_token_value = _ensure_plugin_user_for_collection(
         db,
         collection=collection,
@@ -532,3 +543,800 @@ async def delete_plugin(
     db.commit()
 
     logger.info("Plugin integration deleted: %s", plugin.id)
+
+
+class GenerateLoginUrlRequest(BaseModel):
+    website_url: str
+
+
+class GenerateLoginUrlResponse(BaseModel):
+    login_url: str
+    expires_in: int  # Seconds until token expires
+
+
+@router.post("/generate-login-url", response_model=GenerateLoginUrlResponse)
+async def generate_login_url(
+    payload: GenerateLoginUrlRequest,
+    db: Session = Depends(get_db),
+):
+    """Generate an auto-login URL for a plugin user based on website URL.
+    
+    This endpoint looks up the plugin integration for the given URL,
+    finds or creates the associated plugin user, and generates a
+    short-lived auto-login token that can be used to log in automatically.
+    """
+    from app.core.auth import create_auto_login_token
+    from app.config import settings
+    
+    normalized = _normalize_url(payload.website_url)
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid URL")
+
+    # Find plugin by exact match first
+    plugin = (
+        db.query(PluginIntegration)
+        .join(Collection, PluginIntegration.collection_id == Collection.collection_id)
+        .filter(PluginIntegration.normalized_url == normalized)
+        .first()
+    )
+    
+    # If exact match fails, try prefix matching
+    if not plugin:
+        parsed_request = urlparse(f"https://{normalized}" if "://" not in normalized else normalized)
+        request_domain = parsed_request.netloc.lower()
+        request_path = parsed_request.path.rstrip('/')
+        
+        plugins = (
+            db.query(PluginIntegration)
+            .join(Collection, PluginIntegration.collection_id == Collection.collection_id)
+            .all()
+        )
+        
+        for p in plugins:
+            parsed_plugin = urlparse(f"https://{p.normalized_url}" if "://" not in p.normalized_url else p.normalized_url)
+            plugin_domain = parsed_plugin.netloc.lower()
+            plugin_path = parsed_plugin.path.rstrip('/')
+            
+            if request_domain == plugin_domain:
+                if not plugin_path or request_path.startswith(plugin_path):
+                    plugin = p
+                    break
+    
+    if not plugin:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin not found for the provided URL")
+
+    if not plugin.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Plugin integration is inactive")
+
+    collection = plugin.collection
+    if not collection or not collection.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Collection is inactive")
+
+    # Get or create the plugin user
+    plugin_user, _, _ = _ensure_plugin_user_for_collection(
+        db,
+        collection=collection,
+        plugin=plugin,
+        creator_user_id=None,
+    )
+    db.commit()
+
+    if not plugin_user or not plugin_user.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin user not found or inactive")
+
+    # Generate auto-login token (5 minutes expiry)
+    expires_minutes = 5
+    auto_login_token = create_auto_login_token(
+        user_id=plugin_user.user_id,
+        username=plugin_user.username,
+        collection_id=collection.collection_id,
+        expires_minutes=expires_minutes,
+    )
+
+    # Construct the login URL
+    # Use the frontend URL from settings
+    frontend_base_url = settings.FRONTEND_URL.rstrip('/')
+    login_url = f"{frontend_base_url}/auto-login?token={auto_login_token}"
+
+    logger.info("Generated auto-login URL for plugin: %s, collection: %s", plugin.id, collection.collection_id)
+
+    return GenerateLoginUrlResponse(
+        login_url=login_url,
+        expires_in=expires_minutes * 60,  # Convert to seconds
+    )
+
+
+# --- Session Transfer for Plugin to Frontend Chat Migration ---
+
+import time
+from threading import Lock
+
+# In-memory storage for session transfers (in production, use Redis)
+_session_transfers: dict[str, dict] = {}
+_session_transfers_lock = Lock()
+_TRANSFER_EXPIRY_SECONDS = 300  # 5 minutes
+
+
+def _cleanup_expired_transfers():
+    """Remove expired session transfers."""
+    now = time.time()
+    with _session_transfers_lock:
+        expired_keys = [
+            key for key, data in _session_transfers.items()
+            if now - data.get("created_at", 0) > _TRANSFER_EXPIRY_SECONDS
+        ]
+        for key in expired_keys:
+            del _session_transfers[key]
+
+
+class SessionMessage(BaseModel):
+    user: bool
+    text: str
+    formatted: bool = False
+    timestamp: Optional[str] = None
+    sources: Optional[List[dict]] = None
+    isFollowup: Optional[bool] = False
+
+
+class TransferSessionRequest(BaseModel):
+    website_url: str
+    session_id: str
+    messages: List[SessionMessage]
+
+
+class TransferSessionResponse(BaseModel):
+    transfer_token: str
+    expires_in: int  # Seconds
+
+
+class RetrieveSessionResponse(BaseModel):
+    session_id: str
+    messages: List[SessionMessage]
+    collection_id: str
+
+
+@router.post("/transfer-session", response_model=TransferSessionResponse)
+async def transfer_session(
+    payload: TransferSessionRequest,
+    db: Session = Depends(get_db),
+):
+    """Store a plugin chat session temporarily for transfer to the frontend.
+    
+    This endpoint allows the plugin to send its current chat session data
+    to the backend, which stores it temporarily and returns a transfer token.
+    The frontend can then use this token to retrieve the session data.
+    """
+    _cleanup_expired_transfers()
+    
+    normalized = _normalize_url(payload.website_url)
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid URL")
+
+    # Find plugin to verify it exists and get collection_id
+    plugin = (
+        db.query(PluginIntegration)
+        .join(Collection, PluginIntegration.collection_id == Collection.collection_id)
+        .filter(PluginIntegration.normalized_url == normalized)
+        .first()
+    )
+    
+    # If exact match fails, try prefix matching
+    if not plugin:
+        parsed_request = urlparse(f"https://{normalized}" if "://" not in normalized else normalized)
+        request_domain = parsed_request.netloc.lower()
+        request_path = parsed_request.path.rstrip('/')
+        
+        plugins = (
+            db.query(PluginIntegration)
+            .join(Collection, PluginIntegration.collection_id == Collection.collection_id)
+            .all()
+        )
+        
+        for p in plugins:
+            parsed_plugin = urlparse(f"https://{p.normalized_url}" if "://" not in p.normalized_url else p.normalized_url)
+            plugin_domain = parsed_plugin.netloc.lower()
+            plugin_path = parsed_plugin.path.rstrip('/')
+            
+            if request_domain == plugin_domain:
+                if not plugin_path or request_path.startswith(plugin_path):
+                    plugin = p
+                    break
+    
+    if not plugin:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin not found for the provided URL")
+
+    if not plugin.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Plugin integration is inactive")
+
+    # Generate transfer token
+    transfer_token = secrets.token_urlsafe(32)
+    
+    # Store session data
+    with _session_transfers_lock:
+        _session_transfers[transfer_token] = {
+            "session_id": payload.session_id,
+            "messages": [msg.model_dump() for msg in payload.messages],
+            "collection_id": plugin.collection_id,
+            "created_at": time.time(),
+        }
+    
+    logger.info("Session transfer created for plugin: %s, session: %s", plugin.id, payload.session_id)
+    
+    return TransferSessionResponse(
+        transfer_token=transfer_token,
+        expires_in=_TRANSFER_EXPIRY_SECONDS,
+    )
+
+
+@router.get("/transfer-session/{transfer_token}", response_model=RetrieveSessionResponse)
+async def retrieve_session(transfer_token: str):
+    """Retrieve a transferred plugin chat session.
+    
+    This endpoint retrieves the session data stored by the plugin and
+    deletes it from the temporary storage (one-time retrieval).
+    """
+    _cleanup_expired_transfers()
+    
+    with _session_transfers_lock:
+        transfer_data = _session_transfers.pop(transfer_token, None)
+    
+    if not transfer_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Transfer not found or expired"
+        )
+    
+    logger.info("Session transfer retrieved for session: %s", transfer_data["session_id"])
+    
+    return RetrieveSessionResponse(
+        session_id=transfer_data["session_id"],
+        messages=[SessionMessage(**msg) for msg in transfer_data["messages"]],
+        collection_id=transfer_data["collection_id"],
+    )
+
+
+# --- Multiple Sessions Transfer ---
+
+class TransferSessionData(BaseModel):
+    session_id: str
+    title: Optional[str] = "New Chat"
+    timestamp: Optional[int] = None
+    messages: List[SessionMessage]
+
+
+class TransferSessionsRequest(BaseModel):
+    website_url: str
+    current_session_id: Optional[str] = None
+    sessions: List[TransferSessionData]
+
+
+class RetrieveSessionsResponse(BaseModel):
+    current_session_id: Optional[str]
+    sessions: List[dict]
+    collection_id: str
+
+
+@router.post("/transfer-sessions", response_model=TransferSessionResponse)
+async def transfer_sessions(
+    payload: TransferSessionsRequest,
+    db: Session = Depends(get_db),
+):
+    """Store ALL plugin chat sessions temporarily for transfer to the frontend.
+    
+    This endpoint allows the plugin to send all of its chat history
+    to the backend for transfer when user opens the full frontend.
+    """
+    _cleanup_expired_transfers()
+    
+    normalized = _normalize_url(payload.website_url)
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid URL")
+
+    # Find plugin to verify it exists and get collection_id
+    plugin = (
+        db.query(PluginIntegration)
+        .join(Collection, PluginIntegration.collection_id == Collection.collection_id)
+        .filter(PluginIntegration.normalized_url == normalized)
+        .first()
+    )
+    
+    # If exact match fails, try prefix matching
+    if not plugin:
+        parsed_request = urlparse(f"https://{normalized}" if "://" not in normalized else normalized)
+        request_domain = parsed_request.netloc.lower()
+        request_path = parsed_request.path.rstrip('/')
+        
+        plugins = (
+            db.query(PluginIntegration)
+            .join(Collection, PluginIntegration.collection_id == Collection.collection_id)
+            .all()
+        )
+        
+        for p in plugins:
+            parsed_plugin = urlparse(f"https://{p.normalized_url}" if "://" not in p.normalized_url else p.normalized_url)
+            plugin_domain = parsed_plugin.netloc.lower()
+            plugin_path = parsed_plugin.path.rstrip('/')
+            
+            if request_domain == plugin_domain:
+                if not plugin_path or request_path.startswith(plugin_path):
+                    plugin = p
+                    break
+    
+    if not plugin:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin not found for the provided URL")
+
+    if not plugin.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Plugin integration is inactive")
+
+    # Generate transfer token
+    transfer_token = secrets.token_urlsafe(32)
+    
+    # Store all sessions data
+    sessions_data = []
+    for session in payload.sessions:
+        sessions_data.append({
+            "session_id": session.session_id,
+            "title": session.title or "New Chat",
+            "timestamp": session.timestamp or int(time.time() * 1000),
+            "messages": [msg.model_dump() for msg in session.messages],
+        })
+    
+    with _session_transfers_lock:
+        _session_transfers[transfer_token] = {
+            "current_session_id": payload.current_session_id,
+            "sessions": sessions_data,
+            "collection_id": plugin.collection_id,
+            "created_at": time.time(),
+            "is_multi_session": True,  # Flag to indicate this is multi-session transfer
+        }
+    
+    logger.info("Multi-session transfer created for plugin: %s, %d sessions", plugin.id, len(sessions_data))
+    
+    return TransferSessionResponse(
+        transfer_token=transfer_token,
+        expires_in=_TRANSFER_EXPIRY_SECONDS,
+    )
+
+
+@router.get("/transfer-sessions/{transfer_token}", response_model=RetrieveSessionsResponse)
+async def retrieve_sessions(transfer_token: str):
+    """Retrieve all transferred plugin chat sessions.
+    
+    This endpoint retrieves all session data stored by the plugin and
+    deletes it from the temporary storage (one-time retrieval).
+    """
+    _cleanup_expired_transfers()
+    
+    with _session_transfers_lock:
+        transfer_data = _session_transfers.pop(transfer_token, None)
+    
+    if not transfer_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Transfer not found or expired"
+        )
+    
+    # Handle both single and multi-session transfers
+    if transfer_data.get("is_multi_session"):
+        logger.info("Multi-session transfer retrieved: %d sessions", len(transfer_data.get("sessions", [])))
+        return RetrieveSessionsResponse(
+            current_session_id=transfer_data.get("current_session_id"),
+            sessions=transfer_data.get("sessions", []),
+            collection_id=transfer_data["collection_id"],
+        )
+    else:
+        # Legacy single-session format - convert to multi-session format
+        logger.info("Single session transfer retrieved: %s", transfer_data.get("session_id"))
+        return RetrieveSessionsResponse(
+            current_session_id=transfer_data.get("session_id"),
+            sessions=[{
+                "session_id": transfer_data["session_id"],
+                "title": "New Chat",
+                "timestamp": int(time.time() * 1000),
+                "messages": transfer_data.get("messages", []),
+            }],
+            collection_id=transfer_data["collection_id"],
+        )
+
+
+# --- Persistent Session Sync (Bidirectional) ---
+# This allows extended plugin to sync sessions back so regular plugin can load them
+
+# In-memory storage for persistent synced sessions (keyed by "plugin_id:visitor_id")
+# This ensures each browser/user has isolated sessions
+# In production, this should use Redis or database
+_synced_sessions: dict[str, dict] = {}
+_synced_sessions_lock = Lock()
+_SYNC_EXPIRY_SECONDS = 86400  # 24 hours
+
+
+def _get_sync_key(plugin_id: int, visitor_id: str) -> str:
+    """Generate a unique key for session sync storage."""
+    # Use visitor_id if provided, otherwise fall back to plugin-only key
+    if visitor_id:
+        return f"{plugin_id}:{visitor_id}"
+    return f"{plugin_id}:default"
+
+
+def _cleanup_expired_syncs():
+    """Remove expired synced sessions."""
+    now = time.time()
+    with _synced_sessions_lock:
+        expired_keys = [
+            key for key, data in _synced_sessions.items()
+            if now - data.get("updated_at", 0) > _SYNC_EXPIRY_SECONDS
+        ]
+        for key in expired_keys:
+            del _synced_sessions[key]
+
+
+class SyncSessionsRequest(BaseModel):
+    """Request to sync sessions from extended plugin to backend."""
+    website_url: str
+    visitor_id: Optional[str] = None  # Unique identifier for this browser/user
+    current_session_id: Optional[str] = None
+    sessions: List[TransferSessionData]  # Reuse existing model
+
+
+class SyncSessionsResponse(BaseModel):
+    """Response after syncing sessions."""
+    success: bool
+    synced_count: int
+    message: str
+
+
+class GetSyncedSessionsResponse(BaseModel):
+    """Response with synced sessions for plugin to load."""
+    current_session_id: Optional[str] = None
+    sessions: List[dict]
+    collection_id: str
+    last_synced: Optional[str] = None
+
+
+@router.post("/sync-sessions", response_model=SyncSessionsResponse)
+async def sync_sessions_to_backend(
+    payload: SyncSessionsRequest,
+    db: Session = Depends(get_db),
+):
+    """Sync sessions from extended plugin to backend for plugin to retrieve.
+    
+    This endpoint allows the extended frontend to save its sessions
+    so that the regular plugin can load them when reopened.
+    Unlike transfer-sessions, this is persistent (not one-time use).
+    """
+    _cleanup_expired_syncs()
+    
+    normalized = _normalize_url(payload.website_url)
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid URL")
+    
+    # Find the plugin integration
+    plugin = db.query(PluginIntegration).filter(
+        PluginIntegration.normalized_url == normalized,
+        PluginIntegration.is_active == True
+    ).first()
+    
+    if not plugin:
+        # Try partial match for subdomains/paths
+        all_plugins = db.query(PluginIntegration).filter(
+            PluginIntegration.is_active == True
+        ).all()
+        
+        for p in all_plugins:
+            if normalized.startswith(p.normalized_url) or p.normalized_url.startswith(normalized):
+                plugin = p
+                break
+    
+    if not plugin:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin not found for the provided URL")
+    
+    if not plugin.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Plugin integration is inactive")
+    
+    # Build sessions data
+    sessions_data = []
+    for session in payload.sessions:
+        sessions_data.append({
+            "session_id": session.session_id,
+            "title": session.title or "New Chat",
+            "timestamp": session.timestamp or int(time.time() * 1000),
+            "messages": [msg.model_dump() for msg in session.messages],
+        })
+    
+    # Store synced sessions (persistent, keyed by plugin ID + visitor ID for isolation)
+    sync_key = _get_sync_key(plugin.id, payload.visitor_id or "")
+    with _synced_sessions_lock:
+        _synced_sessions[sync_key] = {
+            "current_session_id": payload.current_session_id,
+            "sessions": sessions_data,
+            "collection_id": plugin.collection_id,
+            "visitor_id": payload.visitor_id,
+            "updated_at": time.time(),
+        }
+    
+    logger.info("Sessions synced for plugin %s (visitor: %s): %d sessions", plugin.id, payload.visitor_id or "default", len(sessions_data))
+    
+    return SyncSessionsResponse(
+        success=True,
+        synced_count=len(sessions_data),
+        message=f"Successfully synced {len(sessions_data)} sessions"
+    )
+
+
+@router.get("/sync-sessions", response_model=GetSyncedSessionsResponse)
+async def get_synced_sessions(
+    website_url: str,
+    visitor_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Retrieve synced sessions for a plugin.
+    
+    This endpoint allows the plugin to load sessions that were
+    synced from the extended frontend.
+    Unlike transfer retrieval, this does NOT delete the data.
+    visitor_id is used to isolate sessions per browser/user.
+    """
+    _cleanup_expired_syncs()
+    
+    normalized = _normalize_url(website_url)
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid URL")
+    
+    # Find the plugin integration
+    plugin = db.query(PluginIntegration).filter(
+        PluginIntegration.normalized_url == normalized,
+        PluginIntegration.is_active == True
+    ).first()
+    
+    if not plugin:
+        # Try partial match
+        all_plugins = db.query(PluginIntegration).filter(
+            PluginIntegration.is_active == True
+        ).all()
+        
+        for p in all_plugins:
+            if normalized.startswith(p.normalized_url) or p.normalized_url.startswith(normalized):
+                plugin = p
+                break
+    
+    if not plugin:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin not found")
+    
+    # Get synced sessions (without deleting), using visitor_id for isolation
+    sync_key = _get_sync_key(plugin.id, visitor_id or "")
+    with _synced_sessions_lock:
+        sync_data = _synced_sessions.get(sync_key)
+    
+    if not sync_data:
+        # Return empty response if no synced sessions
+        return GetSyncedSessionsResponse(
+            current_session_id=None,
+            sessions=[],
+            collection_id=plugin.collection_id,
+            last_synced=None
+        )
+    
+    from datetime import datetime
+    last_synced = datetime.fromtimestamp(sync_data.get("updated_at", 0)).isoformat()
+    
+    logger.info("Synced sessions retrieved for plugin %s (visitor: %s): %d sessions", plugin.id, visitor_id or "default", len(sync_data.get("sessions", [])))
+    
+    return GetSyncedSessionsResponse(
+        current_session_id=sync_data.get("current_session_id"),
+        sessions=sync_data.get("sessions", []),
+        collection_id=sync_data["collection_id"],
+        last_synced=last_synced
+    )
+
+
+# --- Chat Widget URL Generation and Lookup ---
+
+class GenerateWidgetUrlRequest(BaseModel):
+    collection_id: str
+
+
+class GenerateWidgetUrlResponse(BaseModel):
+    widget_url: str
+    widget_token: str
+
+
+class WidgetLookupResponse(BaseModel):
+    access_token: str
+    collection_id: str
+    collection_name: str
+    api_base_url: str
+    user_id: str
+    username: str
+
+
+@router.post("/generate-widget-url", response_model=GenerateWidgetUrlResponse)
+async def generate_widget_url(
+    payload: GenerateWidgetUrlRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Generate a unique widget URL for a collection.
+    
+    This endpoint creates or retrieves a unique widget token for a collection's
+    plugin integration. The widget URL can be shared to provide direct access
+    to the chat widget without embedding the plugin.
+    """
+    from app.config import settings
+    
+    # Verify collection exists and user has access
+    collection = db.query(Collection).filter(
+        Collection.collection_id == payload.collection_id
+    ).first()
+    
+    if not collection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Collection not found"
+        )
+    
+    # Check user permissions
+    if not current_user.is_super_admin():
+        if not current_user.is_user_admin() or collection.admin_user_id != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+    
+    # Find or create plugin integration
+    plugin = db.query(PluginIntegration).filter(
+        PluginIntegration.collection_id == payload.collection_id
+    ).first()
+    
+    if not plugin:
+        # Create a default plugin integration for widget access
+        plugin = PluginIntegration(
+            collection_id=payload.collection_id,
+            website_url=f"widget://{payload.collection_id}",
+            normalized_url=f"widget.{payload.collection_id}",
+            display_name=f"{collection.name} Widget",
+            is_active=True,
+            created_by=current_user.user_id,
+            widget_token=str(uuid.uuid4()),
+        )
+        db.add(plugin)
+        db.commit()
+        db.refresh(plugin)
+        
+        # Ensure plugin user exists for this collection
+        _ensure_plugin_user_for_collection(
+            db,
+            collection=collection,
+            plugin=plugin,
+            creator_user_id=current_user.user_id,
+        )
+        db.commit()
+    elif not plugin.widget_token:
+        # Generate widget token if it doesn't exist
+        plugin.widget_token = str(uuid.uuid4())
+        db.commit()
+        db.refresh(plugin)
+    
+    # Construct widget URL - base URL already contains the full path (e.g., /chat-widget)
+    base_url = settings.CHAT_WIDGET_HOST_URL.rstrip('/')
+    widget_url = f"{base_url}/{plugin.widget_token}"
+    
+    logger.info(
+        "Widget URL generated for collection: %s, token: %s",
+        payload.collection_id,
+        plugin.widget_token
+    )
+    
+    return GenerateWidgetUrlResponse(
+        widget_url=widget_url,
+        widget_token=plugin.widget_token,
+    )
+
+
+@router.get("/widget/lookup/{widget_token}", response_model=WidgetLookupResponse)
+async def widget_lookup(
+    widget_token: str,
+    db: Session = Depends(get_db),
+):
+    """Look up widget configuration by widget token.
+    
+    This endpoint is called by the standalone chat widget when loading.
+    It validates the widget token and returns authentication credentials
+    and configuration for the chat widget to function.
+    """
+    from app.config import settings
+    
+    # Find plugin by widget token
+    plugin = db.query(PluginIntegration).filter(
+        PluginIntegration.widget_token == widget_token,
+        PluginIntegration.is_widget_active == True
+    ).first()
+    
+    if not plugin:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Widget not found or inactive"
+        )
+    
+    collection = plugin.collection
+    if not collection or not collection.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Collection is inactive"
+        )
+    
+    # Get or create plugin user
+    plugin_user, _, plugin_token_value = _ensure_plugin_user_for_collection(
+        db,
+        collection=collection,
+        plugin=plugin,
+        creator_user_id=None,
+    )
+    db.commit()
+    
+    if not plugin_user or not plugin_user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Widget user not found or inactive"
+        )
+    
+    # If no token was generated, use existing
+    if not plugin_token_value:
+        plugin_token_value = plugin_user.plugin_token
+    
+    if not plugin_token_value:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate authentication token"
+        )
+    
+    # Get API base URL from request or settings
+    api_base_url = f"{settings.effective_host}:{settings.effective_port}"
+    if settings.effective_host == "0.0.0.0":
+        # Use the configured frontend URL domain as a fallback
+        from urllib.parse import urlparse
+        parsed = urlparse(settings.FRONTEND_URL)
+        api_base_url = f"{parsed.scheme}://{parsed.netloc}"
+    
+    logger.info(
+        "Widget lookup successful for token: %s, collection: %s",
+        widget_token,
+        plugin.collection_id
+    )
+    
+    return WidgetLookupResponse(
+        access_token=plugin_token_value,
+        collection_id=plugin.collection_id,
+        collection_name=collection.name if collection else "",
+        api_base_url=api_base_url,
+        user_id=plugin_user.user_id,
+        username=plugin_user.username,
+    )
+
+
+# --- Plugin Embed Code Configuration ---
+
+class PluginEmbedConfigResponse(BaseModel):
+    """Response with plugin embed code configuration."""
+    base_url: str
+    css_filename: str
+    js_filename: str
+
+
+@router.get("/embed-config", response_model=PluginEmbedConfigResponse)
+async def get_embed_config(
+    current_user: User = Depends(get_current_user),
+):
+    """Get the configuration for plugin embed code snippets.
+    
+    Returns the base URL and filenames for the CSS and JS assets
+    that need to be added to embed the chat plugin on a website.
+    """
+    from app.config import settings
+    
+    base_url = settings.PLUGIN_EMBED_BASE_URL.rstrip('/')
+    
+    return PluginEmbedConfigResponse(
+        base_url=base_url,
+        css_filename="chatbot.css",
+        js_filename="chatbot.min.js",
+    )

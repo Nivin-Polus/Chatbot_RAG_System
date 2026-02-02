@@ -622,9 +622,34 @@ async def delete_collection(
                 enqueue_user_for_removal(admin_user)
 
         # Delete related records
-        db.query(CollectionUser).filter(CollectionUser.collection_id == collection_id).delete()
-        db.query(SystemPrompt).filter(SystemPrompt.collection_id == collection_id).delete()
-        db.query(FileMetadata).filter(FileMetadata.collection_id == collection_id).delete()
+        from app.models.crawler_job import CrawlerJob
+        from app.models.chat_tracking import ChatSession, ChatQuery, ChatMessageHistory
+        
+        # Log counts before deletion
+        job_count = db.query(CrawlerJob).filter(CrawlerJob.collection_id == collection_id).count()
+        hist_count = db.query(ChatMessageHistory).filter(ChatMessageHistory.collection_id == collection_id).count()
+        query_count = db.query(ChatQuery).filter(ChatQuery.collection_id == collection_id).count()
+        session_count = db.query(ChatSession).filter(ChatSession.collection_id == collection_id).count()
+        user_link_count = db.query(CollectionUser).filter(CollectionUser.collection_id == collection_id).count()
+        prompt_count = db.query(SystemPrompt).filter(SystemPrompt.collection_id == collection_id).count()
+        file_count = db.query(FileMetadata).filter(FileMetadata.collection_id == collection_id).count()
+        
+        logger.info(f"Deleting collection {collection_id}: {job_count} jobs, {hist_count} history, {query_count} queries, {session_count} sessions, {user_link_count} links, {prompt_count} prompts, {file_count} files")
+        
+        # Explicitly delete
+        db.query(CrawlerJob).filter(CrawlerJob.collection_id == collection_id).delete(synchronize_session=False)
+        db.query(ChatMessageHistory).filter(ChatMessageHistory.collection_id == collection_id).delete(synchronize_session=False)
+        db.query(ChatQuery).filter(ChatQuery.collection_id == collection_id).delete(synchronize_session=False)
+        db.query(ChatSession).filter(ChatSession.collection_id == collection_id).delete(synchronize_session=False)
+        
+        db.query(CollectionUser).filter(CollectionUser.collection_id == collection_id).delete(synchronize_session=False)
+        db.query(SystemPrompt).filter(SystemPrompt.collection_id == collection_id).delete(synchronize_session=False)
+        db.query(FileMetadata).filter(FileMetadata.collection_id == collection_id).delete(synchronize_session=False)
+        
+        # Verify deletion immediately
+        remaining_jobs = db.query(CrawlerJob).filter(CrawlerJob.collection_id == collection_id).count()
+        if remaining_jobs > 0:
+            logger.error(f"Failed to delete {remaining_jobs} crawler jobs for collection {collection_id} before parent deletion!")
         
         # Delete collection
         db.delete(collection)

@@ -16,6 +16,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Table,
   TableBody,
@@ -25,10 +26,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Plus, Pencil, Trash2, Loader2, Search, Folder, FileCode, Copy } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Search, Folder, FileCode, Copy, Globe } from 'lucide-react';
 import { Collection } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost, apiDelete, apiPut } from '@/utils/api';
+import { useConfirmAction } from '@/hooks/useConfirmAction';
 
 export default function SuperadminDashboard() {
   const { user } = useAuth();
@@ -56,6 +58,7 @@ export default function SuperadminDashboard() {
     admin_email: '',
     is_active: true,
   });
+  const { confirm: confirmAction, dialog: confirmDialog } = useConfirmAction();
 
   const refreshCollections = useCallback(async () => {
     try {
@@ -124,33 +127,36 @@ export default function SuperadminDashboard() {
         admin_full_name: '',
         admin_password: '',
       });
-      
+
       // Refresh collections
       await refreshCollections();
     } catch (error) {
-      console.error('Failed to create knowledge base', error);
       toast.error(error instanceof Error ? error.message : 'Failed to create knowledge base');
     }
   };
 
   const handleDeleteCollection = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this knowledge base?')) return;
+    confirmAction({
+      title: 'Delete knowledge base?',
+      description: 'This will permanently remove the knowledge base. This cannot be undone.',
+      confirmText: 'Delete',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          const response = await apiDelete(
+            `${import.meta.env.VITE_API_BASE_URL}/collections/${id}`,
+            user?.access_token
+          );
 
-    try {
-      const response = await apiDelete(
-        `${import.meta.env.VITE_API_BASE_URL}/collections/${id}`,
-        user?.access_token
-      );
+          if (!response.ok) throw new Error('Failed to delete collection');
 
-      if (!response.ok) throw new Error('Failed to delete collection');
-
-      toast.success('Knowledge base deleted successfully');
-      
-      // Refresh collections
-      await refreshCollections();
-    } catch (error) {
-      toast.error('Failed to delete knowledge base');
-    }
+          toast.success('Knowledge base deleted successfully');
+          await refreshCollections();
+        } catch (error) {
+          toast.error('Failed to delete knowledge base');
+        }
+      },
+    });
   };
 
   const handleOpenEditDialog = (collection: Collection) => {
@@ -213,7 +219,6 @@ export default function SuperadminDashboard() {
         toast.success('Collection ID copied to clipboard');
       }
     } catch (error) {
-      console.error('Failed to copy collection ID', error);
       toast.error('Unable to copy collection ID');
     }
   };
@@ -229,11 +234,12 @@ export default function SuperadminDashboard() {
 
   return (
     <DashboardLayout>
+      {confirmDialog}
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">Knowledge Base</h1>
-            
+
           </div>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
@@ -262,32 +268,35 @@ export default function SuperadminDashboard() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="description">Description</Label>
+                    <Label htmlFor="description">Description *</Label>
                     <Textarea
                       id="description"
                       maxLength={200}
                       value={formData.description}
                       onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                       rows={3}
+                      required
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="website_url">Website URL</Label>
+                    <Label htmlFor="website_url">Website URL *</Label>
                     <Input
                       id="website_url"
                       value={formData.website_url}
                       onChange={(e) => setFormData({ ...formData, website_url: e.target.value })}
                       placeholder="https://example.com"
+                      required
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="admin_email">Admin Email</Label>
+                    <Label htmlFor="admin_email">Admin Email *</Label>
                     <Input
                       id="admin_email"
                       type="email"
                       value={formData.admin_email}
                       onChange={(e) => setFormData({ ...formData, admin_email: e.target.value })}
                       placeholder="admin@example.com"
+                      required
                     />
                   </div>
                   <div className="flex items-center space-x-2">
@@ -302,12 +311,13 @@ export default function SuperadminDashboard() {
                     <h4 className="font-medium mb-3">Admin User Credentials</h4>
                     <div className="space-y-3">
                       <div className="space-y-2">
-                        <Label htmlFor="admin_full_name">Admin Full Name</Label>
+                        <Label htmlFor="admin_full_name">Admin Full Name *</Label>
                         <Input
                           id="admin_full_name"
                           value={formData.admin_full_name}
                           onChange={(e) => setFormData({ ...formData, admin_full_name: e.target.value })}
                           placeholder="Enter full name"
+                          required
                         />
                       </div>
                       <div className="space-y-2">
@@ -414,7 +424,7 @@ export default function SuperadminDashboard() {
 
         <Card>
           <CardHeader>
-           
+
             <CardDescription>
               {collections.length} knowledge base(s) total
             </CardDescription>
@@ -444,97 +454,146 @@ export default function SuperadminDashboard() {
             ) : (
               <Table>
                 <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Collection ID</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>Collection ID</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead className="text-center">Actions</TableHead>
+                  </TableRow>
                 </TableHeader>
                 <TableBody>
-                {filteredCollections.map((collection) => (
-                  <TableRow key={collection.collection_id}>
-                    <TableCell className="font-medium">
-                      <button
-                        onClick={() => navigate(`/superadmin/knowledge-base/${collection.collection_id}`)}
-                        className="text-primary hover:text-primary/80 hover:underline font-medium"
-                      >
-                        {collection.name}
-                      </button>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {collection.description || '—'}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <code className="text-xs bg-muted px-2 py-1 rounded">
-                          {collection.collection_id}
-                        </code>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleCopyCollectionId(collection.collection_id)}
-                          aria-label="Copy collection ID"
+                  {filteredCollections.map((collection) => (
+                    <TableRow key={collection.collection_id}>
+                      <TableCell className="font-medium">
+                        <button
+                          onClick={() => navigate(`/superadmin/knowledge-base/${collection.collection_id}`)}
+                          className="text-primary hover:text-primary/80 hover:underline font-medium"
                         >
-                          <Copy className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          collection.is_active
+                          {collection.name}
+                        </button>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {collection.description || '—'}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <code className="text-xs bg-muted px-2 py-1 rounded">
+                            {collection.collection_id}
+                          </code>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleCopyCollectionId(collection.collection_id)}
+                                aria-label="Copy collection ID"
+                              >
+                                <Copy className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent className="text-xs">
+                              Copy Collection ID
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${collection.is_active
                             ? 'bg-green-100 text-green-800'
                             : 'bg-gray-100 text-gray-800'
-                        }`}
-                      >
-                        {collection.is_active ? 'Active' : 'Inactive'}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {new Date(collection.created_at).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end space-x-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleNavigateToTab(collection.collection_id, 'files')}
-                          aria-label="View files"
+                            }`}
                         >
-                          <Folder className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleNavigateToTab(collection.collection_id, 'prompts')}
-                          aria-label="View prompts"
-                        >
-                          <FileCode className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleOpenEditDialog(collection)}
-                          aria-label="Edit knowledge base"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDeleteCollection(collection.collection_id)}
-                          className="text-destructive hover:text-destructive"
-                          aria-label="Delete knowledge base"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                          {collection.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {new Date(collection.created_at).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <div className="flex items-center justify-center space-x-1">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => navigate(`/superadmin/crawler?collectionId=${collection.collection_id}`)}
+                                className="hover:bg-accent"
+                              >
+                                <Globe className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              Crawl Website
+                            </TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleNavigateToTab(collection.collection_id, 'files')}
+                                aria-label="View files"
+                              >
+                                <Folder className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent className="text-xs">
+                              View Files
+                            </TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleNavigateToTab(collection.collection_id, 'prompts')}
+                                aria-label="View prompts"
+                              >
+                                <FileCode className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent className="text-xs">
+                              View Prompts
+                            </TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleOpenEditDialog(collection)}
+                                aria-label="Edit knowledge base"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent className="text-xs">
+                              Edit Knowledge Base
+                            </TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDeleteCollection(collection.collection_id)}
+                                className="text-destructive hover:text-destructive"
+                                aria-label="Delete knowledge base"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent className="text-xs">
+                              Delete Knowledge Base
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
                 </TableBody>
               </Table>
             )}

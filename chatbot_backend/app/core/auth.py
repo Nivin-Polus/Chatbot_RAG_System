@@ -210,6 +210,56 @@ def decode_plugin_user_token(token: str) -> Dict[str, str]:
         raise ValueError("Malformed plugin token payload") from exc
 
 
+def create_auto_login_token(
+    *,
+    user_id: str,
+    username: str,
+    collection_id: str,
+    expires_minutes: int = 5,
+) -> str:
+    """Create a short-lived auto-login token for plugin users.
+    
+    This token is used for magic-link style logins where clicking a URL
+    automatically authenticates the user.
+    """
+    issued_at = datetime.utcnow()
+    expires_at = issued_at + timedelta(minutes=expires_minutes)
+
+    payload = {
+        "type": "auto_login_token",
+        "sub": username,
+        "user_id": user_id,
+        "username": username,
+        "collection_id": collection_id,
+        "iat": issued_at,
+        "exp": expires_at,
+    }
+
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+
+def verify_auto_login_token(token: str) -> Dict[str, str]:
+    """Verify an auto-login token and return user info."""
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+    except jwt.ExpiredSignatureError as exc:
+        raise ValueError("Auto-login token has expired") from exc
+    except jwt.PyJWTError as exc:
+        raise ValueError("Invalid auto-login token") from exc
+
+    if payload.get("type") != "auto_login_token":
+        raise ValueError("Invalid token type")
+
+    try:
+        return {
+            "user_id": payload["user_id"],
+            "username": payload["username"],
+            "collection_id": payload["collection_id"],
+        }
+    except KeyError as exc:
+        raise ValueError("Malformed auto-login token payload") from exc
+
+
 def create_user(username: str, password: str, email: str = None, full_name: str = None, role: str = "user") -> Optional[Dict[str, Any]]:
     """Create a new user in the database"""
     try:

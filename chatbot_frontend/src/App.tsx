@@ -18,7 +18,7 @@ import SuperadminUsers from "./pages/superadmin/SuperadminUsers";
 import SuperadminChat from "./pages/superadmin/SuperadminChat";
 import SuperadminActivity from "./pages/superadmin/SuperadminActivity";
 import SuperadminSettings from "./pages/superadmin/SuperadminSettings";
-import SuperadminPlugins from "./pages/superadmin/SuperadminPlugins";
+import SuperadminDeployment from "./pages/superadmin/SuperadminDeployment";
 import SuperadminCrawler from "./pages/superadmin/SuperadminCrawler";
 import KnowledgeBaseDetails from "./pages/superadmin/KnowledgeBaseDetails";
 import UserDashboard from "./pages/user/UserDashboard";
@@ -28,7 +28,10 @@ import UserAdminChat from "./pages/useradmin/UserAdminChat";
 import UserAdminSettings from "./pages/useradmin/UserAdminSettings";
 import UserAdminUsers from "./pages/useradmin/UserAdminUsers";
 import UserAdminPlugins from "./pages/useradmin/UserAdminPlugins";
+import UserAdminHelpPage from "./pages/useradmin/UserAdminHelpPage";
 import UserAdminCrawler from "./pages/useradmin/UserAdminCrawler";
+import PluginUserChat from "./pages/pluginuser/PluginUserChat";
+import AutoLoginPage from "./pages/AutoLoginPage";
 
 const queryClient = new QueryClient();
 
@@ -43,6 +46,7 @@ const App = () => (
             <Routes>
               {/* Public Routes */}
               <Route path="/login" element={<Login />} />
+              <Route path="/auto-login" element={<AutoLoginPage />} />
               <Route path="/access-denied" element={<AccessDenied />} />
 
               {/* Superadmin Routes */}
@@ -59,7 +63,7 @@ const App = () => (
                       <Route path="files" element={<SuperadminFiles />} />
                       <Route path="prompts" element={<SuperadminPrompts />} />
                       <Route path="users" element={<SuperadminUsers />} />
-                      <Route path="plugins" element={<SuperadminPlugins />} />
+                      <Route path="deployment" element={<SuperadminDeployment />} />
                       <Route path="crawler" element={<SuperadminCrawler />} />
                       <Route path="chat" element={<SuperadminChat />} />
                       <Route path="activity" element={<SuperadminActivity />} />
@@ -81,6 +85,7 @@ const App = () => (
                       />
                       <Route path="users" element={<UserAdminUsers />} />
                       <Route path="plugins" element={<UserAdminPlugins />} />
+                      <Route path="help-page" element={<UserAdminHelpPage />} />
                       <Route path="crawler" element={<UserAdminCrawler />} />
                       <Route path="knowledge-base" element={<UserAdminDashboard />} />
                       <Route path="chat" element={<UserAdminChat />} />
@@ -98,6 +103,19 @@ const App = () => (
                     <Routes>
                       <Route index element={<Navigate to="chat" replace />} />
                       <Route path="chat" element={<UserChat />} />
+                    </Routes>
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Plugin User Routes */}
+              <Route
+                path="/pluginuser/*"
+                element={
+                  <ProtectedRoute allowedRoles={["plugin_user"]}>
+                    <Routes>
+                      <Route index element={<Navigate to="chat" replace />} />
+                      <Route path="chat" element={<PluginUserChat />} />
                     </Routes>
                   </ProtectedRoute>
                 }

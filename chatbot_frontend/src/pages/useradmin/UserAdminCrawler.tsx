@@ -13,13 +13,29 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import {
+    Collapsible,
+    CollapsibleContent,
+    CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+import {
     Dialog,
     DialogContent,
     DialogDescription,
-    DialogFooter,
     DialogHeader,
     DialogTitle,
+    DialogTrigger,
+    DialogFooter,
 } from '@/components/ui/dialog';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
     Table,
     TableBody,
@@ -38,6 +54,7 @@ import {
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import {
     Globe,
     Play,
@@ -54,6 +71,9 @@ import {
     AlertCircle,
     CalendarClock,
     Timer,
+    Info,
+    ChevronDown,
+    ChevronUp,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiGet, apiPost, apiDelete } from '@/utils/api';
@@ -85,6 +105,15 @@ interface Collection {
     name: string;
 }
 
+// Crawler status interface
+interface CrawlerStatus {
+    is_crawl_running: boolean;
+    active_crawl_count: number;
+    active_job_ids: string[];
+    max_concurrent: number;
+    can_start_new: boolean;
+}
+
 export default function UserAdminCrawler() {
     const { user } = useAuth();
     const [collection, setCollection] = useState<Collection | null>(null);
@@ -92,20 +121,35 @@ export default function UserAdminCrawler() {
     const [isLoading, setIsLoading] = useState(true);
     const [isStarting, setIsStarting] = useState(false);
     const [showAdvanced, setShowAdvanced] = useState(false);
+    const [crawlerStatus, setCrawlerStatus] = useState<CrawlerStatus | null>(null);
 
     // Form state
     const [targetUrl, setTargetUrl] = useState('');
-    const [maxPages, setMaxPages] = useState(0); // 0 = unlimited
-    const [maxDepth, setMaxDepth] = useState(10);
+    const [maxPages, setMaxPages] = useState<number | string>(0); // 0 = unlimited
+    const [maxDepth, setMaxDepth] = useState<number | string>(0);
     const [useSitemap, setUseSitemap] = useState(true);
+    const [processDocuments, setProcessDocuments] = useState(true);
     const [excludePatterns, setExcludePatterns] = useState('/login\n/admin\n/cart');
     const [includeKeywords, setIncludeKeywords] = useState('');
 
     // Schedule dialog state
     const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
     const [scheduleJobId, setScheduleJobId] = useState<string | null>(null);
-    const [scheduleInterval, setScheduleInterval] = useState('48');
+    const [scheduleInterval, setScheduleInterval] = useState('1440');
     const [isScheduling, setIsScheduling] = useState(false);
+
+    // Delete confirmation state
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+    const [jobIdToDelete, setJobIdToDelete] = useState<string | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    // Cancel confirmation state
+    const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+    const [jobIdToCancel, setJobIdToCancel] = useState<string | null>(null);
+    const [isCancelling, setIsCancelling] = useState(false);
+
+    // Crawl in progress dialog state
+    const [crawlInProgressOpen, setCrawlInProgressOpen] = useState(false);
 
     // Fetch user's collection (user admins have access to their assigned collection)
     const fetchCollection = useCallback(async () => {
@@ -122,7 +166,25 @@ export default function UserAdminCrawler() {
                 }
             }
         } catch (error) {
-            console.error('Failed to fetch collection:', error);
+            // Failed to fetch collection
+        }
+    }, [user?.access_token]);
+
+    // Fetch crawler status (system-wide)
+    const fetchCrawlerStatus = useCallback(async () => {
+        try {
+            const response = await apiGet(
+                `${import.meta.env.VITE_API_BASE_URL}/crawler/status`,
+                user?.access_token,
+                false,
+                false
+            );
+            if (response.ok) {
+                const data = await response.json();
+                setCrawlerStatus(data);
+            }
+        } catch (error) {
+            // Failed to fetch status
         }
     }, [user?.access_token]);
 
@@ -134,16 +196,23 @@ export default function UserAdminCrawler() {
         }
 
         try {
+            // Suppress logout on 401 for polling to prevent disruption during long crawl jobs
             const response = await apiGet(
                 `${import.meta.env.VITE_API_BASE_URL}/crawler/jobs?collection_id=${collection.collection_id}`,
-                user?.access_token
+                user?.access_token,
+                false, // showErrorToast = false
+                false  // logoutOn401 = false - don't logout on expired token during polling
             );
             if (response.ok) {
                 const data = await response.json();
                 setJobs(data.jobs || []);
+            } else if (response.status === 401) {
+                // Token expired - silently fail to avoid disrupting long-running crawl monitoring
+                // User can manually refresh the page to re-authenticate if needed
+                console.warn('Token expired during crawl job polling');
             }
         } catch (error) {
-            console.error('Failed to fetch jobs:', error);
+            // Failed to fetch jobs - silently handle to avoid disrupting monitoring
         } finally {
             setIsLoading(false);
         }
@@ -151,7 +220,8 @@ export default function UserAdminCrawler() {
 
     useEffect(() => {
         fetchCollection();
-    }, [fetchCollection]);
+        fetchCrawlerStatus();
+    }, [fetchCollection, fetchCrawlerStatus]);
 
     useEffect(() => {
         if (collection) {
@@ -159,14 +229,17 @@ export default function UserAdminCrawler() {
         }
     }, [collection, fetchJobs]);
 
-    // Auto-refresh running jobs
+    // Auto-refresh running jobs and crawler status
     useEffect(() => {
         const hasRunningJobs = jobs.some(j => j.status === 'running' || j.status === 'pending');
-        if (hasRunningJobs) {
-            const interval = setInterval(fetchJobs, 3000);
+        if (hasRunningJobs || crawlerStatus?.is_crawl_running) {
+            const interval = setInterval(() => {
+                fetchJobs();
+                fetchCrawlerStatus();
+            }, 3000);
             return () => clearInterval(interval);
         }
-    }, [jobs, fetchJobs]);
+    }, [jobs, crawlerStatus?.is_crawl_running, fetchJobs, fetchCrawlerStatus]);
 
     // Start a new crawl
     const handleStartCrawl = async () => {
@@ -177,14 +250,35 @@ export default function UserAdminCrawler() {
 
         setIsStarting(true);
         try {
+            // First check if a crawl is already running
+            const statusResponse = await apiGet(
+                `${import.meta.env.VITE_API_BASE_URL}/crawler/status`,
+                user?.access_token
+            );
+
+            if (statusResponse.ok) {
+                const status = await statusResponse.json();
+                if (status.is_crawl_running) {
+                    // Show popup that a crawl is already in progress
+                    setCrawlInProgressOpen(true);
+                    setIsStarting(false);
+                    return;
+                }
+            }
+
+            // Parse numeric values, defaulting to 0/5 if empty or invalid
+            const parsedMaxPages = maxPages === '' ? 0 : parseInt(String(maxPages));
+            const parsedMaxDepth = maxDepth === '' ? 5 : parseInt(String(maxDepth));
+
             const response = await apiPost(
                 `${import.meta.env.VITE_API_BASE_URL}/crawler/start`,
                 {
                     target_url: targetUrl,
                     collection_id: collection.collection_id,
-                    max_pages: maxPages,
-                    max_depth: maxDepth,
+                    max_pages: isNaN(parsedMaxPages) ? 0 : parsedMaxPages,
+                    max_depth: isNaN(parsedMaxDepth) ? 5 : parsedMaxDepth,
                     use_sitemap: useSitemap,
+                    process_documents: processDocuments,
                     exclude_patterns: excludePatterns
                         .split('\n')
                         .map(p => p.trim())
@@ -213,40 +307,52 @@ export default function UserAdminCrawler() {
         }
     };
 
-    // Cancel a running job
-    const handleCancelJob = async (jobId: string) => {
+    // Show cancel confirmation dialog
+    const handleCancelJob = (jobId: string) => {
+        setJobIdToCancel(jobId);
+        setCancelDialogOpen(true);
+    };
+
+    // Perform the actual cancellation
+    const confirmCancelJob = async (deleteData: boolean) => {
+        if (!jobIdToCancel) return;
+
+        setIsCancelling(true);
         try {
             const response = await apiPost(
-                `${import.meta.env.VITE_API_BASE_URL}/crawler/jobs/${jobId}/cancel`,
-                {},
+                `${import.meta.env.VITE_API_BASE_URL}/crawler/jobs/${jobIdToCancel}/cancel`,
+                { delete_crawled_data: deleteData },
                 user?.access_token
             );
 
             if (response.ok) {
-                toast.success('Crawl cancelled');
+                toast.success(deleteData ? 'Crawl cancelled and data deleted' : 'Crawl cancelled, data kept');
                 fetchJobs();
             } else {
                 toast.error('Failed to cancel crawl');
             }
         } catch (error) {
             toast.error('Failed to cancel crawl');
+        } finally {
+            setIsCancelling(false);
+            setCancelDialogOpen(false);
+            setJobIdToCancel(null);
         }
     };
 
     // Delete a job
-    const handleDeleteJob = async (jobId: string) => {
-        // Confirm deletion since it removes content from knowledge base
-        const confirmed = window.confirm(
-            'Are you sure you want to delete this crawl job?\n\n' +
-            'This will also remove all crawled content from the knowledge base. ' +
-            'This action cannot be undone.'
-        );
+    const handleDeleteJob = (jobId: string) => {
+        setJobIdToDelete(jobId);
+        setDeleteDialogOpen(true);
+    };
 
-        if (!confirmed) return;
+    const confirmDeleteJob = async () => {
+        if (!jobIdToDelete) return;
 
+        setIsDeleting(true);
         try {
             const response = await apiDelete(
-                `${import.meta.env.VITE_API_BASE_URL}/crawler/jobs/${jobId}`,
+                `${import.meta.env.VITE_API_BASE_URL}/crawler/jobs/${jobIdToDelete}`,
                 user?.access_token
             );
 
@@ -258,6 +364,10 @@ export default function UserAdminCrawler() {
             }
         } catch (error) {
             toast.error('Failed to delete job');
+        } finally {
+            setIsDeleting(false);
+            setDeleteDialogOpen(false);
+            setJobIdToDelete(null);
         }
     };
 
@@ -284,7 +394,7 @@ export default function UserAdminCrawler() {
     // Open schedule dialog
     const openScheduleDialog = (jobId: string) => {
         setScheduleJobId(jobId);
-        setScheduleInterval('48');
+        setScheduleInterval('1440');
         setScheduleDialogOpen(true);
     };
 
@@ -453,75 +563,221 @@ export default function UserAdminCrawler() {
                         </div>
 
                         {/* Advanced Settings */}
-                        <div className="flex items-center gap-2">
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setShowAdvanced(!showAdvanced)}
-                            >
-                                <Settings2 className="h-4 w-4 mr-1" />
-                                {showAdvanced ? 'Hide' : 'Show'} Advanced Settings
-                            </Button>
-                        </div>
-
-                        {showAdvanced && (
-                            <div className="grid gap-4 md:grid-cols-2 p-4 bg-muted/50 rounded-lg">
-                                <div className="space-y-2">
-                                    <Label htmlFor="max-pages">Max Pages (0 = unlimited)</Label>
-                                    <Input
-                                        id="max-pages"
-                                        type="number"
-                                        min={0}
-                                        value={maxPages}
-                                        onChange={(e) => setMaxPages(parseInt(e.target.value) || 0)}
-                                        placeholder="0 for unlimited"
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="max-depth">Max Depth</Label>
-                                    <Input
-                                        id="max-depth"
-                                        type="number"
-                                        min={1}
-                                        max={15}
-                                        value={maxDepth}
-                                        onChange={(e) => setMaxDepth(parseInt(e.target.value) || 10)}
-                                    />
-                                </div>
-                                <div className="space-y-2 md:col-span-2">
-                                    <div className="flex items-center gap-2">
-                                        <Switch
-                                            id="use-sitemap"
-                                            checked={useSitemap}
-                                            onCheckedChange={setUseSitemap}
+                        <Collapsible open={showAdvanced} onOpenChange={setShowAdvanced} className="border rounded-lg bg-muted/20">
+                            <CollapsibleTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    className="flex w-full items-center justify-between p-4 transition-colors"
+                                >
+                                    <div className="flex items-center gap-2 font-medium">
+                                        <Settings2 className="h-4 w-4" />
+                                        Advanced Settings
+                                    </div>
+                                    {showAdvanced ? (
+                                        <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                                    ) : (
+                                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                    )}
+                                </Button>
+                            </CollapsibleTrigger>
+                            <CollapsibleContent className="p-4 pt-0 space-y-6">
+                                <div className="grid gap-6 md:grid-cols-2 pt-2">
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-1.5">
+                                            <Label htmlFor="max-pages">Max Pages</Label>
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                                                </TooltipTrigger>
+                                                <TooltipContent side="top" className="max-w-[260px] p-3">
+                                                    <div className="space-y-1.5">
+                                                        <p className="text-xs font-semibold flex items-center gap-1.5">
+                                                            <FileText className="h-3 w-3 text-primary" />
+                                                            Crawl Limit
+                                                        </p>
+                                                        <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                                            Maximum number of pages to index. Set to <span className="font-medium text-foreground">0</span> for an <span className="font-medium text-foreground">unlimited</span> crawl of the entire domain.
+                                                        </p>
+                                                    </div>
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        </div>
+                                        <Input
+                                            id="max-pages"
+                                            type="number"
+                                            min={0}
+                                            value={maxPages}
+                                            onChange={(e) => setMaxPages(e.target.value)}
+                                            placeholder="0 for unlimited"
+                                            className="bg-background"
                                         />
-                                        <Label htmlFor="use-sitemap">Use sitemap.xml for URL discovery</Label>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-1.5">
+                                            <Label htmlFor="max-depth">Max Depth</Label>
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                                                </TooltipTrigger>
+                                                <TooltipContent side="top" className="max-w-[260px] p-3">
+                                                    <div className="space-y-1.5">
+                                                        <p className="text-xs font-semibold flex items-center gap-1.5">
+                                                            <Link2 className="h-3 w-3 text-primary" />
+                                                            Link Depth
+                                                        </p>
+                                                        <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                                            How many steps away from the start URL the crawler will go. Set to <span className="font-medium text-foreground">0</span> for <span className="font-medium text-foreground">unlimited</span> depth. Default is <span className="font-medium text-foreground">5</span>.
+                                                        </p>
+                                                    </div>
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        </div>
+                                        <Input
+                                            id="max-depth"
+                                            type="number"
+                                            min={0}
+                                            value={maxDepth}
+                                            onChange={(e) => setMaxDepth(e.target.value)}
+                                            placeholder="0 for unlimited"
+                                            className="bg-background"
+                                        />
                                     </div>
                                 </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="exclude-patterns">Exclude Patterns (one per line)</Label>
-                                    <Textarea
-                                        id="exclude-patterns"
-                                        placeholder="/login&#10;/admin&#10;/cart"
-                                        value={excludePatterns}
-                                        onChange={(e) => setExcludePatterns(e.target.value)}
-                                        rows={3}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="include-keywords">Include Keywords (one per line)</Label>
-                                    <Textarea
-                                        id="include-keywords"
-                                        placeholder="docs&#10;guide&#10;help"
-                                        value={includeKeywords}
-                                        onChange={(e) => setIncludeKeywords(e.target.value)}
-                                        rows={3}
-                                    />
-                                </div>
-                            </div>
-                        )}
 
-                        <Button onClick={handleStartCrawl} disabled={isStarting || !targetUrl}>
+                                <div className="grid gap-6 md:grid-cols-2">
+                                    <div className="space-y-4">
+                                        <div className="flex items-center justify-between border p-3 rounded-md bg-background">
+                                            <div className="space-y-0.5">
+                                                <div className="flex items-center gap-1.5">
+                                                    <Label htmlFor="use-sitemap" className="text-base cursor-pointer">Sitemap Discovery</Label>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                                                        </TooltipTrigger>
+                                                        <TooltipContent side="right" className="max-w-[260px] p-3">
+                                                            <div className="space-y-1.5">
+                                                                <p className="text-xs font-semibold flex items-center gap-1.5">
+                                                                    <Globe className="h-3 w-3 text-primary" />
+                                                                    Sitemap Discovery
+                                                                </p>
+                                                                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                                                    When enabled, the crawler reads your domain's <code className="text-[10px] bg-muted px-1 py-0.5 rounded">sitemap.xml</code> to find and index pages much more efficiently.
+                                                                </p>
+                                                            </div>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                </div>
+                                                <p className="text-xs text-muted-foreground">
+                                                    Use sitemap.xml to find pages faster
+                                                </p>
+                                            </div>
+                                            <Switch
+                                                id="use-sitemap"
+                                                checked={useSitemap}
+                                                onCheckedChange={setUseSitemap}
+                                            />
+                                        </div>
+                                        <div className="flex items-center justify-between border p-3 rounded-md bg-background">
+                                            <div className="space-y-0.5">
+                                                <div className="flex items-center gap-1.5">
+                                                    <Label htmlFor="process-documents" className="text-base cursor-pointer">Process Documents</Label>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                                                        </TooltipTrigger>
+                                                        <TooltipContent side="right" className="max-w-[260px] p-3">
+                                                            <div className="space-y-1.5">
+                                                                <p className="text-xs font-semibold flex items-center gap-1.5">
+                                                                    <FileText className="h-3 w-3 text-primary" />
+                                                                    Document Analysis
+                                                                </p>
+                                                                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                                                    Extract text content from <span className="font-medium text-foreground">PDF and Word</span> files found during crawling to include in your knowledge base knowledge.
+                                                                </p>
+                                                            </div>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                </div>
+                                                <p className="text-xs text-muted-foreground">
+                                                    Extract text from PDF/Word files
+                                                </p>
+                                            </div>
+                                            <Switch
+                                                id="process-documents"
+                                                checked={processDocuments}
+                                                onCheckedChange={setProcessDocuments}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <div className="space-y-2">
+                                            <div className="flex items-center gap-1.5">
+                                                <Label htmlFor="exclude-patterns">Exclude Patterns</Label>
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                                                    </TooltipTrigger>
+                                                    <TooltipContent side="top" className="max-w-[260px] p-3">
+                                                        <div className="space-y-1.5">
+                                                            <p className="text-xs font-semibold flex items-center gap-1.5">
+                                                                <XCircle className="h-3 w-3 text-destructive" />
+                                                                Exclude Substrings
+                                                            </p>
+                                                            <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                                                URLs containing any of these lines will be <span className="font-medium text-foreground">skipped</span>. One pattern per line (e.g. <code className="text-[10px] bg-muted px-1 py-0.5 rounded">/login</code>).
+                                                            </p>
+                                                        </div>
+                                                    </TooltipContent>
+                                                </Tooltip>
+                                            </div>
+                                            <Textarea
+                                                id="exclude-patterns"
+                                                placeholder="/login&#10;/admin&#10;/cart"
+                                                value={excludePatterns}
+                                                onChange={(e) => setExcludePatterns(e.target.value)}
+                                                rows={3}
+                                                className="bg-background resize-none"
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <div className="flex items-center gap-1.5">
+                                                <Label htmlFor="include-keywords">Include Keywords</Label>
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors cursor-help" />
+                                                    </TooltipTrigger>
+                                                    <TooltipContent side="top" className="max-w-[260px] p-3">
+                                                        <div className="space-y-1.5">
+                                                            <p className="text-xs font-semibold flex items-center gap-1.5">
+                                                                <AlertCircle className="h-3 w-3 text-primary" />
+                                                                Strict Filtering
+                                                            </p>
+                                                            <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                                                Only URLs containing <span className="font-medium text-foreground">at least one</span> of these keywords will be crawled. Leave empty to crawl everything.
+                                                            </p>
+                                                        </div>
+                                                    </TooltipContent>
+                                                </Tooltip>
+                                            </div>
+                                            <Textarea
+                                                id="include-keywords"
+                                                placeholder="docs&#10;guide&#10;help"
+                                                value={includeKeywords}
+                                                onChange={(e) => setIncludeKeywords(e.target.value)}
+                                                rows={3}
+                                                className="bg-background resize-none"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            </CollapsibleContent>
+                        </Collapsible>
+
+                        <Button 
+                            onClick={handleStartCrawl} 
+                            disabled={isStarting || !targetUrl}
+                        >
                             {isStarting ? (
                                 <>
                                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -654,40 +910,64 @@ export default function UserAdminCrawler() {
                                             <TableCell className="text-right">
                                                 <div className="flex justify-end gap-1">
                                                     {job.is_scheduled ? (
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            onClick={() => handleUnschedule(job.job_id)}
-                                                            title="Remove schedule"
-                                                        >
-                                                            <CalendarClock className="h-4 w-4 text-purple-600" />
-                                                        </Button>
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    onClick={() => handleUnschedule(job.job_id)}
+                                                                >
+                                                                    <CalendarClock className="h-4 w-4 text-purple-600" />
+                                                                </Button>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent className="text-xs">
+                                                                Remove schedule
+                                                            </TooltipContent>
+                                                        </Tooltip>
                                                     ) : (
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            onClick={() => openScheduleDialog(job.job_id)}
-                                                            title="Schedule recurring crawl"
-                                                        >
-                                                            <CalendarClock className="h-4 w-4" />
-                                                        </Button>
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    onClick={() => openScheduleDialog(job.job_id)}
+                                                                >
+                                                                    <CalendarClock className="h-4 w-4" />
+                                                                </Button>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent className="text-xs">
+                                                                Schedule recurring crawl
+                                                            </TooltipContent>
+                                                        </Tooltip>
                                                     )}
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        onClick={() => handleRecrawl(job.job_id)}
-                                                        title="Recrawl now"
-                                                    >
-                                                        <RefreshCw className="h-4 w-4" />
-                                                    </Button>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        onClick={() => handleDeleteJob(job.job_id)}
-                                                        title="Delete"
-                                                    >
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                onClick={() => handleRecrawl(job.job_id)}
+                                                            >
+                                                                <RefreshCw className="h-4 w-4" />
+                                                            </Button>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent className="text-xs">
+                                                            Recrawl now
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                onClick={() => handleDeleteJob(job.job_id)}
+                                                            >
+                                                                <Trash2 className="h-4 w-4" />
+                                                            </Button>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent className="text-xs">
+                                                            Delete
+                                                        </TooltipContent>
+                                                    </Tooltip>
                                                 </div>
                                             </TableCell>
                                         </TableRow>
@@ -719,6 +999,91 @@ export default function UserAdminCrawler() {
                 </Card>
             </div>
 
+            {/* Delete Confirmation Dialog */}
+            <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This will permanently delete the crawl job and remove all crawled content
+                            from the knowledge base. This action cannot be undone.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+                            onClick={(e) => {
+                                e.preventDefault();
+                                confirmDeleteJob();
+                            }}
+                            disabled={isDeleting}
+                        >
+                            {isDeleting ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Deleting...
+                                </>
+                            ) : (
+                                'Delete'
+                            )}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            {/* Cancel Confirmation Dialog */}
+            <AlertDialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Cancel Crawl Job</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            The crawl is currently in progress. What would you like to do with the data that has already been crawled?
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+                        <AlertDialogCancel disabled={isCancelling}>
+                            Don't Cancel
+                        </AlertDialogCancel>
+                        <Button
+                            variant="outline"
+                            onClick={() => confirmCancelJob(false)}
+                            disabled={isCancelling}
+                            className="sm:mr-auto"
+                        >
+                            {isCancelling ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Cancelling...
+                                </>
+                            ) : (
+                                <>
+                                    <CheckCircle2 className="h-4 w-4 mr-2" />
+                                    Keep Data
+                                </>
+                            )}
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            onClick={() => confirmCancelJob(true)}
+                            disabled={isCancelling}
+                        >
+                            {isCancelling ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Cancelling...
+                                </>
+                            ) : (
+                                <>
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete Data
+                                </>
+                            )}
+                        </Button>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
             {/* Schedule Configuration Dialog */}
             <Dialog open={scheduleDialogOpen} onOpenChange={setScheduleDialogOpen}>
                 <DialogContent className="sm:max-w-md">
@@ -740,14 +1105,9 @@ export default function UserAdminCrawler() {
                                     <SelectValue placeholder="Select interval" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="6">6 hours</SelectItem>
-                                    <SelectItem value="12">12 hours</SelectItem>
-                                    <SelectItem value="24">1 day</SelectItem>
-                                    <SelectItem value="48">2 days</SelectItem>
-                                    <SelectItem value="72">3 days</SelectItem>
-                                    <SelectItem value="168">1 week</SelectItem>
-                                    <SelectItem value="336">2 weeks</SelectItem>
-                                    <SelectItem value="720">1 month</SelectItem>
+                                    <SelectItem value="1440">2 months</SelectItem>
+                                    <SelectItem value="4320">6 months</SelectItem>
+                                    <SelectItem value="8760">1 year</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -780,6 +1140,23 @@ export default function UserAdminCrawler() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Crawl In Progress Alert Dialog */}
+            <AlertDialog open={crawlInProgressOpen} onOpenChange={setCrawlInProgressOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Crawl In Progress</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            A crawl is already in progress. Only one crawl can run at a time to ensure optimal performance and resource usage. Please wait for the current crawl to complete before starting a new one.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogAction onClick={() => setCrawlInProgressOpen(false)}>
+                            OK
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </DashboardLayout>
     );
 }

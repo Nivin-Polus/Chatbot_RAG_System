@@ -69,10 +69,13 @@ class CrawlerJob(Base):
     skipped_urls = Column(JSON, nullable=True)  # List of {"url": str, "reason": str}
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    collection = relationship("Collection", back_populates="crawler_jobs")
     
     def to_dict(self) -> dict:
         """Convert to dictionary for API response."""

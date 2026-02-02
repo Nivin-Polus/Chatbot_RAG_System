@@ -3,10 +3,35 @@
 Startup script for the RAG Chatbot Backend
 """
 
+
 import os
 import sys
 import logging
+import unittest.mock
 from pathlib import Path
+
+# -- PATCH START: Mock pywin32 modules if missing --
+# This allows the server to start on Windows even if pywin32 is not installed.
+# qdrant_client and potentially other libs try to import these.
+try:
+    import pywintypes
+except ImportError:
+    # If pywintypes is missing, mock it and other related modules
+    # so that subsequent imports of them succeed (as mocks).
+    modules_to_patch = [
+        "pywintypes",
+        "win32api",
+        "win32con",
+        "win32file",
+        "win32event",
+        "pythoncom",
+        "winerror"
+    ]
+    for module in modules_to_patch:
+        # Only patch if not already in sys.modules to be safe
+        if module not in sys.modules:
+            sys.modules[module] = unittest.mock.MagicMock()
+# -- PATCH END --
 
 # Load .env file first
 from dotenv import load_dotenv

@@ -88,6 +88,82 @@ async def login(
     }
 
 
+class RefreshTokenRequest(BaseModel):
+    access_token: str
+
+
+@router.post("/refresh")
+async def refresh_token(
+    request: RefreshTokenRequest,
+    db: Session = Depends(get_db),
+):
+    """Refresh an access token. Accepts tokens that are expired or about to expire."""
+    import jwt
+    from jwt import ExpiredSignatureError, InvalidTokenError
+    from datetime import datetime
+    
+    try:
+        # Decode token without verification first to get user info
+        # We'll verify the user exists and is active, then issue a new token
+        try:
+            # Try to decode with verification
+            payload = jwt.decode(
+                request.access_token, 
+                settings.SECRET_KEY, 
+                algorithms=[settings.ALGORITHM]
+            )
+        except ExpiredSignatureError:
+            # Token is expired, but we can still decode it without verifying expiration to get user info
+            payload = jwt.decode(
+                request.access_token, 
+                settings.SECRET_KEY, 
+                algorithms=[settings.ALGORITHM],
+                options={"verify_exp": False}  # Don't verify expiration, but still verify signature
+            )
+        
+        username: str = payload.get("sub")
+        user_id: str = payload.get("user_id")
+        
+        if not username or not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        
+        # Verify user still exists and is active
+        user = db.query(User).filter(
+            User.username == username,
+            User.user_id == user_id,
+            User.is_active == True
+        ).first()
+        
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found or inactive")
+        
+        # Issue a new token
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={
+                "sub": user.username,
+                "role": user.role,
+                "user_id": user.user_id,
+                "website_id": user.website_id,
+            },
+            expires_delta=access_token_expires,
+        )
+        
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "role": user.role,
+            "username": user.username,
+            "website_id": user.website_id,
+            "user_id": user.user_id,
+        }
+        
+    except InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Token refresh failed: {str(e)}")
+
+
 # Dependency to get current user from JWT
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     import jwt
@@ -343,3 +419,88 @@ async def create_public_token(request: PublicTokenRequest, db: Session = Depends
         session_id=session_id,
         expires_in=int(access_token_expires.total_seconds()),
     )
+
+
+class AutoLoginRequest(BaseModel):
+    token: str
+
+
+class AutoLoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    role: str
+    username: str
+    user_id: str
+    website_id: Optional[str] = None
+    collection_id: str
+
+
+@router.post("/validate-auto-login", response_model=AutoLoginResponse)
+async def validate_auto_login(
+    request: AutoLoginRequest,
+    db: Session = Depends(get_db),
+):
+    """Validate an auto-login token and issue a regular access token.
+    
+    This endpoint is used by the frontend to exchange a short-lived
+    auto-login token for a regular session access token.
+    """
+    from app.core.auth import verify_auto_login_token
+    
+    if not request.token:
+        raise HTTPException(status_code=400, detail="Auto-login token is required")
+
+    try:
+        token_payload = verify_auto_login_token(request.token)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    # Verify user exists and is active
+    user = db.query(User).filter(
+        User.user_id == token_payload["user_id"],
+        User.username == token_payload["username"],
+        User.is_active == True,
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+
+    if user.role != "plugin_user":
+        raise HTTPException(status_code=401, detail="Invalid user type for auto-login")
+
+    # Verify user has access to the collection
+    membership = db.query(CollectionUser).filter(
+        CollectionUser.user_id == user.user_id,
+        CollectionUser.collection_id == token_payload["collection_id"],
+    ).first()
+
+    if not membership:
+        raise HTTPException(status_code=401, detail="User does not have access to the collection")
+
+    # Update last login
+    from datetime import datetime
+    user.last_login = datetime.utcnow()
+    db.commit()
+
+    # Issue a regular access token
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={
+            "sub": user.username,
+            "role": user.role,
+            "user_id": user.user_id,
+            "website_id": user.website_id,
+            "collection_id": token_payload["collection_id"],
+        },
+        expires_delta=access_token_expires,
+    )
+
+    return AutoLoginResponse(
+        access_token=access_token,
+        role=user.role,
+        username=user.username,
+        user_id=user.user_id,
+        website_id=user.website_id,
+        collection_id=token_payload["collection_id"],
+    )
+

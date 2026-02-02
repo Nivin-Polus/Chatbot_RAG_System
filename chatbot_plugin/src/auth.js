@@ -216,56 +216,56 @@ export class AuthService {
   }
 
   /** Verify if token is still valid */
-static async verifyToken(token) {
-  try {
-    if (!token) return null;
+  static async verifyToken(token) {
+    try {
+      if (!token) return null;
 
-    const response = await fetch(this.VERIFY_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        token,
-        website_url: CONFIG?.websiteUrl
-      })
-    }).catch(() => null);
+      const response = await fetch(this.VERIFY_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          token,
+          website_url: CONFIG?.websiteUrl
+        })
+      }).catch(() => null);
 
-    // If request itself failed
-    if (!response || !response.ok) {
-      if (response?.status === 401) {
-        this.clearToken();
-      } else {
-        this.clearTokenContext();
+      // If request itself failed
+      if (!response || !response.ok) {
+        if (response?.status === 401) {
+          this.clearToken();
+        } else {
+          this.clearTokenContext();
+        }
+        return null;
       }
-      return null;
-    }
 
-    const data = await response.json().catch(() => null);
+      const data = await response.json().catch(() => null);
 
-    if (!data || data.valid !== true) {
+      if (!data || data.valid !== true) {
+        this.clearTokenContext();
+        return null;
+      }
+
+      const normalized = {
+        valid: true,
+        user_id: data.user_id,
+        username: data.username,
+        collection_id: data.collection_id,
+        website_id: data.website_id
+      };
+
+      this.storeTokenContext(normalized);
+      return normalized;
+
+    } catch {
+      // Fail silently on ANY error
       this.clearTokenContext();
       return null;
     }
-
-    const normalized = {
-      valid: true,
-      user_id: data.user_id,
-      username: data.username,
-      collection_id: data.collection_id,
-      website_id: data.website_id
-    };
-
-    this.storeTokenContext(normalized);
-    return normalized;
-
-  } catch {
-    // Fail silently on ANY error
-    this.clearTokenContext();
-    return null;
   }
-}
 
 
   /** Login with credentials */
@@ -280,10 +280,10 @@ static async verifyToken(token) {
       formData.append('username', credentials.username);
       formData.append('password', credentials.password);
       formData.append('grant_type', 'password');
-      
+
       const response = await fetch(this.buildApiUrl("/auth/token"), {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/x-www-form-urlencoded"
         },
         body: formData
@@ -295,10 +295,10 @@ static async verifyToken(token) {
       }
 
       const data = await response.json();
-      
+
       // Store the token for future use
       this.storeToken(data.access_token);
-      
+
       return data;
     } catch (err) {
       throw err;
@@ -334,5 +334,41 @@ static async verifyToken(token) {
 
     const auth = await this.login(credentials);
     return auth.access_token;
+  }
+
+  /** Get auto-login URL for redirecting to full React frontend */
+  static async getAutoLoginUrl() {
+    const websiteUrl = CONFIG?.websiteUrl;
+    if (!websiteUrl) {
+      console.error('No website URL configured for auto-login');
+      return null;
+    }
+
+    try {
+      const response = await fetch(this.buildApiUrl("/plugins/generate-login-url"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ website_url: websiteUrl })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        console.error('Failed to get auto-login URL:', response.status, errorText);
+        return null;
+      }
+
+      const data = await response.json().catch(() => null);
+      if (!data || !data.login_url) {
+        console.error('Invalid auto-login response:', data);
+        return null;
+      }
+
+      return data.login_url;
+    } catch (err) {
+      console.error('Error getting auto-login URL:', err);
+      return null;
+    }
   }
 }

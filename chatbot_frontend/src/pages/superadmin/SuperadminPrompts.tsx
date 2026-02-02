@@ -45,8 +45,12 @@ export default function SuperadminPrompts() {
   const [editingPrompt, setEditingPrompt] = useState<Prompt | null>(null);
   const [formData, setFormData] = useState({
     name: '',
+    description: '',
     content: '',
     is_default: false,
+    max_tokens: 4096,
+    model_name: 'claude-3-haiku-20240307',
+    temperature: 0.0,
   });
 
   useEffect(() => {
@@ -106,8 +110,12 @@ export default function SuperadminPrompts() {
         },
         body: JSON.stringify({
           name: formData.name,
-          content: formData.content,
+          description: formData.description,
+          system_prompt: formData.content,
           is_default: formData.is_default,
+          max_tokens: formData.max_tokens,
+          model_name: formData.model_name,
+          temperature: formData.temperature,
           collection_id: selectedCollection,
         }),
       });
@@ -116,7 +124,7 @@ export default function SuperadminPrompts() {
 
       toast.success('Prompt created successfully');
       setIsDialogOpen(false);
-      setFormData({ name: '', content: '', is_default: false });
+      setFormData({ name: '', description: '', content: '', is_default: false, max_tokens: 4096, model_name: 'claude-3-haiku-20240307', temperature: 0.0 });
       fetchPrompts(selectedCollection);
     } catch (error) {
       toast.error('Failed to create prompt');
@@ -136,8 +144,11 @@ export default function SuperadminPrompts() {
         },
         body: JSON.stringify({
           name: formData.name,
-          content: formData.content,
+          system_prompt: formData.content,
           is_default: formData.is_default,
+          max_tokens: formData.max_tokens,
+          model_name: formData.model_name,
+          temperature: formData.temperature,
         }),
       });
 
@@ -146,7 +157,7 @@ export default function SuperadminPrompts() {
       toast.success('Prompt updated successfully');
       setIsDialogOpen(false);
       setEditingPrompt(null);
-      setFormData({ name: '', content: '', is_default: false });
+      setFormData({ name: '', description: '', content: '', is_default: false, max_tokens: 4096, model_name: 'claude-3-haiku-20240307', temperature: 0.0 });
       fetchPrompts(selectedCollection);
     } catch (error) {
       toast.error('Failed to update prompt');
@@ -184,8 +195,12 @@ export default function SuperadminPrompts() {
     setEditingPrompt(prompt);
     setFormData({
       name: prompt.name,
+      description: prompt.description || '',
       content: prompt.system_prompt,
       is_default: prompt.is_default,
+      max_tokens: prompt.max_tokens || 4096,
+      model_name: prompt.model_name || 'claude-3-haiku-20240307',
+      temperature: prompt.temperature ?? 0.0,
     });
     setIsDialogOpen(true);
   };
@@ -193,13 +208,13 @@ export default function SuperadminPrompts() {
   const closeDialog = () => {
     setIsDialogOpen(false);
     setEditingPrompt(null);
-    setFormData({ name: '', content: '', is_default: false });
+    setFormData({ name: '', description: '', content: '', is_default: false, max_tokens: 4096, model_name: 'claude-3-haiku-20240307', temperature: 0.0 });
   };
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
+      <div className="space-y-6 relative">
+        <div className="flex items-center justify-between pt-8">
           <div>
             <h1 className="text-3xl font-bold">Prompts Management</h1>
             <p className="text-muted-foreground">Manage prompts for knowledge base</p>
@@ -254,15 +269,15 @@ export default function SuperadminPrompts() {
                         Create Prompt
                       </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-2xl">
+                    <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
                       <form onSubmit={editingPrompt ? handleUpdatePrompt : handleCreatePrompt}>
                         <DialogHeader>
                           <DialogTitle>
                             {editingPrompt ? 'Edit Prompt' : 'Create New Prompt'}
                           </DialogTitle>
                           <DialogDescription>
-                            {editingPrompt 
-                              ? 'Update the prompt details' 
+                            {editingPrompt
+                              ? 'Update the prompt details'
                               : 'Create a new prompt for the selected knowledge base'
                             }
                           </DialogDescription>
@@ -287,6 +302,7 @@ export default function SuperadminPrompts() {
                               required
                             />
                           </div>
+
                           <div className="flex items-center space-x-2">
                             <Switch
                               id="is_default"
@@ -332,18 +348,17 @@ export default function SuperadminPrompts() {
                         <TableRow key={prompt.prompt_id}>
                           <TableCell className="font-medium">{prompt.name}</TableCell>
                           <TableCell className="text-muted-foreground max-w-xs truncate">
-                            {prompt.system_prompt.length > 100 
-                              ? `${prompt.system_prompt.substring(0, 100)}...` 
+                            {prompt.system_prompt.length > 100
+                              ? `${prompt.system_prompt.substring(0, 100)}...`
                               : prompt.system_prompt
                             }
                           </TableCell>
                           <TableCell>
                             <span
-                              className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                                prompt.is_default
-                                  ? 'bg-blue-100 text-blue-800'
-                                  : 'bg-gray-100 text-gray-800'
-                              }`}
+                              className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${prompt.is_default
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-gray-100 text-gray-800'
+                                }`}
                             >
                               {prompt.is_default ? 'Default' : '—'}
                             </span>

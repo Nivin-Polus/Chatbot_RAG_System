@@ -16,7 +16,7 @@ async function getConfig() {
         scriptUrl.hash = "";
         configUrl = new URL("assets/config.json", scriptUrl).href;
       } catch (error) {
-        console.warn("Unable to resolve config URL from script src:", error);
+        // Unable to resolve config URL
       }
     }
   }
@@ -152,7 +152,7 @@ async function loadConfig() {
     const overrides = normalizeConfig(raw);
     applyRuntimeConfig(overrides);
   } catch (error) {
-    console.warn(error);
+    // Failed to load config
   }
 
   if (!CONFIG.websiteUrl && typeof window !== "undefined") {

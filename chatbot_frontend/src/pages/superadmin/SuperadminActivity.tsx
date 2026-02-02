@@ -13,6 +13,15 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+  PaginationEllipsis,
+} from '@/components/ui/pagination';
 
 type ActivityDetails = Record<string, unknown> | null | undefined;
 
@@ -41,11 +50,14 @@ export default function SuperadminActivity() {
   const [isLoading, setIsLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<'all' | '24h' | '7d' | '30d'>('24h');
   const [activityTypeFilter, setActivityTypeFilter] = useState<string>('all');
-  const [userFilter, setUserFilter] = useState<string>('');
-  const [collectionFilter, setCollectionFilter] = useState<string>('');
-  const [offset, setOffset] = useState(0);
+  const [userFilter, setUserFilter] = useState<string>('all');
+  const [collectionFilter, setCollectionFilter] = useState<string>('all');
+  const [availableUsers, setAvailableUsers] = useState<{ id: string; username: string }[]>([]);
+  const [availableCollections, setAvailableCollections] = useState<{ id: string; name: string }[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [totalActivities, setTotalActivities] = useState(0);
+  const itemsPerPage = 500; // Increased from 100 to allow loading more queries
 
   const normalizeTimestamp = (rawTimestamp: any): string => {
     if (!rawTimestamp) {
@@ -80,7 +92,6 @@ export default function SuperadminActivity() {
     try {
       return new Date(rawTimestamp).toISOString();
     } catch (error) {
-      console.warn('Failed to normalize activity timestamp', rawTimestamp, error);
       return new Date().toISOString();
     }
   };
@@ -99,13 +110,14 @@ export default function SuperadminActivity() {
       }
       // For 'all', sinceHours remains undefined to fetch all activities
 
+      const offset = (currentPage - 1) * itemsPerPage;
       const queryParams = new URLSearchParams({
-        limit: '100',
+        limit: itemsPerPage.toString(),
         offset: offset.toString(),
         ...(sinceHours !== undefined && { since_hours: sinceHours.toString() }),
         ...(activityTypeFilter && activityTypeFilter !== 'all' && { activity_type: activityTypeFilter }),
-        ...(userFilter && { username: userFilter }),
-        ...(collectionFilter && { collection_id: collectionFilter })
+        ...(userFilter && userFilter !== 'all' && { username: userFilter }),
+        ...(collectionFilter && collectionFilter !== 'all' && { collection_id: collectionFilter })
       });
 
       const [recentResponse, statsResponse] = await Promise.all([
@@ -126,26 +138,22 @@ export default function SuperadminActivity() {
         const rawActivities: any[] = Array.isArray(recentData)
           ? recentData
           : Array.isArray(recentData?.activities)
-          ? recentData.activities
-          : [];
+            ? recentData.activities
+            : [];
 
         const normalized = rawActivities.map(normalizeActivityItem);
-        
-        // If offset is 0, replace activities, otherwise append
-        if (offset === 0) {
-          setActivities(normalized);
-        } else {
-          setActivities(prev => [...prev, ...normalized]);
-        }
-        
-        // Check if there are more activities to load
-        setHasMore(rawActivities.length === 100);
-        setTotalActivities(recentData.count || rawActivities.length);
+
+        // Always replace activities when fetching a new page
+        setActivities(normalized);
+
+        // Use the total count from the API response
+        const total = recentData.total ?? recentData.count ?? rawActivities.length;
+        setTotalActivities(total);
+        setHasMore(recentData.has_more ?? (rawActivities.length === itemsPerPage && offset + rawActivities.length < total));
       } else {
-        if (offset === 0) {
-          setActivities([]);
-        }
+        setActivities([]);
         setHasMore(false);
+        setTotalActivities(0);
       }
 
       if (statsResponse.ok) {
@@ -165,27 +173,68 @@ export default function SuperadminActivity() {
         setStats(null);
       }
     } catch (error) {
-      console.error('Error fetching activity data:', error);
       toast.error('Failed to fetch activity data');
       // Ensure activities is always an array even on error
-      if (offset === 0) {
-        setActivities([]);
-      }
+      setActivities([]);
+      setTotalActivities(0);
+      setHasMore(false);
     } finally {
       setIsLoading(false);
     }
-  }, [user?.access_token, offset, timeFilter, activityTypeFilter, userFilter, collectionFilter]);
+  }, [user?.access_token, currentPage, itemsPerPage, timeFilter, activityTypeFilter, userFilter, collectionFilter]);
+
+  const fetchUsers = useCallback(async () => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/users/`, {
+        headers: {
+          Authorization: `Bearer ${user?.access_token}`,
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableUsers(data.map((u: any) => ({ id: u.user_id, username: u.username })));
+      }
+    } catch (error) {
+      console.error('Failed to fetch users', error);
+    }
+  }, [user?.access_token]);
+
+  const fetchCollections = useCallback(async () => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/collections/summary`, {
+        headers: {
+          Authorization: `Bearer ${user?.access_token}`,
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableCollections(data.map((c: any) => ({ id: c.collection_id, name: c.name })));
+      }
+    } catch (error) {
+      console.error('Failed to fetch collections', error);
+    }
+  }, [user?.access_token]);
 
   useEffect(() => {
-    // Reset offset when filters change
-    setOffset(0);
+    // Reset to page 1 when filters change
+    setCurrentPage(1);
+  }, [timeFilter, activityTypeFilter, userFilter, collectionFilter]);
+
+  useEffect(() => {
+    // Fetch data when page or filters change
     fetchActivityData().catch(() => undefined);
-  }, [fetchActivityData, timeFilter, activityTypeFilter, userFilter, collectionFilter]);
+  }, [fetchActivityData]);
+
+  useEffect(() => {
+    // Fetch lookup data on mount
+    fetchUsers().catch(() => undefined);
+    fetchCollections().catch(() => undefined);
+  }, [fetchUsers, fetchCollections]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
       // Only refresh if we're at the first page
-      if (offset === 0) {
+      if (currentPage === 1) {
         fetchActivityData().catch(() => undefined);
       }
     }, 60000);
@@ -193,7 +242,7 @@ export default function SuperadminActivity() {
     return () => {
       window.clearInterval(interval);
     };
-  }, [fetchActivityData, offset]);
+  }, [fetchActivityData, currentPage]);
 
   const normalizeActivityItem = (raw: any): ActivityItem => {
     const id = raw?.id || raw?.activity_id || crypto.randomUUID();
@@ -340,19 +389,57 @@ export default function SuperadminActivity() {
     return `${Math.floor(diffInSeconds / 86400)}d ago`;
   };
 
-  const handleLoadMore = () => {
-    setOffset(prev => prev + 100);
+  const handleRefresh = () => {
+    setCurrentPage(1);
+    fetchActivityData();
   };
 
-  const handleRefresh = () => {
-    setOffset(0);
-    fetchActivityData();
+  const totalPages = Math.ceil(totalActivities / itemsPerPage);
+
+  const getPageNumbers = () => {
+    const pages: (number | 'ellipsis')[] = [];
+    const maxVisible = 7;
+
+    if (totalPages <= maxVisible) {
+      // Show all pages if total is small
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      // Always show first page
+      pages.push(1);
+
+      if (currentPage <= 3) {
+        // Near the start
+        for (let i = 2; i <= 5; i++) {
+          pages.push(i);
+        }
+        pages.push('ellipsis');
+        pages.push(totalPages);
+      } else if (currentPage >= totalPages - 2) {
+        // Near the end
+        pages.push('ellipsis');
+        for (let i = totalPages - 4; i <= totalPages; i++) {
+          pages.push(i);
+        }
+      } else {
+        // In the middle
+        pages.push('ellipsis');
+        for (let i = currentPage - 1; i <= currentPage + 1; i++) {
+          pages.push(i);
+        }
+        pages.push('ellipsis');
+        pages.push(totalPages);
+      }
+    }
+
+    return pages;
   };
 
   const handleClearFilters = () => {
     setActivityTypeFilter('all');
-    setUserFilter('');
-    setCollectionFilter('');
+    setUserFilter('all');
+    setCollectionFilter('all');
     setTimeFilter('24h');
   };
 
@@ -395,7 +482,7 @@ export default function SuperadminActivity() {
                   </SelectContent>
                 </Select>
               </div>
-              
+
               <div>
                 <label className="text-sm font-medium mb-1 block">Activity Type</label>
                 <Select value={activityTypeFilter} onValueChange={setActivityTypeFilter}>
@@ -416,25 +503,41 @@ export default function SuperadminActivity() {
                   </SelectContent>
                 </Select>
               </div>
-              
+
               <div>
                 <label className="text-sm font-medium mb-1 block">User</label>
-                <Input 
-                  placeholder="Filter by user" 
-                  value={userFilter}
-                  onChange={(e) => setUserFilter(e.target.value)}
-                />
+                <Select value={userFilter} onValueChange={setUserFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All users" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All users</SelectItem>
+                    {availableUsers.map((u) => (
+                      <SelectItem key={u.id} value={u.username}>
+                        {u.username}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              
+
               <div>
                 <label className="text-sm font-medium mb-1 block">Collection</label>
-                <Input 
-                  placeholder="Filter by collection" 
-                  value={collectionFilter}
-                  onChange={(e) => setCollectionFilter(e.target.value)}
-                />
+                <Select value={collectionFilter} onValueChange={setCollectionFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All collections" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All collections</SelectItem>
+                    {availableCollections.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              
+
               <div className="flex items-end">
                 <Button variant="outline" onClick={handleClearFilters} className="w-full">
                   Clear Filters
@@ -497,12 +600,18 @@ export default function SuperadminActivity() {
               <Activity className="h-5 w-5" />
               Recent Activity
               <span className="text-sm font-normal text-muted-foreground ml-2">
-                {activities.length} of {totalActivities} activities
+                {totalActivities > 0 ? (
+                  <>
+                    Showing {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, totalActivities)} of {totalActivities} activities
+                  </>
+                ) : (
+                  'No activities'
+                )}
               </span>
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {isLoading && offset === 0 ? (
+            {isLoading && currentPage === 1 ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
               </div>
@@ -557,23 +666,63 @@ export default function SuperadminActivity() {
                     </div>
                   </div>
                 ))}
-                
-                {hasMore && (
+
+                {totalPages > 1 && (
                   <div className="flex justify-center py-4">
-                    <Button 
-                      onClick={handleLoadMore} 
-                      disabled={isLoading}
-                      variant="outline"
-                    >
-                      {isLoading ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Loading...
-                        </>
-                      ) : (
-                        'Load More'
-                      )}
-                    </Button>
+                    <Pagination>
+                      <PaginationContent>
+                        <PaginationItem>
+                          <PaginationPrevious
+                            onClick={(e) => {
+                              e.preventDefault();
+                              if (currentPage > 1) {
+                                setCurrentPage(prev => prev - 1);
+                              }
+                            }}
+                            className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                            href="#"
+                          />
+                        </PaginationItem>
+
+                        {getPageNumbers().map((page, index) => {
+                          if (page === 'ellipsis') {
+                            return (
+                              <PaginationItem key={`ellipsis-${index}`}>
+                                <PaginationEllipsis />
+                              </PaginationItem>
+                            );
+                          }
+                          return (
+                            <PaginationItem key={page}>
+                              <PaginationLink
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  setCurrentPage(page);
+                                }}
+                                isActive={currentPage === page}
+                                className="cursor-pointer"
+                                href="#"
+                              >
+                                {page}
+                              </PaginationLink>
+                            </PaginationItem>
+                          );
+                        })}
+
+                        <PaginationItem>
+                          <PaginationNext
+                            onClick={(e) => {
+                              e.preventDefault();
+                              if (currentPage < totalPages) {
+                                setCurrentPage(prev => prev + 1);
+                              }
+                            }}
+                            className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                            href="#"
+                          />
+                        </PaginationItem>
+                      </PaginationContent>
+                    </Pagination>
                   </div>
                 )}
               </div>

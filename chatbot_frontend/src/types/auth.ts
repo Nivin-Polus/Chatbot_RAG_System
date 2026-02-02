@@ -19,6 +19,8 @@ export interface PluginIntegration {
   normalized_url: string;
   display_name?: string | null;
   is_active: boolean;
+  is_widget_active: boolean;
+  widget_token?: string | null;
   created_at?: string | null;
   created_by?: string | null;
 }
@@ -49,9 +51,14 @@ export interface FileItem {
   uploaded_by: string;
   uploader_id: string;
   upload_timestamp: string;
-  file_size: number;
+  file_size: number | null;
   processing_status: string;
   collection_id: string;
+  source_type?: 'file' | 'crawled';
+  crawl_job_id?: string;
+  target_url?: string;
+  pages_crawled?: number;
+  chunks_created?: number;
 }
 
 export interface Prompt {
@@ -106,6 +113,7 @@ export interface ChatSource {
   chunk_indices?: number[];
   source_type?: 'file' | 'web_crawl';
   url?: string;
+  confidence?: number;  // Confidence score (0.0-1.0) for source relevance
 }
 
 export interface ChatMessage {
@@ -114,5 +122,7 @@ export interface ChatMessage {
   content: string;
   timestamp: Date;
   isGeneric?: boolean;
+  isFollowup?: boolean;  // NEW: Indicates this is a follow-up question
   sources?: ChatSource[];
+  answer_mode?: 'FULL' | 'PARTIAL_TRANSPARENT' | 'FOLLOWUP'; // NEW: Track answer mode
 }

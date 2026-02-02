@@ -34,6 +34,7 @@ export default function SuperadminFiles() {
   const [searchTerm, setSearchTerm] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<Record<string, 'pending' | 'success' | 'error'>>({});
+  const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchCollections();
@@ -82,6 +83,13 @@ export default function SuperadminFiles() {
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = event.target.files;
     if (!selectedFiles || selectedFiles.length === 0 || !selectedCollection) return;
+
+    // Limit to maximum 10 files
+    if (selectedFiles.length > 10) {
+      toast.error(`You can only upload a maximum of 10 files at once. You selected ${selectedFiles.length} files.`);
+      event.target.value = ''; // Reset the file input
+      return;
+    }
 
     const filesArray = Array.from(selectedFiles);
     const allowedTypes = [
@@ -151,7 +159,6 @@ export default function SuperadminFiles() {
       toast.success(`Uploaded ${uploadedFiles.length}/${filesArray.length} file(s)`);
       event.target.value = '';
     } catch (error) {
-      console.error('Failed to upload files', error);
       toast.error(error instanceof Error ? error.message : 'Failed to upload files');
       setUploadProgress((prev) => {
         const updated: Record<string, 'pending' | 'success' | 'error'> = {};
@@ -166,6 +173,7 @@ export default function SuperadminFiles() {
   };
 
   const handleDownload = async (fileId: string, fileName: string) => {
+    setDownloadingFileId(fileId);
     try {
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/files/download/${fileId}`, {
         headers: {
@@ -188,6 +196,8 @@ export default function SuperadminFiles() {
       }
     } catch (error) {
       toast.error('Failed to download file');
+    } finally {
+      setDownloadingFileId(null);
     }
   };
 
@@ -227,8 +237,8 @@ export default function SuperadminFiles() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
-        <div>
+      <div className="space-y-6 relative">
+        <div className="pt-8">
           <h1 className="text-3xl font-bold">Files Management</h1>
           <p className="text-muted-foreground">Upload and manage files for collections</p>
         </div>
@@ -268,7 +278,7 @@ export default function SuperadminFiles() {
                   Upload File
                 </CardTitle>
                 <CardDescription>
-                  Upload files to the selected knowledge base (PDF, TXT, CSV, DOCX, PPTX, XLS/XLSX - Max 10MB)
+                  Upload up to 10 files to the selected knowledge base (PDF, TXT, CSV, DOCX, PPTX, XLS/XLSX - Max 10MB each)
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -340,13 +350,12 @@ export default function SuperadminFiles() {
                           <TableCell className="font-medium">{file.file_name}</TableCell>
                           <TableCell>{formatFileSize(file.file_size)}</TableCell>
                           <TableCell>
-                            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                              file.processing_status === 'completed'
-                                ? 'bg-green-100 text-green-800'
-                                : file.processing_status === 'processing'
+                            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${file.processing_status === 'completed'
+                              ? 'bg-green-100 text-green-800'
+                              : file.processing_status === 'processing'
                                 ? 'bg-yellow-100 text-yellow-800'
                                 : 'bg-red-100 text-red-800'
-                            }`}>
+                              }`}>
                               {file.processing_status}
                             </span>
                           </TableCell>
@@ -358,9 +367,13 @@ export default function SuperadminFiles() {
                               variant="ghost"
                               size="icon"
                               onClick={() => handleDownload(file.file_id, file.file_name)}
-                              disabled={file.processing_status !== 'completed'}
+                              disabled={file.processing_status !== 'completed' || downloadingFileId === file.file_id}
                             >
-                              <Download className="h-4 w-4" />
+                              {downloadingFileId === file.file_id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Download className="h-4 w-4" />
+                              )}
                             </Button>
                             <Button
                               variant="ghost"

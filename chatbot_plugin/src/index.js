@@ -15,6 +15,46 @@ import "./styles.css";
   const { token, context: tokenContext } = authBootstrap || {};
 
   const ui = new ChatbotUI();
+  ui.onExpandHistory = () => {
+    // Sort sessions by timestamp desc
+    const sorted = [...sessions].sort((a, b) => b.timestamp - a.timestamp);
+    ui.renderHistoryList(sorted, chatService.sessionId, switchSession, deleteSession, renameSession);
+  };
+  // Provide callbacks for chat history transfer to frontend
+  ui.getCurrentSessionId = () => chatService.sessionId;
+  ui.getSessionMessages = () => messages; // Return current session messages
+  // Return all sessions with their messages for full history transfer
+  ui.getAllSessions = () => {
+    return sessions.map(session => {
+      // For current session, use in-memory messages
+      if (session.id === chatService.sessionId) {
+        return {
+          ...session,
+          messages: messages.filter(m => !m.isTypingIndicator && !m.isTyping)
+        };
+      }
+      // For other sessions, load from localStorage
+      try {
+        const storedMsgs = localStorage.getItem(CHAT_MESSAGES_PREFIX + session.id);
+        if (storedMsgs) {
+          return {
+            ...session,
+            messages: JSON.parse(storedMsgs)
+          };
+        }
+      } catch (e) {
+        console.warn('Failed to load messages for session:', session.id);
+      }
+      return { ...session, messages: [] };
+    }).filter(s => s.messages && s.messages.length > 0); // Only include sessions with messages
+  };
+  // After transfer to frontend, keep localStorage intact so users can continue
+  // their chat when they return to the plugin
+  ui.onTransferComplete = () => {
+    console.log('Transfer successful - preserving plugin localStorage for session continuity');
+    // Do NOT clear localStorage - users should be able to continue their chat
+    // when they close the extended frontend and return to the plugin
+  };
   ui.init();
 
   const chatService = new ChatService();
@@ -33,12 +73,35 @@ import "./styles.css";
   let inFlight = false;
   let abortController = null;
   let currentTypingFinish = null;
+  let currentTypingMessage = null; // Store reference to current typing message
+  let currentTypingFullText = null; // Store full text for current typing message
   let currentRequestId = null; // Track current request to prevent old responses from updating UI
   let originalSendBtnHTML = null; // Store original send button HTML
+  let userMessageCount = 0; // Track how many user messages have been sent in this session
+  let currentSessionId = null; // Track current session ID
+  let userScrolledDuringStream = false; // Track if user manually scrolled during streaming
 
   // LocalStorage keys for chat history
   const CHAT_HISTORY_KEY = 'chatbot_chat_history';
   const CHAT_SESSION_KEY = 'chatbot_chat_session_id';
+  const CHAT_SESSIONS_INDEX_KEY = 'chatbot_sessions_index';
+  const CHAT_MESSAGES_PREFIX = 'chatbot_messages_';
+  const VISITOR_ID_KEY = 'chatbot_visitor_id';
+
+  // Generate or retrieve unique visitor ID for this browser
+  function getVisitorId() {
+    let visitorId = localStorage.getItem(VISITOR_ID_KEY);
+    if (!visitorId) {
+      // Generate a unique visitor ID
+      visitorId = 'visitor_' + Date.now() + '_' + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem(VISITOR_ID_KEY, visitorId);
+    }
+    return visitorId;
+  }
+
+  const visitorId = getVisitorId();
+
+  let sessions = []; // [{id, title, timestamp}]
   const downloadRegistry = {
     byName: new Map(),
     byId: new Map(),
@@ -65,10 +128,27 @@ import "./styles.css";
     }
   };
 
-  function scrollChatToBottom() {
+  function scrollChatToBottom(force = false) {
     if (chatBox) {
+      // Don't auto-scroll if user has manually scrolled during streaming (unless forced)
+      if (!force && userScrolledDuringStream && inFlight) {
+        return;
+      }
       chatBox.scrollTop = chatBox.scrollHeight;
     }
+  }
+
+  // Scroll so that the latest user question sits at the top of the chat area
+  function scrollLastUserMessageToTop() {
+    if (!chatBox) return;
+    const userMessages = chatBox.querySelectorAll(".plugin-msg.msg.user, .msg.user");
+    if (!userMessages || userMessages.length === 0) return;
+    const lastUser = userMessages[userMessages.length - 1];
+    if (!lastUser) return;
+
+    // Position the last user message at the top of the scroll container
+    const offsetTop = lastUser.offsetTop ?? 0;
+    chatBox.scrollTop = offsetTop;
   }
 
   await new Promise(resolve => setTimeout(resolve, 100));
@@ -88,11 +168,55 @@ import "./styles.css";
     }
   }
 
+  // Track user scroll during streaming to allow manual scrolling
+  if (chatBox) {
+    let isAutoScrolling = false;
+
+    // Wrap scrollTop setter to detect programmatic scrolls
+    // This is a workaround as there's no direct way to distinguish user scroll from programmatic scroll
+    // We'll use a global helper to set scrollTop programmatically and temporarily disable user scroll detection
+
+    chatBox.addEventListener('scroll', () => {
+      // Only track user scrolls during active streaming
+      if (inFlight && !isAutoScrolling) {
+        // Check if user scrolled away from bottom
+        const isNearBottom = chatBox.scrollHeight - chatBox.clientHeight - chatBox.scrollTop <= 50;
+        if (!isNearBottom) {
+          userScrolledDuringStream = true;
+        }
+      }
+    }, { passive: true });
+
+    // Helper to set scroll without triggering user scroll detection
+    window.__chatboxAutoScroll = (value) => {
+      isAutoScrolling = true;
+      chatBox.scrollTop = value;
+      // Reset after a brief delay to allow scroll event to process
+      setTimeout(() => { isAutoScrolling = false; }, 50);
+    };
+  }
+
   // Try to load chat history from localStorage
   const historyLoaded = loadChatHistory();
   if (!historyLoaded) {
     initializeMessages();
   }
+
+  // Initialize user message counter based on any restored history
+  userMessageCount = messages.filter(m => m && m.user).length;
+
+  // Fetch synced sessions from backend (async, will update UI if newer sessions found)
+  // This allows loading sessions created in the extended plugin
+  fetchSyncedSessions().then(synced => {
+    if (synced) {
+      console.log('Synced sessions loaded from backend');
+      // Update UI with any newly loaded sessions
+      renderMessages();
+      userMessageCount = messages.filter(m => m && m.user).length;
+    }
+  }).catch(err => {
+    console.warn('Could not fetch synced sessions:', err);
+  });
 
   if (CONFIG?.ui) {
     const root = document.documentElement;
@@ -281,6 +405,10 @@ import "./styles.css";
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
+      // Prevent click if button is in cooldown (even though pointer-events should handle this)
+      if (!ui.canTriggerNewChat()) {
+        return false;
+      }
       handleNewChat();
       return false;
     }
@@ -325,6 +453,7 @@ import "./styles.css";
     if (stopBtn) {
       stopBtn.style.display = "none";
     }
+    // Input loader removed - no loader in input box
   }
 
   function showProcessingState() {
@@ -336,6 +465,7 @@ import "./styles.css";
     if (stopBtn) {
       stopBtn.style.display = "inline-flex";
     }
+    // Input loader removed - no loader in input box
   }
 
   async function handleSendMessage() {
@@ -355,31 +485,39 @@ import "./styles.css";
 
     // Set inFlight flag and disable UI elements
     inFlight = true;
+    userScrolledDuringStream = false; // Reset scroll flag for new message
     abortController = new AbortController();
+
+    // Capture the session ID where this request started
+    const requestSessionId = chatService.sessionId;
 
     try {
       input.disabled = true;
       showProcessingState();
 
       addMessage({ user: true, text: userMsg, formatted: false });
-      scrollChatToBottom();
+      // Track how many user messages have been sent in this session
+      userMessageCount += 1;
+
+      // For the very first exchange, keep existing behavior (scroll to bottom).
+      // From the second user message onwards, align the question at the top so
+      // that the response renders just beneath it.
+      if (userMessageCount <= 1) {
+        scrollChatToBottom();
+      } else {
+        scrollLastUserMessageToTop();
+      }
       input.value = "";
       input.dispatchEvent(new Event("input", { bubbles: true }));
 
       const typingIndicator = showTypingIndicator();
-      scrollChatToBottom();
-
-      console.log('[ChatPlugin] Sending message to API...');
-      const reply = await chatService.sendMessage(userMsg, { signal: abortController.signal });
-      console.log('[ChatPlugin] Got response from API:', reply ? 'success' : 'null');
-
-      // Check if this request is still valid (new chat might have been clicked)
-      if (currentRequestId !== requestId) {
-        // Reset send button before returning
-        showSendButton();
-        if (input) input.disabled = false;
-        return; // Request was cancelled by new chat, don't update UI
+      if (userMessageCount <= 1) {
+        scrollChatToBottom();
       }
+
+      const reply = await chatService.sendMessage(userMsg, { signal: abortController.signal });
+
+      console.log('[DEBUG] Reply received:', JSON.stringify(reply, null, 2));
 
       removeTypingIndicator(typingIndicator);
       input.disabled = false;
@@ -387,12 +525,21 @@ import "./styles.css";
 
       // Check again before typing the message
       if (currentRequestId !== requestId) {
-        // Reset send button before returning
+        // We switched sessions! Save response to background session history.
+        if (requestSessionId) {
+          saveBackgroundResponse(requestSessionId, reply);
+        }
         showSendButton();
-        return; // Request was cancelled by new chat, don't update UI
+        return;
       }
 
-      await typeAssistantMessage(reply.text, reply.sources, requestId, Boolean(reply?.generic)).then(() => {
+      await typeAssistantMessage(
+        reply.text,
+        reply.sources,
+        requestId,
+        Boolean(reply?.is_generic || reply?.generic),
+        Boolean(reply?.is_followup)  // NEW: Pass follow-up flag
+      ).then(() => {
         // Final check before updating context indicator
         if (currentRequestId === requestId) {
           ui.updateContextIndicator(chatService.getContextInfo());
@@ -401,26 +548,31 @@ import "./styles.css";
         }
       });
     } catch (error) {
-      // Check if this request is still valid
-      if (currentRequestId !== requestId) {
-        // Reset send button before returning
-        showSendButton();
-        if (input) input.disabled = false;
-        return; // Request was cancelled by new chat, don't update UI
+      // Always remove typing indicator if it was created
+      if (typeof typingIndicator !== 'undefined' && typingIndicator) {
+        removeTypingIndicator(typingIndicator);
       }
 
-      // Re-enable input and send button on error
+      // Check if this request is still valid or if it was aborted
+      if (currentRequestId !== requestId || error?.name === 'AbortError') {
+        // Reset state and UI but don't show error message
+        showSendButton();
+        if (input) input.disabled = false;
+        inFlight = false;
+        abortController = null;
+        return;
+      }
+
+      // Re-enable input and send button on unexpected error
       input.disabled = false;
       showSendButton();
 
-      if (error?.name !== 'AbortError') {
-        addMessage({
-          user: false,
-          text: "Sorry, I encountered an error. Please try again.",
-          formatted: false,
-          isError: true
-        });
-      }
+      addMessage({
+        user: false,
+        text: "Sorry, I encountered an error. Please try again.",
+        formatted: false,
+        isError: true
+      });
     } finally {
       // Only reset if this is still the current request
       if (currentRequestId === requestId) {
@@ -433,40 +585,42 @@ import "./styles.css";
   }
 
   function handleStop() {
-    if (typeof currentTypingFinish === 'function') {
-      clearInterval(typingInterval);
-      typingInterval = null;
-      currentTypingFinish();
-      if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
-    }
-  }
-
-  function handleNewChat() {
-    if (!ui.canTriggerNewChat()) return;
-    ui.startNewChatCooldown();
-
-    // Abort any ongoing fetch request
+    // Abort any ongoing API request
     if (abortController) {
       abortController.abort();
       abortController = null;
     }
 
+    // Reset state flags
+    inFlight = false;
+
     // Stop any typing animation
     if (typeof currentTypingFinish === 'function') {
       clearInterval(typingInterval);
       typingInterval = null;
-      currentTypingFinish();
       currentTypingFinish = null;
     } else {
       clearInterval(typingInterval);
       typingInterval = null;
     }
 
-    // Invalidate current request ID so old responses won't update UI
-    currentRequestId = null;
+    // Finalize any messages that are still in typing state with full text
+    if (currentTypingMessage && currentTypingFullText) {
+      currentTypingMessage.text = currentTypingFullText;
+      currentTypingMessage.isTyping = false;
+      currentTypingMessage = null;
+      currentTypingFullText = null;
+    } else {
+      // Fallback: find any typing messages and finalize with current text
+      messages.forEach(msg => {
+        if (msg.isTyping) {
+          msg.isTyping = false;
+        }
+      });
+    }
 
-    // Remove any typing indicators
-    const typingIndicators = messages.filter(msg => msg.isTypingIndicator || msg.isTyping);
+    // Remove any typing indicators (thinking spinner)
+    const typingIndicators = messages.filter(msg => msg.isTypingIndicator);
     typingIndicators.forEach(indicator => {
       const index = messages.indexOf(indicator);
       if (index !== -1) {
@@ -474,7 +628,78 @@ import "./styles.css";
       }
     });
 
-    // Reset state flags
+    // Invalidate current request ID after finalizing messages
+    currentRequestId = null;
+
+    renderMessages();
+
+    // Re-enable UI elements
+    if (input) {
+      input.disabled = false;
+    }
+    showSendButton();
+
+    // Scroll to bottom to show the finalized response
+    if (chatBox) {
+      scrollChatToBottom(true); // Force scroll
+    }
+  }
+
+  async function handleNewChat(skipSave = false) {
+    if (!ui.canTriggerNewChat()) return;
+    ui.startNewChatCooldown();
+
+    // Don't abort ongoing fetch requests - let them complete in background
+    // The response will be saved via saveBackgroundResponse() when it completes
+    // Just detach the controller so we can start a new one for the new session
+    abortController = null;
+
+    // Stop any typing animation
+    if (typeof currentTypingFinish === 'function') {
+      clearInterval(typingInterval);
+      typingInterval = null;
+      currentTypingFinish = null;
+    } else {
+      clearInterval(typingInterval);
+      typingInterval = null;
+    }
+
+    // Finalize any streaming messages with full text before switching sessions
+    if (currentTypingMessage && currentTypingFullText) {
+      currentTypingMessage.text = currentTypingFullText;
+      currentTypingMessage.isTyping = false;
+      // Save the finalized message to chat history
+      saveChatHistory();
+    } else {
+      // Fallback: finalize any typing messages with current text
+      messages.forEach(msg => {
+        if (msg.isTyping) {
+          msg.isTyping = false;
+        }
+      });
+      // Save any finalized messages
+      if (messages.some(msg => msg.isTyping === false && !msg.user && msg.text)) {
+        saveChatHistory();
+      }
+    }
+
+    currentTypingMessage = null;
+    currentTypingFullText = null;
+
+    // Invalidate current request ID so old responses won't update THIS UI
+    // but they'll still save to their original session via saveBackgroundResponse()
+    currentRequestId = null;
+
+    // Remove only typing indicators (thinking spinner), not typing messages
+    const typingIndicators = messages.filter(msg => msg.isTypingIndicator);
+    typingIndicators.forEach(indicator => {
+      const index = messages.indexOf(indicator);
+      if (index !== -1) {
+        messages.splice(index, 1);
+      }
+    });
+
+    // Reset UI state flags (background requests still tracked by their own requestId)
     inFlight = false;
 
     // Re-enable UI elements
@@ -483,20 +708,113 @@ import "./styles.css";
     }
     showSendButton();
 
-    // Clear context and messages
+    // Transfer current session to backend before clearing
+    // Only transfer if there are user messages (skip if chat is empty)
+    const hasUserMessages = messages.some(m => m.user);
+    if (hasUserMessages && chatService.sessionId && CONFIG?.websiteUrl) {
+      try {
+        const allSessions = ui.getAllSessions?.() || [];
+        const currentSessionId = chatService.sessionId;
+
+        if (allSessions.length > 0) {
+          const apiBase = (CONFIG.apiBase || '').replace(/\/+$/, '');
+          const transferResponse = await fetch(`${apiBase}/plugins/transfer-sessions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              website_url: CONFIG.websiteUrl,
+              current_session_id: currentSessionId,
+              sessions: allSessions.map(session => ({
+                session_id: session.id,
+                title: session.title || 'New Chat',
+                timestamp: session.timestamp,
+                messages: (session.messages || []).filter(m => !m.isTypingIndicator && !m.isTyping).map(m => ({
+                  user: Boolean(m.user),
+                  text: m.text || '',
+                  formatted: Boolean(m.formatted),
+                  timestamp: m.timestamp || new Date().toISOString(),
+                  sources: m.sources || [],
+                  isFollowup: Boolean(m.isFollowup),
+                })),
+              })),
+            }),
+          });
+
+          if (transferResponse.ok) {
+            console.log('Session transferred successfully before clearing');
+          } else {
+            console.warn('Could not transfer session, proceeding with clear');
+          }
+        }
+      } catch (transferErr) {
+        console.warn('Session transfer failed:', transferErr);
+      }
+    }
+
+    // Clear context and messages (do NOT delete existing sessions)
     chatService.clearContext();
+    currentSessionId = chatService.sessionId; // Update tracker
+
+    // Start fresh
+    messages.length = 0;
     initializeMessages();
+    renderMessages();
 
-    // Clear chat history from localStorage
-    clearChatHistory();
-
-    ui.updateContextIndicator(chatService.getContextInfo());
-    input.value = "";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.focus();
+    // Update history sidebar
+    if (ui.onExpandHistory) {
+      ui.onExpandHistory();
+    }
   }
 
+  // ... (addMessage, etc.)
+
+  async function deleteSession(sessionId) {
+    // Delete from backend first
+    if (chatService.token && sessionId) {
+      try {
+        const apiBase = (CONFIG.apiBase || '').replace(/\/+$/, '');
+        await fetch(`${apiBase}/chat/sessions/${sessionId}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${chatService.token}`,
+          },
+        });
+      } catch (error) {
+        // Silently fail - session might not exist in backend yet
+        console.warn('Failed to delete session from backend:', error);
+      }
+    }
+
+    // Delete from localStorage
+    sessions = sessions.filter(s => s.id !== sessionId);
+    localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
+    localStorage.removeItem(CHAT_MESSAGES_PREFIX + sessionId);
+
+    if (chatService.sessionId === sessionId) {
+      handleNewChat(true); // Skip saving the session we just deleted
+    } else {
+      if (ui.isExpanded && ui.onExpandHistory) ui.onExpandHistory();
+    }
+  }
+
+
   function addMessage(message) {
+    // Ensure sources array preserves all fields from each source object
+    const normalizeSources = (sources) => {
+      if (!Array.isArray(sources)) return [];
+      return sources.map(source => {
+        if (!source || typeof source !== 'object') return null;
+        // Preserve all source fields: file_name, file_id, chunk_indices, source_type, url
+        return {
+          file_name: source.file_name || null,
+          file_id: source.file_id || null,
+          chunk_indices: Array.isArray(source.chunk_indices) ? source.chunk_indices : null,
+          source_type: source.source_type || 'file',
+          url: source.url || null
+        };
+      }).filter(source => source !== null && source.file_name); // Filter out invalid sources
+    };
+
     const storedMessage = {
       user: Boolean(message.user),
       text: message.text || "",
@@ -505,7 +823,8 @@ import "./styles.css";
       isError: Boolean(message.isError),
       isTyping: Boolean(message.isTyping),
       isTypingIndicator: Boolean(message.isTypingIndicator),
-      sources: message.sources || []
+      isFollowup: Boolean(message.isFollowup),  // NEW: Track follow-up status
+      sources: normalizeSources(message.sources)
     };
     messages.push(storedMessage);
     renderMessages();
@@ -520,7 +839,11 @@ import "./styles.css";
 
   function showTypingIndicator() {
     const indicator = addMessage({ user: false, text: "", formatted: false, isTypingIndicator: true });
-    scrollChatToBottom();
+    if (userMessageCount <= 1) {
+      scrollChatToBottom();
+    } else {
+      scrollLastUserMessageToTop();
+    }
     return indicator;
   }
 
@@ -533,17 +856,18 @@ import "./styles.css";
   }
 
   // Maximum number of sources to surface in the UI
-  const MAX_DISPLAY_SOURCES = 3;
+  const MAX_DISPLAY_SOURCES = 4;
 
   // Helper function to detect generic responses
   function isGenericResponse(text) {
     if (!text) return false;
     const normalized = text.trim();
-    const genericPattern = /I apologize|I'm limited to providing information|not have any information|outside of my scope|I'm afraid I don't have enough information|I don't have access to information|I don't have any information about|I'm here to help with questions about your knowledge base documents/i;
+    const genericPattern = /I apologize|I'm limited to providing information|not have any information|outside of my scope|I'm afraid I don't have enough information|I don't have access to information|I don't have any information about|I'm here to help with questions about your knowledge base documents|the provided context does not contain|does not contain any information|do not have enough details|without any relevant information|there are no sources that discuss|i do not have enough details to provide|my role is to assist based on the provided information|I do not have enough context|I have no relevant information|I don't have enough context|I do not have any relevant information|provide a meaningful response/i;
     return genericPattern.test(normalized);
   }
 
-  function typeAssistantMessage(fullText, sources = [], requestId = null, isGenericFlag = false) {
+  function typeAssistantMessage(fullText, sources = [], requestId = null, isGenericFlag = false, isFollowup = false) {
+    console.log('[DEBUG] typeAssistantMessage called with:', { fullText, isFollowup, isGenericFlag });
     return new Promise((resolve) => {
       // Check if this request is still valid
       if (requestId !== null && currentRequestId !== requestId) {
@@ -553,25 +877,31 @@ import "./styles.css";
 
       clearInterval(typingInterval);
 
-      // Determine if message is generic - if so, don't show sources
-      const isGeneric = Boolean(isGenericFlag) || isGenericResponse(fullText);
-      const effectiveSources = isGeneric ? [] : sources;
-
-      // Only append sources section if sources are provided and message is not generic
+      // Always strip existing "Sources:" section from the text to ensure no double rendering
+      // or rendering when generic. Matches: "Sources:", "**Sources:**", "> Sources:", "- Sources:", etc.
       let enhancedText = fullText || "";
-      if (!isGeneric && Array.isArray(effectiveSources) && effectiveSources.length > 0) {
-        // Remove existing Sources section if present (handles various formats from LLM)
-        // Matches: "Sources:", "**Sources:**", "> Sources:", "- Sources:", etc.
-        enhancedText = enhancedText
-          .replace(/\r?\n+[\s>*-]*\*{0,2}\s*Sources?\s*:?\s*\*{0,2}\s*[\s\S]*$/i, '')
-          .replace(/\r?\n+Sources?\s*:[\s\S]*$/i, '')
-          .trim();
+      enhancedText = enhancedText
+        .replace(/\r?\n+[\s>*-]*\*{0,2}\s*Sources?\s*:?\s*\*{0,2}\s*[\s\S]*$/i, '')
+        .replace(/\r?\n+Sources?\s*:[\s\S]*$/i, '')
+        .trim();
 
+      console.log('[DEBUG] enhancedText after processing:', enhancedText);
+
+      // Follow-up messages don't show sources and use different styling
+      // Generic messages also don't show sources
+      const isGeneric = Boolean(isGenericFlag) || isGenericResponse(fullText);
+      // Always preserve sources array with all fields, even for generic messages
+      const preservedSources = Array.isArray(sources) ? sources : [];
+      // Only use sources for display if message is not generic AND not a follow-up
+      const displaySources = (isGeneric || isFollowup) ? [] : preservedSources;
+
+      // Only append sources section if sources are provided and message is not generic/followup
+      if (!isGeneric && !isFollowup && Array.isArray(displaySources) && displaySources.length > 0) {
         // Append fresh sources section
         enhancedText += "\n\nSources:\n";
         // Limit displayed sources to the first N to avoid overwhelming the UI
-        effectiveSources.slice(0, MAX_DISPLAY_SOURCES).forEach(source => {
-          if (source.file_name) {
+        displaySources.slice(0, MAX_DISPLAY_SOURCES).forEach(source => {
+          if (source && source.file_name) {
             enhancedText += `- ${source.file_name}\n`;
           }
         });
@@ -583,8 +913,24 @@ import "./styles.css";
         return;
       }
 
-      const typingMessage = addMessage({ user: false, text: "", formatted: true, isTyping: true, sources: effectiveSources });
-      scrollChatToBottom();
+      // Store preserved sources with all fields, even if not displayed
+      // Mark as follow-up if applicable for styling purposes
+      const typingMessage = addMessage({
+        user: false,
+        text: "",
+        formatted: true,
+        isTyping: true,
+        sources: preservedSources,
+        isFollowup: isFollowup  // NEW: Track follow-up status for styling
+      });
+      // Store reference to current typing message and full text for stop button handling
+      currentTypingMessage = typingMessage;
+      currentTypingFullText = enhancedText;
+      if (userMessageCount <= 1) {
+        scrollChatToBottom();
+      } else {
+        scrollLastUserMessageToTop();
+      }
       let completed = false;
 
       const finishTyping = () => {
@@ -611,8 +957,16 @@ import "./styles.css";
         inFlight = false;
         abortController = null;
         currentTypingFinish = null;
+        currentTypingMessage = null;
+        currentTypingFullText = null;
         input.focus();
-        if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
+        if (chatBox) {
+          if (userMessageCount <= 1) {
+            chatBox.scrollTop = chatBox.scrollHeight;
+          } else {
+            scrollLastUserMessageToTop();
+          }
+        }
       };
 
       if (!enhancedText || document.hidden) {
@@ -651,19 +1005,405 @@ import "./styles.css";
     });
   }
 
-  // Save chat history to localStorage (disabled)
+  // Save chat history to localStorage
   function saveChatHistory() {
-    return; // Disabled per request
+    try {
+      if (!chatService.sessionId) return;
+
+      const normalizeSourcesForStorage = (sources) => {
+        if (!Array.isArray(sources)) return [];
+        return sources.map(source => {
+          if (!source || typeof source !== 'object') return null;
+          return {
+            file_name: source.file_name || null,
+            file_id: source.file_id || null,
+            chunk_indices: Array.isArray(source.chunk_indices) ? source.chunk_indices : null,
+            source_type: source.source_type || 'file',
+            url: source.url || null
+          };
+        }).filter(source => source !== null && source.file_name);
+      };
+
+      const messagesToSave = messages
+        .filter(msg => !msg.isTypingIndicator && !msg.isTyping)
+        .map(msg => ({
+          user: msg.user,
+          text: msg.text,
+          formatted: msg.formatted,
+          timestamp: msg.timestamp,
+          sources: normalizeSourcesForStorage(msg.sources || [])
+        }));
+
+      // Save current session messages
+      localStorage.setItem(CHAT_MESSAGES_PREFIX + chatService.sessionId, JSON.stringify(messagesToSave));
+
+      const firstUserMsg = messagesToSave.find(m => m.user);
+      let title = "New Chat";
+      if (firstUserMsg && firstUserMsg.text) {
+        title = firstUserMsg.text.slice(0, 30) + (firstUserMsg.text.length > 30 ? "..." : "");
+      }
+
+      const now = Date.now();
+      const existingIndex = sessions.findIndex(s => s.id === chatService.sessionId);
+      const nextSession = {
+        id: chatService.sessionId,
+        timestamp: now,
+        title: title
+      };
+
+      if (existingIndex >= 0) {
+        sessions[existingIndex] = { ...sessions[existingIndex], ...nextSession };
+      } else {
+        sessions.push(nextSession);
+      }
+
+      sessions.sort((a, b) => b.timestamp - a.timestamp);
+
+      localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
+      chatService.restoreHistory(messagesToSave);
+
+      if (ui.isExpanded && ui.onExpandHistory) {
+        ui.onExpandHistory();
+      }
+    } catch (err) {
+      console.error("Failed to save history", err);
+    }
+  }
+
+  function saveBackgroundResponse(sessionId, reply) {
+    try {
+      if (!sessionId || !reply) return;
+
+      const storedMsgsKey = CHAT_MESSAGES_PREFIX + sessionId;
+      const storedMsgsStr = localStorage.getItem(storedMsgsKey);
+      let msgs = storedMsgsStr ? JSON.parse(storedMsgsStr) : [];
+
+      const normalizeSourcesForStorage = (sources) => {
+        if (!Array.isArray(sources)) return [];
+        return sources.map(source => {
+          if (!source || typeof source !== 'object') return null;
+          return {
+            file_name: source.file_name || null,
+            file_id: source.file_id || null,
+            chunk_indices: Array.isArray(source.chunk_indices) ? source.chunk_indices : null,
+            source_type: source.source_type || 'file',
+            url: source.url || null
+          };
+        }).filter(source => source !== null && source.file_name);
+      };
+
+      const assistantMsg = {
+        user: false,
+        text: reply.text || "",
+        formatted: true,
+        timestamp: new Date().toISOString(),
+        sources: normalizeSourcesForStorage(reply.sources || []),
+        isFollowup: Boolean(reply.is_followup),
+        isError: false,
+        isTyping: false,
+        isTypingIndicator: false
+      };
+
+      msgs.push(assistantMsg);
+      localStorage.setItem(storedMsgsKey, JSON.stringify(msgs));
+
+      const sessionIndex = sessions.findIndex(s => s.id === sessionId);
+      if (sessionIndex >= 0) {
+        sessions[sessionIndex].timestamp = Date.now();
+        localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
+      }
+
+      // If we are somehow back on this session (race condition?), reload history
+      if (chatService.sessionId === sessionId) {
+        chatService.restoreHistory(msgs);
+        // If UI is showing this session, maybe we should render? 
+        // But safely we assume UI is elsewhere.
+      }
+
+    } catch (err) {
+      console.error("Failed to save background response", err);
+    }
   }
 
   // Load chat history from localStorage
   function loadChatHistory() {
-    return false; // Disabled per request
+    try {
+      const storedIndex = localStorage.getItem(CHAT_SESSIONS_INDEX_KEY);
+      if (storedIndex) {
+        sessions = JSON.parse(storedIndex);
+      }
+
+      if (sessions.length === 0) {
+        const legacyMsgs = localStorage.getItem(CHAT_HISTORY_KEY);
+        if (legacyMsgs) {
+          const legacySessionId = localStorage.getItem(CHAT_SESSION_KEY) || Date.now().toString();
+          sessions.push({
+            id: legacySessionId,
+            timestamp: Date.now(),
+            title: "Previous Chat"
+          });
+          localStorage.setItem(CHAT_MESSAGES_PREFIX + legacySessionId, legacyMsgs);
+          localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
+        }
+      }
+
+      if (sessions.length > 0) {
+        const lastSession = sessions.sort((a, b) => b.timestamp - a.timestamp)[0];
+        switchSession(lastSession.id);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error("Failed to load history", err);
+      return false;
+    }
   }
 
-  // Clear chat history from localStorage
+  // Fetch synced sessions from backend (sessions created in extended plugin)
+  async function fetchSyncedSessions() {
+    try {
+      if (!CONFIG?.websiteUrl || !CONFIG?.apiBase) {
+        console.log('Missing config for synced sessions fetch');
+        return false;
+      }
+
+      const apiBase = (CONFIG.apiBase || '').replace(/\/+$/, '');
+      const websiteUrl = encodeURIComponent(CONFIG.websiteUrl);
+      const vid = encodeURIComponent(visitorId);
+
+      const response = await fetch(`${apiBase}/plugins/sync-sessions?website_url=${websiteUrl}&visitor_id=${vid}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      if (!response.ok) {
+        console.warn('Failed to fetch synced sessions:', response.status);
+        return false;
+      }
+
+      const data = await response.json();
+
+      if (!data.sessions || data.sessions.length === 0) {
+        console.log('No synced sessions from backend');
+        return false;
+      }
+
+      console.log(`Found ${data.sessions.length} synced sessions from backend`);
+
+      // Merge synced sessions with local sessions
+      let localUpdated = false;
+      const existingIds = new Set(sessions.map(s => s.id));
+
+      for (const syncedSession of data.sessions) {
+        // Check if this session exists locally
+        const localMsgsStr = localStorage.getItem(CHAT_MESSAGES_PREFIX + syncedSession.session_id);
+        const syncedTimestamp = syncedSession.timestamp || Date.now();
+
+        // Compare timestamps to determine which is newer
+        let shouldUseBackend = false;
+
+        if (!localMsgsStr) {
+          // Session doesn't exist locally - use backend version
+          shouldUseBackend = true;
+        } else {
+          // Session exists - check which is newer
+          const existingSession = sessions.find(s => s.id === syncedSession.session_id);
+          if (existingSession && syncedTimestamp > existingSession.timestamp) {
+            shouldUseBackend = true;
+          }
+        }
+
+        if (shouldUseBackend && syncedSession.messages && syncedSession.messages.length > 0) {
+          console.log(`Importing synced session: ${syncedSession.session_id}`);
+
+          // Convert backend message format to plugin format
+          const pluginMessages = syncedSession.messages.map(msg => ({
+            user: msg.user === true,
+            text: msg.text || '',
+            formatted: msg.formatted !== false,
+            timestamp: msg.timestamp || new Date().toISOString(),
+            sources: msg.sources || [],
+            isFollowup: msg.isFollowup || false,
+          }));
+
+          // Save messages to localStorage
+          localStorage.setItem(
+            CHAT_MESSAGES_PREFIX + syncedSession.session_id,
+            JSON.stringify(pluginMessages)
+          );
+
+          // Update sessions index
+          if (!existingIds.has(syncedSession.session_id)) {
+            sessions.push({
+              id: syncedSession.session_id,
+              title: syncedSession.title || 'New Chat',
+              timestamp: syncedTimestamp,
+            });
+            existingIds.add(syncedSession.session_id);
+          } else {
+            // Update existing session timestamp
+            const idx = sessions.findIndex(s => s.id === syncedSession.session_id);
+            if (idx >= 0) {
+              sessions[idx].timestamp = syncedTimestamp;
+              sessions[idx].title = syncedSession.title || sessions[idx].title;
+            }
+          }
+          localUpdated = true;
+        }
+      }
+
+      if (localUpdated) {
+        // Save updated sessions index
+        sessions.sort((a, b) => b.timestamp - a.timestamp);
+        localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
+
+        // Load the most recent session (or the current_session_id if specified)
+        const targetSessionId = data.current_session_id || sessions[0]?.id;
+        if (targetSessionId) {
+          switchSession(targetSessionId);
+        }
+        return true;
+      }
+
+      return false;
+    } catch (err) {
+      console.error('Failed to fetch synced sessions:', err);
+      return false;
+    }
+  }
+
+  function switchSession(sessionId) {
+    if (currentSessionId === sessionId && messages.length > 0) return;
+
+    // Don't abort ongoing requests - let them complete in background
+    // The response will be saved to the original session via saveBackgroundResponse()
+    // when handleSendMessage() detects currentRequestId has changed
+    if (abortController) {
+      abortController = null;
+    }
+
+    // Stop any typing animation
+    if (typeof currentTypingFinish === 'function') {
+      clearInterval(typingInterval);
+      typingInterval = null;
+      currentTypingFinish = null;
+    } else {
+      clearInterval(typingInterval);
+      typingInterval = null;
+    }
+
+    // Finalize any streaming messages with full text before switching sessions
+    if (currentTypingMessage && currentTypingFullText) {
+      currentTypingMessage.text = currentTypingFullText;
+      currentTypingMessage.isTyping = false;
+      // Save the finalized message to chat history before switching
+      saveChatHistory();
+    } else {
+      // Fallback: finalize any typing messages with current text
+      messages.forEach(msg => {
+        if (msg.isTyping) {
+          msg.isTyping = false;
+        }
+      });
+      // Save any finalized messages before switching
+      if (messages.some(msg => msg.isTyping === false && !msg.user && msg.text)) {
+        saveChatHistory();
+      }
+    }
+
+    currentTypingMessage = null;
+    currentTypingFullText = null;
+
+    // Remove typing indicators (the "thinking..." bubbles)
+    const typingIndicators = messages.filter(msg => msg.isTypingIndicator);
+    typingIndicators.forEach(indicator => {
+      const index = messages.indexOf(indicator);
+      if (index !== -1) {
+        messages.splice(index, 1);
+      }
+    });
+
+    // Reset state flags
+    inFlight = false;
+    currentRequestId = null;
+
+    // Re-enable UI elements
+    if (input) {
+      input.disabled = false;
+    }
+    showSendButton();
+
+    const storedMsgs = localStorage.getItem(CHAT_MESSAGES_PREFIX + sessionId);
+    if (!storedMsgs) return;
+
+    try {
+      const parsed = JSON.parse(storedMsgs);
+
+      chatService.clearContext();
+      chatService.sessionId = sessionId;
+      currentSessionId = sessionId;
+
+      messages.length = 0;
+
+      const normalizeSourcesFromStorage = (sources) => {
+        if (!Array.isArray(sources)) return [];
+        return sources.map(source => {
+          if (!source || typeof source !== 'object') return null;
+          return {
+            file_name: source.file_name || null,
+            file_id: source.file_id || null,
+            chunk_indices: Array.isArray(source.chunk_indices) ? source.chunk_indices : null,
+            source_type: source.source_type || 'file',
+            url: source.url || null
+          };
+        }).filter(source => source !== null && source.file_name);
+      };
+
+      parsed.forEach(msg => {
+        messages.push({
+          user: Boolean(msg.user),
+          text: msg.text || '',
+          formatted: Boolean(msg.formatted),
+          timestamp: msg.timestamp || new Date().toISOString(),
+          sources: normalizeSourcesFromStorage(msg.sources || [])
+        });
+      });
+
+      chatService.restoreHistory(parsed);
+
+      // Defer rendering to ensure all functions are initialized
+      // This prevents "Cannot access before initialization" errors in minified code
+      setTimeout(() => {
+        if (typeof renderMessages === 'function') {
+          renderMessages();
+        }
+        if (ui && typeof ui.updateContextIndicator === 'function') {
+          ui.updateContextIndicator(chatService.getContextInfo());
+        }
+        if (ui && ui.isExpanded && ui.onExpandHistory) ui.onExpandHistory();
+        scrollChatToBottom();
+      }, 0);
+    } catch (e) {
+      console.error("Failed to switch session", e);
+    }
+  }
+
+
+
+  function renameSession(sessionId, newTitle) {
+    const session = sessions.find(s => s.id === sessionId);
+    if (session) {
+      session.title = newTitle;
+      localStorage.setItem(CHAT_SESSIONS_INDEX_KEY, JSON.stringify(sessions));
+      if (ui.isExpanded && ui.onExpandHistory) ui.onExpandHistory();
+    }
+  }
+
   function clearChatHistory() {
-    return; // Disabled per request
+    try {
+      localStorage.removeItem(CHAT_HISTORY_KEY);
+      localStorage.removeItem(CHAT_SESSION_KEY);
+    } catch (err) { }
   }
 
   function initializeMessages() {
@@ -679,8 +1419,14 @@ import "./styles.css";
     const html = messages.map(renderMessageHtml).join("");
     chatBox.innerHTML = html;
 
-    if (wasNearBottom) chatBox.scrollTop = chatBox.scrollHeight;
-    else chatBox.scrollTop = previousScrollTop;
+    // During streaming, respect user's manual scroll - don't auto-scroll if they scrolled up
+    if (userScrolledDuringStream && inFlight) {
+      chatBox.scrollTop = previousScrollTop;
+    } else if (wasNearBottom) {
+      chatBox.scrollTop = chatBox.scrollHeight;
+    } else {
+      chatBox.scrollTop = previousScrollTop;
+    }
 
     if (chatEmpty) chatEmpty.style.display = messages.length ? "none" : "flex";
   }
@@ -692,20 +1438,42 @@ import "./styles.css";
       </div>`;
     }
     if (message.isTypingIndicator) {
-      return `<div class="plugin-msg msg bot typing">
-        <div class="plugin-typing-dots typing-dots"><span></span><span></span><span></span></div>
-      </div>`;
+      const logoUrl = CONFIG.ui.placeholderLogoUrl || CONFIG.ui.logoUrl || `${CONFIG.ui.iconsBaseUrl}/logo1.svg`;
+      return `<div class="plugin-msg msg bot typing thinking-indicator"><div class="plugin-thinking-content thinking-content"><div class="plugin-thinking-inner thinking-inner"><img src="${logoUrl}" alt="Leto logo" class="plugin-thinking-logo thinking-logo" /><div class="plugin-thinking-status thinking-status"><span class="plugin-thinking-text thinking-text">Leto is thinking</span><span class="typing-dots"><span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></span></div></div></div></div>`;
     }
     const classes = ["msg", "bot"];
     if (message.isError) classes.push("error");
     if (message.isTyping) classes.push("typing-text");
+    if (message.isFollowup) classes.push("followup-message");  // NEW: Add followup styling class
     const content = renderAssistantContent(message);
     return `<div class="plugin-msg ${classes.join(" ")}">${content}</div>`;
   }
 
+  // Strip incomplete markdown patterns from streaming text
+  function stripIncompleteMarkdown(text) {
+    if (!text) return text;
+
+    // Fix: Only strip ** if it is an unmatched opening tag (odd count)
+    // This prevents stripping the closing ** of a completed bold section,
+    // which caused the raw "**" to be visible for a split second (or longer)
+    // before the renderer could detect the pair.
+
+    const doubleStarCount = (text.match(/\*\*/g) || []).length;
+    if (doubleStarCount % 2 !== 0) {
+      const lastIndex = text.lastIndexOf("**");
+      if (lastIndex !== -1) {
+        return text.substring(0, lastIndex) + text.substring(lastIndex + 2);
+      }
+    }
+
+    return text;
+  }
+
   function renderAssistantContent(message) {
     if (message.formatted) {
-      const html = renderAssistantText(message.text, message.sources || []);
+      // Strip incomplete markdown patterns during typing animation
+      const textToRender = message.isTyping ? stripIncompleteMarkdown(message.text) : message.text;
+      const html = renderAssistantText(textToRender, message.sources || []);
       return `<div class="plugin-msg-content msg-content text-sm"><div class="plugin-prose prose prose-sm max-w-none">${html}</div></div>`;
     }
     return `<div class="plugin-msg-content msg-content">${escapeHtml(message.text)}</div>`;
@@ -813,6 +1581,18 @@ import "./styles.css";
   function renderAssistantText(text, sources = []) {
     if (!text) return "";
 
+    // Normalize sources to ensure all fields are present
+    const normalizedSources = Array.isArray(sources) ? sources.map(source => {
+      if (!source || typeof source !== 'object') return null;
+      return {
+        file_name: source.file_name || null,
+        file_id: source.file_id || null,
+        chunk_indices: Array.isArray(source.chunk_indices) ? source.chunk_indices : null,
+        source_type: source.source_type || 'file',
+        url: source.url || null
+      };
+    }).filter(source => source !== null && source.file_name) : [];
+
     // Normalize label like "Source 4: Leave_Policy.pdf" to match file_name
     function normalizeFileName(label) {
       return label.replace(/^Source\s*\d+:\s*/, "").trim();
@@ -850,16 +1630,18 @@ import "./styles.css";
       return sourceMetadataMap[trimmedName.toLowerCase()] || null;
     };
 
-    if (Array.isArray(sources)) {
-      sources.forEach(source => {
-        if (source.file_name) {
+    // Process normalized sources
+    if (Array.isArray(normalizedSources)) {
+      normalizedSources.forEach(source => {
+        if (source && source.file_name) {
           const fileName = source.file_name.trim();
           const fileId = source.file_id ? source.file_id.trim() : null;
           if (!fileName) return;
           const metadata = {
             source_type: source.source_type || 'file',
             url: source.url || null,
-            file_id: fileId
+            file_id: fileId,
+            chunk_indices: source.chunk_indices || null
           };
           storeFileMapping(fileName, fileId, fileName, metadata);
           const normalizedFileName = normalizeFileName(fileName);
@@ -898,7 +1680,7 @@ import "./styles.css";
         const url = (metadata && metadata.url) || fallbackRef;
         const href = url.startsWith('http') ? url : `https://${url}`;
         const token = `__SOURCE_LINK_${linkTokens.length}__`;
-        linkTokens.push(`<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer" class="source-link">${buttonLabel} ↗</a>`);
+        linkTokens.push(`<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer" class="source-link"><span class="source-link-text">${buttonLabel}</span><svg class="source-link-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>`);
         return token;
       } else {
         // File source - render as download button
@@ -1023,7 +1805,7 @@ import "./styles.css";
       if (isWebCrawl && url) {
         // Web crawl source - render as anchor tag that opens in new tab
         const href = url.startsWith('http') ? url : `https://${url}`;
-        const linkHtml = `<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer" class="source-link">${escapeHtml(displayName)} ↗</a>`;
+        const linkHtml = `<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer" class="source-link"><span class="source-link-text">${escapeHtml(displayName)}</span><svg class="source-link-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>`;
         safe = safe.replace(token, linkHtml);
       } else {
         // File source - render as download button
@@ -1033,6 +1815,13 @@ import "./styles.css";
         const buttonHtml = `<button type="button" class="source-download"${idAttribute} data-source-ref="${dataRef}" data-source-name="${dataName}">${escapeHtml(displayName)}</button>`;
         safe = safe.replace(token, buttonHtml);
       }
+    });
+
+    // Process Markdown headings (# to ######) - must be done before bold text processing
+    // Match heading at start of line: optional whitespace, 1-6 #, space, then content
+    safe = safe.replace(/^(#{1,6})\s+(.+)$/gm, (match, hashes, content) => {
+      const level = hashes.length;
+      return `<h${level} class="chat-heading chat-heading-${level}">${content}</h${level}>`;
     });
 
     safe = safe.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");

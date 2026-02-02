@@ -33,20 +33,30 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
-  ArrowLeft, 
-  Upload, 
-  Download, 
-  Trash2, 
-  Search, 
-  Loader2, 
-  Plus, 
-  Pencil, 
+import {
+  ArrowLeft,
+  Upload,
+  Download,
+  Trash2,
+  Search,
+  Loader2,
+  Plus,
+  Pencil,
   Database,
   FileCode,
-  Settings
+  Settings,
+  Eye,
+  Globe,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
 import { Collection, FileItem, Prompt } from '@/types/auth';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import { toast } from 'sonner';
 import { apiGet, apiPost, apiPut, apiDelete, apiUpload } from '@/utils/api';
 
@@ -84,6 +94,7 @@ export default function KnowledgeBaseDetails() {
   const [isFileDialogOpen, setIsFileDialogOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<Record<string, 'pending' | 'success' | 'error'>>({});
+  const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null);
 
   // Prompt management state
   const [isPromptDialogOpen, setIsPromptDialogOpen] = useState(false);
@@ -94,17 +105,42 @@ export default function KnowledgeBaseDetails() {
     content: '',
     is_active: true,
     is_default: false,
+    max_tokens: 4096,
+    model_name: 'claude-3-haiku-20240307',
+    temperature: 0.0,
   });
+
+  // Chunks viewer state
+  interface ChunkData {
+    chunk_id: string;
+    text: string;
+    chunk_index: number;
+    section_header: string;
+    block_type: string;
+    word_count: number;
+    char_count: number;
+  }
+  interface PageChunks {
+    url: string;
+    page_title: string;
+    chunks: ChunkData[];
+  }
+  const [isChunksDialogOpen, setIsChunksDialogOpen] = useState(false);
+  const [chunksLoading, setChunksLoading] = useState(false);
+  const [selectedCrawlFile, setSelectedCrawlFile] = useState<FileItem | null>(null);
+  const [chunksData, setChunksData] = useState<{ pages: PageChunks[]; total_chunks_in_job: number } | null>(null);
+  const [expandedPages, setExpandedPages] = useState<Set<string>>(new Set());
+  const [sourceType, setSourceType] = useState<'files' | 'crawl'>('files');
 
   const fetchCollection = useCallback(async () => {
     if (!id) return;
-    
+
     try {
       const response = await apiGet(
         `${import.meta.env.VITE_API_BASE_URL}/collections/${id}`,
         user?.access_token
       );
-      
+
       if (response.ok) {
         const data = await response.json();
         setCollection(data);
@@ -140,7 +176,7 @@ export default function KnowledgeBaseDetails() {
             `${import.meta.env.VITE_API_BASE_URL}/files/list?collection_id=${id}`,
             user?.access_token
           );
-          
+
           if (response.ok) {
             const data = await response.json();
             setFiles(data);
@@ -165,7 +201,7 @@ export default function KnowledgeBaseDetails() {
             `${import.meta.env.VITE_API_BASE_URL}/prompts/?collection_id=${id}`,
             user?.access_token
           );
-          
+
           if (response.ok) {
             const data = await response.json();
             setPrompts(data);
@@ -184,6 +220,13 @@ export default function KnowledgeBaseDetails() {
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = event.target.files;
     if (!selectedFiles || selectedFiles.length === 0 || !id) return;
+
+    // Limit to maximum 10 files
+    if (selectedFiles.length > 10) {
+      toast.error(`You can only upload a maximum of 10 files at once. You selected ${selectedFiles.length} files.`);
+      event.target.value = ''; // Reset the file input
+      return;
+    }
 
     setIsUploading(true);
     const filesArray = Array.from(selectedFiles);
@@ -215,7 +258,7 @@ export default function KnowledgeBaseDetails() {
             errorMessage = errorData.detail;
           } else if (Array.isArray(errorData?.detail)) {
             errorMessage = errorData.detail
-              .map((item) => (typeof item?.msg === 'string' ? item.msg : '') )
+              .map((item) => (typeof item?.msg === 'string' ? item.msg : ''))
               .filter(Boolean)
               .join('; ') || errorMessage;
           }
@@ -267,6 +310,7 @@ export default function KnowledgeBaseDetails() {
   };
 
   const handleDownload = async (fileId: string, fileName: string) => {
+    setDownloadingFileId(fileId);
     try {
       const response = await apiGet(
         `${import.meta.env.VITE_API_BASE_URL}/files/download/${fileId}`,
@@ -288,6 +332,52 @@ export default function KnowledgeBaseDetails() {
       }
     } catch (error) {
       toast.error('Failed to download file');
+    } finally {
+      setDownloadingFileId(null);
+    }
+  };
+
+  const handleDownloadCrawlData = async (file: FileItem) => {
+    if (!file.crawl_job_id && !file.file_id.startsWith('crawl_')) return;
+
+    const jobId = file.crawl_job_id || file.file_id.replace('crawl_', '');
+    setDownloadingFileId(file.file_id);
+
+    try {
+      const response = await apiGet(
+        `${import.meta.env.VITE_API_BASE_URL}/files/download/crawl_${jobId}`,
+        user?.access_token
+      );
+
+      if (!response.ok) {
+        throw new Error('Download failed');
+      }
+
+      const blob = await response.blob();
+
+      // Try to infer filename from Content-Disposition header if present
+      const disposition = response.headers.get('content-disposition') || '';
+      let filename = '';
+      const match = disposition.match(/filename="?(?<name>[^"]+)"?/i);
+      if (match && match.groups?.name) {
+        filename = match.groups.name;
+      } else {
+        filename = `crawl_data_${jobId}.json`;
+      }
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Failed to download crawl data', error);
+      toast.error('Failed to download crawl data');
+    } finally {
+      setDownloadingFileId(null);
     }
   };
 
@@ -302,7 +392,7 @@ export default function KnowledgeBaseDetails() {
 
       if (response.ok) {
         toast.success('File deleted successfully');
-        
+
         // Refresh files
         const refreshResponse = await apiGet(
           `${import.meta.env.VITE_API_BASE_URL}/files/list?collection_id=${id}`,
@@ -333,6 +423,9 @@ export default function KnowledgeBaseDetails() {
           system_prompt: promptFormData.content,
           is_active: promptFormData.is_active,
           is_default: promptFormData.is_default,
+          max_tokens: promptFormData.max_tokens,
+          model_name: promptFormData.model_name,
+          temperature: promptFormData.temperature,
           collection_id: id,
         },
         user?.access_token
@@ -341,8 +434,8 @@ export default function KnowledgeBaseDetails() {
       if (response.ok) {
         toast.success('Prompt created successfully');
         setIsPromptDialogOpen(false);
-        setPromptFormData({ name: '', description: '', content: '', is_active: true, is_default: false });
-        
+        setPromptFormData({ name: '', description: '', content: '', is_active: true, is_default: false, max_tokens: 4096, model_name: 'claude-3-haiku-20240307', temperature: 0.0 });
+
         // Refresh prompts
         const refreshResponse = await apiGet(
           `${import.meta.env.VITE_API_BASE_URL}/prompts/?collection_id=${id}`,
@@ -373,6 +466,9 @@ export default function KnowledgeBaseDetails() {
           system_prompt: promptFormData.content,
           is_active: promptFormData.is_active,
           is_default: promptFormData.is_default,
+          max_tokens: promptFormData.max_tokens,
+          model_name: promptFormData.model_name,
+          temperature: promptFormData.temperature,
         },
         user?.access_token
       );
@@ -381,8 +477,8 @@ export default function KnowledgeBaseDetails() {
         toast.success('Prompt updated successfully');
         setIsPromptDialogOpen(false);
         setEditingPrompt(null);
-        setPromptFormData({ name: '', description: '', content: '', is_active: true, is_default: false });
-        
+        setPromptFormData({ name: '', description: '', content: '', is_active: true, is_default: false, max_tokens: 4096, model_name: 'claude-3-haiku-20240307', temperature: 0.0 });
+
         // Refresh prompts
         const refreshResponse = await apiGet(
           `${import.meta.env.VITE_API_BASE_URL}/prompts/?collection_id=${id}`,
@@ -411,7 +507,7 @@ export default function KnowledgeBaseDetails() {
 
       if (response.ok) {
         toast.success('Prompt deleted successfully');
-        
+
         // Refresh prompts
         const refreshResponse = await apiGet(
           `${import.meta.env.VITE_API_BASE_URL}/prompts/?collection_id=${id}`,
@@ -431,20 +527,23 @@ export default function KnowledgeBaseDetails() {
 
   const openEditPromptDialog = (prompt: Prompt) => {
     setEditingPrompt(prompt);
-      setPromptFormData({
-        name: prompt.name,
-        description: prompt.description || '',
-        content: prompt.system_prompt,
-        is_active: prompt.is_active,
-        is_default: prompt.is_default,
-      });
+    setPromptFormData({
+      name: prompt.name,
+      description: prompt.description || '',
+      content: prompt.system_prompt,
+      is_active: prompt.is_active,
+      is_default: prompt.is_default,
+      max_tokens: prompt.max_tokens || 4096,
+      model_name: prompt.model_name || 'claude-3-haiku-20240307',
+      temperature: prompt.temperature ?? 0.0,
+    });
     setIsPromptDialogOpen(true);
   };
 
   const closePromptDialog = () => {
     setIsPromptDialogOpen(false);
     setEditingPrompt(null);
-    setPromptFormData({ name: '', description: '', content: '', is_active: true, is_default: false });
+    setPromptFormData({ name: '', description: '', content: '', is_active: true, is_default: false, max_tokens: 4096, model_name: 'claude-3-haiku-20240307', temperature: 0.0 });
   };
 
   const formatFileSize = (bytes: number) => {
@@ -455,9 +554,109 @@ export default function KnowledgeBaseDetails() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const filteredFiles = files.filter(file =>
-    file.file_name?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const handleViewChunks = async (file: FileItem) => {
+    if (!file.crawl_job_id && !file.file_id.startsWith('crawl_')) return;
+
+    setSelectedCrawlFile(file);
+    setIsChunksDialogOpen(true);
+    setChunksLoading(true);
+    setChunksData(null);
+    setExpandedPages(new Set());
+
+    const jobId = file.crawl_job_id || file.file_id.replace('crawl_', '');
+
+    try {
+      const response = await apiGet(
+        `${import.meta.env.VITE_API_BASE_URL}/crawler/jobs/${jobId}/chunks?limit=500`,
+        user?.access_token
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setChunksData(data);
+      } else {
+        throw new Error('Failed to fetch chunks');
+      }
+    } catch (error) {
+      toast.error('Failed to load chunks');
+      console.error(error);
+    } finally {
+      setChunksLoading(false);
+    }
+  };
+
+  const handleDeleteChunk = async (chunkId: string) => {
+    if (!selectedCrawlFile || !confirm('Are you sure you want to delete this chunk?')) return;
+
+    const jobId = selectedCrawlFile.crawl_job_id || selectedCrawlFile.file_id.replace('crawl_', '');
+
+    try {
+      const response = await apiDelete(
+        `${import.meta.env.VITE_API_BASE_URL}/crawler/jobs/${jobId}/chunks/${chunkId}`,
+        user?.access_token
+      );
+
+      if (response.ok) {
+        toast.success('Chunk deleted');
+        // Refresh chunks
+        handleViewChunks(selectedCrawlFile);
+      } else {
+        throw new Error('Delete failed');
+      }
+    } catch (error) {
+      toast.error('Failed to delete chunk');
+    }
+  };
+
+  const handleDeleteAllChunks = async () => {
+    if (!selectedCrawlFile || !confirm('Are you sure you want to delete ALL chunks for this crawl job? This cannot be undone.')) return;
+
+    const jobId = selectedCrawlFile.crawl_job_id || selectedCrawlFile.file_id.replace('crawl_', '');
+
+    try {
+      const response = await apiDelete(
+        `${import.meta.env.VITE_API_BASE_URL}/crawler/jobs/${jobId}/chunks`,
+        user?.access_token
+      );
+
+      if (response.ok) {
+        toast.success('All chunks deleted');
+        setIsChunksDialogOpen(false);
+        // Refresh files list
+        const refreshResponse = await apiGet(
+          `${import.meta.env.VITE_API_BASE_URL}/files/list?collection_id=${id}`,
+          user?.access_token
+        );
+        if (refreshResponse.ok) {
+          const data = await refreshResponse.json();
+          setFiles(data);
+        }
+      } else {
+        throw new Error('Delete failed');
+      }
+    } catch (error) {
+      toast.error('Failed to delete chunks');
+    }
+  };
+
+  const togglePageExpanded = (url: string) => {
+    setExpandedPages(prev => {
+      const next = new Set(prev);
+      if (next.has(url)) {
+        next.delete(url);
+      } else {
+        next.add(url);
+      }
+      return next;
+    });
+  };
+
+  const filteredFiles = files.filter(file => {
+    const isCrawl = file.source_type === 'crawled' || file.file_id.startsWith('crawl_');
+    const matchesSearch = file.file_name?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSource = sourceType === 'files' ? !isCrawl : isCrawl;
+    return matchesSearch && matchesSource;
+  });
 
   const filteredPrompts = prompts.filter(prompt =>
     prompt.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -548,11 +747,10 @@ export default function KnowledgeBaseDetails() {
             </div>
             <div className="flex items-center space-x-2">
               <span
-                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                  collection.is_active
-                    ? 'bg-green-100 text-green-800'
-                    : 'bg-gray-100 text-gray-800'
-                }`}
+                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${collection.is_active
+                  ? 'bg-green-100 text-green-800'
+                  : 'bg-gray-100 text-gray-800'
+                  }`}
               >
                 {collection.is_active ? 'Active' : 'Inactive'}
               </span>
@@ -561,12 +759,6 @@ export default function KnowledgeBaseDetails() {
                 Edit
               </Button>
             </div>
-          </div>
-          <div>
-            <Button variant="outline" onClick={() => navigate('/superadmin')}>
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Knowledge Bases
-            </Button>
           </div>
         </div>
 
@@ -638,11 +830,11 @@ export default function KnowledgeBaseDetails() {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-           <TabsList>
-             <TabsTrigger value="overview">Overview</TabsTrigger>
-             <TabsTrigger value="files">Files</TabsTrigger>
-             <TabsTrigger value="prompts">Prompts</TabsTrigger>
-           </TabsList>
+          <TabsList>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="files">Sources</TabsTrigger>
+            <TabsTrigger value="prompts">Prompts</TabsTrigger>
+          </TabsList>
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
@@ -686,73 +878,87 @@ export default function KnowledgeBaseDetails() {
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <Database className="h-5 w-5" />
-                      Files
+                      Sources
                     </CardTitle>
                     <CardDescription>
-                      Manage files for this knowledge base
+                      Manage sources for this knowledge base
                     </CardDescription>
                   </div>
-                  <Dialog open={isFileDialogOpen} onOpenChange={setIsFileDialogOpen}>
-                    <DialogTrigger asChild>
-                      <Button>
-                        <Upload className="mr-2 h-4 w-4" />
-                        Upload File
+                  <div className="flex items-center gap-4">
+                    <Tabs value={sourceType} onValueChange={(v) => setSourceType(v as 'files' | 'crawl')} className="w-[400px]">
+                      <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="files">Files</TabsTrigger>
+                        <TabsTrigger value="crawl">Crawled Data</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                    {sourceType === 'crawl' && (
+                      <Button variant="outline" onClick={() => navigate(`/superadmin/crawler?collectionId=${id}`)}>
+                        Go to Crawler
                       </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Upload File</DialogTitle>
-                        <DialogDescription>
-                          Upload files to this knowledge base (PDF, DOC, DOCX, PPTX, XLSX, TXT, CSV - Max 10MB each)
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4">
-                        <div>
-                          <Label htmlFor="file-upload">Choose File</Label>
-                          <Input
-                            id="file-upload"
-                            type="file"
-                            multiple
-                            accept=".pdf,.doc,.docx,.pptx,.xlsx,.txt,.csv"
-                            onChange={handleFileUpload}
-                            disabled={isUploading}
-                          />
-                        </div>
-                        {isUploading && (
-                          <div className="space-y-2">
-                            <Label className="text-sm font-medium">Upload Progress</Label>
-                            <div className="space-y-1 text-sm">
-                              {Object.entries(uploadProgress).map(([fileName, status]) => (
-                                <div key={fileName} className="flex items-center justify-between">
-                                  <span className="truncate max-w-xs" title={fileName}>
-                                    {fileName}
-                                  </span>
-                                  <span
-                                    className={`text-xs font-medium ${
-                                      status === 'success'
-                                        ? 'text-green-600'
-                                        : status === 'error'
-                                        ? 'text-red-600'
-                                        : 'text-muted-foreground'
-                                    }`}
-                                  >
-                                    {status === 'pending' && 'Uploading...'}
-                                    {status === 'success' && 'Uploaded'}
-                                    {status === 'error' && 'Failed'}
-                                  </span>
-                                </div>
-                              ))}
+                    )}
+                    {sourceType === 'files' && (
+                      <Dialog open={isFileDialogOpen} onOpenChange={setIsFileDialogOpen} >
+                        <DialogTrigger asChild>
+                          <Button>
+                            <Upload className="mr-2 h-4 w-4" />
+                            Upload File
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Upload Files</DialogTitle>
+                            <DialogDescription>
+                              Upload up to 10 files to this knowledge base (PDF, DOC, DOCX, PPTX, XLSX, TXT, CSV - Max 10MB each)
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="space-y-4">
+                            <div>
+                              <Label htmlFor="file-upload">Choose File</Label>
+                              <Input
+                                id="file-upload"
+                                type="file"
+                                multiple
+                                accept=".pdf,.doc,.docx,.pptx,.xlsx,.txt,.csv"
+                                onChange={handleFileUpload}
+                                disabled={isUploading}
+                              />
                             </div>
+                            {isUploading && (
+                              <div className="space-y-2">
+                                <Label className="text-sm font-medium">Upload Progress</Label>
+                                <div className="space-y-1 text-sm">
+                                  {Object.entries(uploadProgress).map(([fileName, status]) => (
+                                    <div key={fileName} className="flex items-center justify-between">
+                                      <span className="truncate max-w-xs" title={fileName}>
+                                        {fileName}
+                                      </span>
+                                      <span
+                                        className={`text-xs font-medium ${status === 'success'
+                                          ? 'text-green-600'
+                                          : status === 'error'
+                                            ? 'text-red-600'
+                                            : 'text-muted-foreground'
+                                          }`}
+                                      >
+                                        {status === 'pending' && 'Uploading...'}
+                                        {status === 'success' && 'Uploaded'}
+                                        {status === 'error' && 'Failed'}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsFileDialogOpen(false)}>
-                          Cancel
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
+                          <DialogFooter>
+                            <Button variant="outline" onClick={() => setIsFileDialogOpen(false)}>
+                              Cancel
+                            </Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
+                    )}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
@@ -778,56 +984,74 @@ export default function KnowledgeBaseDetails() {
                   </div>
                 ) : (
                   <Table>
-                     <TableHeader>
-                       <TableRow>
-                         <TableHead>File Name</TableHead>
-                         <TableHead>Size</TableHead>
-                         <TableHead>Status</TableHead>
-                         <TableHead>Uploaded</TableHead>
-                         <TableHead className="text-right">Actions</TableHead>
-                       </TableRow>
-                     </TableHeader>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>File Name</TableHead>
+                        <TableHead>Size</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Uploaded</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
                     <TableBody>
-                       {filteredFiles.map((file) => (
-                         <TableRow key={file.file_id}>
-                           <TableCell className="font-medium">{file.file_name}</TableCell>
-                           <TableCell>{formatFileSize(file.file_size)}</TableCell>
-                           <TableCell>
-                             <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                               file.processing_status === 'completed'
-                                 ? 'bg-green-100 text-green-800'
-                                 : file.processing_status === 'processing'
-                                 ? 'bg-yellow-100 text-yellow-800'
-                                 : 'bg-red-100 text-red-800'
-                             }`}>
-                               {file.processing_status}
-                             </span>
-                           </TableCell>
-                           <TableCell>{new Date(file.upload_timestamp).toLocaleDateString()}</TableCell>
-                           <TableCell className="text-right">
-                             <div className="flex items-center justify-end space-x-2">
-                               <Button
-                                 variant="ghost"
-                                 size="sm"
-                                 onClick={() => handleDownload(file.file_id, file.file_name)}
-                                 disabled={file.processing_status !== 'completed'}
-                               >
-                                 <Download className="h-4 w-4 mr-1" />
-                                 Download
-                               </Button>
-                               <Button
-                                 variant="ghost"
-                                 size="sm"
-                                 onClick={() => handleDeleteFile(file.file_id)}
-                                 className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                               >
-                                 <Trash2 className="h-4 w-4 mr-1" />
-                                 Delete
-                               </Button>
-                             </div>
-                           </TableCell>
-                         </TableRow>
-                       ))}
+                      {filteredFiles.map((file) => (
+                        <TableRow key={file.file_id}>
+                          <TableCell className="font-medium">
+                            {file.processing_status === 'processing' && (file.source_type === 'crawled' || file.file_id.startsWith('crawl_'))
+                              ? file.file_name.replace('Crawled', 'Crawling')
+                              : file.file_name}
+                          </TableCell>
+                          <TableCell>{formatFileSize(file.file_size)}</TableCell>
+                          <TableCell>
+                            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${file.processing_status === 'completed'
+                              ? 'bg-green-100 text-green-800'
+                              : file.processing_status === 'processing'
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : 'bg-red-100 text-red-800'
+                              }`}>
+                              {file.processing_status}
+                            </span>
+                          </TableCell>
+                          <TableCell>{new Date(file.upload_timestamp).toLocaleDateString()}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end space-x-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  if (file.source_type === 'crawled' || file.file_id.startsWith('crawl_')) {
+                                    handleDownloadCrawlData(file);
+                                  } else {
+                                    handleDownload(file.file_id, file.file_name);
+                                  }
+                                }}
+                                disabled={file.processing_status !== 'completed' || downloadingFileId === file.file_id}
+                              >
+                                {downloadingFileId === file.file_id ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                    Downloading...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="h-4 w-4 mr-1" />
+                                    Download
+                                  </>
+                                )}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteFile(file.file_id)}
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              >
+                                <Trash2 className="h-4 w-4 mr-1" />
+                                Delete
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
                     </TableBody>
                   </Table>
                 )}
@@ -856,15 +1080,15 @@ export default function KnowledgeBaseDetails() {
                         Create Prompt
                       </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-2xl">
+                    <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
                       <form onSubmit={editingPrompt ? handleUpdatePrompt : handleCreatePrompt}>
                         <DialogHeader>
                           <DialogTitle>
                             {editingPrompt ? 'Edit Prompt' : 'Create New Prompt'}
                           </DialogTitle>
                           <DialogDescription>
-                            {editingPrompt 
-                              ? 'Update the prompt details' 
+                            {editingPrompt
+                              ? 'Update the prompt details'
                               : 'Create a new prompt for this knowledge base'
                             }
                           </DialogDescription>
@@ -900,6 +1124,7 @@ export default function KnowledgeBaseDetails() {
                               required
                             />
                           </div>
+
                           <div className="flex items-center space-x-6">
                             <div className="flex items-center space-x-2">
                               <input
@@ -967,59 +1192,178 @@ export default function KnowledgeBaseDetails() {
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
-                     <TableBody>
-                       {filteredPrompts.map((prompt) => (
-                         <TableRow key={prompt.prompt_id}>
-                           <TableCell className="font-medium">{prompt.name}</TableCell>
-                           <TableCell className="max-w-xs truncate">{prompt.description || 'No description'}</TableCell>
-                           <TableCell className="max-w-xs truncate">{prompt.system_prompt}</TableCell>
-                           <TableCell>
-                             <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                               prompt.is_active
-                                 ? 'bg-green-100 text-green-800'
-                                 : 'bg-gray-100 text-gray-800'
-                             }`}>
-                               {prompt.is_active ? 'Active' : 'Inactive'}
-                             </span>
-                           </TableCell>
-                           <TableCell>
-                             {prompt.is_default && (
-                               <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800">
-                                 Default
-                               </span>
-                             )}
-                           </TableCell>
-                           <TableCell className="text-right">
-                             <div className="flex items-center justify-end space-x-2">
-                               <Button
-                                 variant="ghost"
-                                 size="sm"
-                                 onClick={() => openEditPromptDialog(prompt)}
-                               >
-                                 <Pencil className="h-4 w-4 mr-1" />
-                                 Edit
-                               </Button>
-                               <Button
-                                 variant="ghost"
-                                 size="sm"
-                                 onClick={() => handleDeletePrompt(prompt.prompt_id)}
-                                 disabled={prompt.is_default && prompts.length === 1}
-                                 className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                               >
-                                 <Trash2 className="h-4 w-4 mr-1" />
-                                 Delete
-                               </Button>
-                             </div>
-                           </TableCell>
-                         </TableRow>
-                       ))}
-                     </TableBody>
+                    <TableBody>
+                      {filteredPrompts.map((prompt) => (
+                        <TableRow key={prompt.prompt_id}>
+                          <TableCell className="font-medium">{prompt.name}</TableCell>
+                          <TableCell className="max-w-xs truncate">{prompt.description || 'No description'}</TableCell>
+                          <TableCell className="max-w-xs truncate">{prompt.system_prompt}</TableCell>
+                          <TableCell>
+                            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${prompt.is_active
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-gray-100 text-gray-800'
+                              }`}>
+                              {prompt.is_active ? 'Active' : 'Inactive'}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            {prompt.is_default && (
+                              <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800">
+                                Default
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end space-x-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openEditPromptDialog(prompt)}
+                              >
+                                <Pencil className="h-4 w-4 mr-1" />
+                                Edit
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeletePrompt(prompt.prompt_id)}
+                                disabled={prompt.is_default && prompts.length === 1}
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              >
+                                <Trash2 className="h-4 w-4 mr-1" />
+                                Delete
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
                   </Table>
                 )}
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
+
+        {/* View Chunks Dialog */}
+        <Dialog open={isChunksDialogOpen} onOpenChange={setIsChunksDialogOpen}>
+          <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Globe className="h-5 w-5" />
+                Crawled Chunks
+              </DialogTitle>
+              <DialogDescription>
+                {selectedCrawlFile?.file_name}
+                {chunksData && (
+                  <span className="ml-2 text-xs">
+                    ({chunksData.total_chunks_in_job} total chunks)
+                  </span>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="flex-1 pr-4 overflow-y-auto">
+              {chunksLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                </div>
+              ) : !chunksData || chunksData.pages.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  No chunks found for this crawl job.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {chunksData.pages.map((page, pageIndex) => (
+                    <Collapsible
+                      key={page.url}
+                      open={expandedPages.has(page.url)}
+                      onOpenChange={() => togglePageExpanded(page.url)}
+                    >
+                      <Card className="overflow-hidden">
+                        <CollapsibleTrigger asChild>
+                          <CardHeader className="py-3 px-4 cursor-pointer hover:bg-muted/50 transition-colors">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                {expandedPages.has(page.url) ? (
+                                  <ChevronDown className="h-4 w-4 flex-shrink-0" />
+                                ) : (
+                                  <ChevronRight className="h-4 w-4 flex-shrink-0" />
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <CardTitle className="text-sm font-medium truncate">
+                                    {page.page_title || 'Untitled Page'}
+                                  </CardTitle>
+                                  <p className="text-xs text-muted-foreground truncate">
+                                    {page.url}
+                                  </p>
+                                </div>
+                              </div>
+                              <span className="text-xs bg-muted px-2 py-1 rounded ml-2 flex-shrink-0">
+                                {page.chunks.length} chunks
+                              </span>
+                            </div>
+                          </CardHeader>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <CardContent className="pt-0 pb-3 px-4">
+                            <div className="space-y-2">
+                              {page.chunks.map((chunk) => (
+                                <div
+                                  key={chunk.chunk_id}
+                                  className="border rounded-md p-3 bg-muted/30"
+                                >
+                                  <div className="flex items-start justify-between gap-2 mb-2">
+                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                      <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded">
+                                        #{chunk.chunk_index}
+                                      </span>
+                                      {chunk.section_header && (
+                                        <span className="truncate max-w-[200px]">
+                                          {chunk.section_header}
+                                        </span>
+                                      )}
+                                      <span>{chunk.word_count} words</span>
+                                    </div>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleDeleteChunk(chunk.chunk_id)}
+                                      className="h-6 px-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                  <p className="text-sm whitespace-pre-wrap line-clamp-4">
+                                    {chunk.text}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </CardContent>
+                        </CollapsibleContent>
+                      </Card>
+                    </Collapsible>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <DialogFooter className="pt-4 border-t">
+              <Button
+                variant="destructive"
+                onClick={handleDeleteAllChunks}
+                disabled={chunksLoading || !chunksData || chunksData.pages.length === 0}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete All Chunks
+              </Button>
+              <Button variant="outline" onClick={() => setIsChunksDialogOpen(false)}>
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

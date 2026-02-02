@@ -1,0 +1,1458 @@
+/**
+ * Chat Widget Application
+ * 
+ * This standalone chat widget connects to the backend via a unique widget token
+ * extracted from the URL path. It provides a full-featured chat interface with
+ * session management, chat history, and theme switching.
+ */
+
+// ===== Get Widget Config (from config.js) =====
+const WCFG = window.WIDGET_CONFIG || {};
+
+// ===== Runtime Configuration (populated from widget lookup) =====
+const CONFIG = {
+    // API settings from config.js
+    apiBaseUrl: WCFG.api?.baseUrl || '',
+    widgetLookupPath: WCFG.api?.widgetLookupPath || '/rag/plugins/widget/lookup',
+    tokenVerifyPath: WCFG.api?.tokenVerifyPath || '/rag/auth/plugin-token/verify',
+    chatEndpoint: WCFG.api?.chatEndpoint || '/rag/chat/ask',
+    downloadEndpoint: WCFG.api?.downloadEndpoint || '/rag/files/download',
+    // Will be populated from widget lookup response
+    accessToken: '',
+    collectionId: '',
+    collectionName: '',
+    userId: '',
+    username: '',
+    websiteId: '',
+};
+
+// ===== State =====
+const state = {
+    sessionId: null,
+    sessions: [],
+    messages: [],
+    isLoading: false,
+    isStreaming: false,
+    sidebarOpen: true,
+    typingInterval: null,
+    currentRequestId: null, // Track ongoing requests for background completion
+    currentTypingMessage: null, // Track current typing message for session switch
+    currentTypingFullText: null, // Store full text for current typing message
+    abortController: null, // Added for stopping requests
+    userScrolledDuringStream: false, // Track if user manually scrolled during streaming
+    isAutoScrolling: false, // Flag to distinguish programmed scroll from user scroll
+};
+
+// ===== DOM Elements =====
+let elements = {};
+
+// ===== Initialize App =====
+document.addEventListener('DOMContentLoaded', init);
+
+async function init() {
+    cacheElements();
+    if (elements.emptyChatMessage) {
+        const emptyTextEl = elements.emptyChatMessage?.querySelector('.empty-chat-text');
+
+        if (emptyTextEl) {
+            emptyTextEl.textContent =
+                WCFG.branding?.emptyStateMessage || '';
+        }
+
+    }
+
+    setupEventListeners();
+    loadTheme();
+    updateMetaTags();
+
+    // ===== Design/Mock Mode - Skip API calls =====
+    if (WCFG.mockMode) {
+        console.log('🎨 Design Mode: Using mock data (no backend required)');
+
+        // Set mock config data
+        CONFIG.collectionId = 'mock-collection';
+        CONFIG.collectionName = WCFG.branding?.appName || 'Chat Assistant';
+        CONFIG.userId = 'mock-user';
+        CONFIG.username = 'Designer';
+
+        // Update UI with mock data
+        if (elements.collectionName) {
+            elements.collectionName.textContent = CONFIG.collectionName;
+        }
+        document.title = `${CONFIG.collectionName} - ${WCFG.branding?.pageTitleSuffix || 'Help Page'}`;
+
+        // Show interface immediately
+        loadSessions();
+        showChatInterface();
+
+        if (!state.sessionId) {
+            startNewSession();
+        }
+        return;
+    }
+
+    // ===== Normal Mode - API calls =====
+    // Extract widget token from URL
+    const widgetToken = getWidgetToken();
+    if (!widgetToken) {
+        showError(WCFG.errors?.invalidWidgetUrl || 'Invalid widget URL. Please check the link and try again.');
+        return;
+    }
+
+    // Lookup widget configuration
+    const success = await lookupWidget(widgetToken);
+    if (!success) {
+        return;
+    }
+
+    // Load saved sessions and show interface
+    loadSessions();
+    showChatInterface();
+
+    // Start with a new session if none exists
+    if (!state.sessionId) {
+        startNewSession();
+    }
+}
+
+function cacheElements() {
+    elements = {
+        loadingScreen: document.getElementById('loading-screen'),
+        errorScreen: document.getElementById('error-screen'),
+        errorMessage: document.getElementById('error-message'),
+        chatInterface: document.getElementById('chat-interface'),
+        sidebar: document.getElementById('sidebar'),
+        toggleSidebarBtn: document.getElementById('toggle-sidebar'),
+        mobileMenuBtn: document.getElementById('mobile-menu-btn'),
+        newChatBtn: document.getElementById('new-chat-btn'),
+        historyList: document.getElementById('history-list'),
+        collectionName: document.getElementById('collection-name'),
+        messagesContainer: document.getElementById('messages-container'),
+        messagesList: document.getElementById('messages-list'),
+        messagesEnd: document.getElementById('messages-end'),
+        chatForm: document.getElementById('chat-form'),
+        messageInput: document.getElementById('message-input'),
+        sendBtn: document.getElementById('send-btn'),
+        stopBtn: document.getElementById('stop-btn'),
+        themeToggle: document.getElementById('theme-toggle'),
+        headerNewChatBtn: document.getElementById('header-new-chat-btn'),
+        emptyChatMessage: document.getElementById('empty-chat-message'),
+    };
+    console.log('⏹️ Stop button element:', elements.stopBtn);
+}
+
+function setupEventListeners() {
+    // Sidebar toggle (desktop + mobile)
+    // Left sidebar header button
+    if (elements.toggleSidebarBtn) {
+        elements.toggleSidebarBtn.addEventListener('click', toggleSidebar);
+    }
+    // Top header button: on small screens use slide-in mobile sidebar,
+    // on larger screens collapse/expand the sidebar
+    if (elements.mobileMenuBtn) {
+        elements.mobileMenuBtn.addEventListener('click', () => {
+            if (window.innerWidth <= 768) {
+                toggleMobileSidebar();
+            } else {
+                toggleSidebar();
+            }
+        });
+    }
+
+    // New chat
+    if (elements.newChatBtn) {
+        elements.newChatBtn.addEventListener('click', startNewSession);
+    }
+    if (elements.headerNewChatBtn) {
+        elements.headerNewChatBtn.addEventListener('click', startNewSession);
+    }
+
+    // Chat form
+    if (elements.chatForm) {
+        elements.chatForm.addEventListener('submit', handleSubmit);
+    }
+    if (elements.messageInput) {
+        elements.messageInput.addEventListener('input', handleInputChange);
+    }
+
+    // Stop button
+    if (elements.stopBtn) {
+        elements.stopBtn.addEventListener('click', handleStop);
+    }
+
+    // Theme toggle
+    if (elements.themeToggle) {
+        elements.themeToggle.addEventListener('click', toggleTheme);
+    }
+
+    // Close mobile sidebar on overlay click
+    document.addEventListener('click', (e) => {
+        if (e.target.classList.contains('sidebar-overlay')) {
+            closeMobileSidebar();
+        }
+    });
+
+    // Track user scroll during streaming to allow manual scrolling
+    if (elements.messagesContainer) {
+        elements.messagesContainer.addEventListener('scroll', () => {
+            // Only track user scrolls during active streaming or loading
+            if ((state.isStreaming || state.isLoading) && !state.isAutoScrolling) {
+                const container = elements.messagesContainer;
+                const isNearBottom = container.scrollHeight - container.clientHeight - container.scrollTop <= 80;
+                if (!isNearBottom) {
+                    state.userScrolledDuringStream = true;
+                }
+            }
+        }, { passive: true });
+    }
+
+    // Handle source download clicks
+    document.addEventListener('click', (e) => {
+        const downloadBtn = e.target.closest('.source-download');
+        if (downloadBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            handleDownloadSource(
+                downloadBtn.dataset.sourceRef,
+                downloadBtn.dataset.sourceName,
+                downloadBtn
+            );
+        }
+    });
+}
+
+// ===== Widget Lookup =====
+function getWidgetToken() {
+    // Extract token from URL path: /chat-widget/{token}
+    // The token is the last segment after /chat-widget/
+    const path = window.location.pathname;
+
+    // Match UUID pattern at the end of the path
+    const uuidPattern = /([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i;
+    const match = path.match(uuidPattern);
+
+    return match ? match[1] : null;
+}
+
+async function lookupWidget(token) {
+    try {
+        // Determine API base URL from current location
+        const baseUrl = CONFIG.apiBaseUrl || window.location.origin;
+
+        const response = await fetch(`${baseUrl}${CONFIG.widgetLookupPath}/${token}`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+
+        if (!response.ok) {
+            if (response.status === 404) {
+                showError(WCFG.errors?.widgetNotFound || 'This chat widget link is invalid or has expired.');
+            } else if (response.status === 403) {
+                showError(WCFG.errors?.widgetInactive || 'This chat widget is currently inactive.');
+            } else {
+                showError(WCFG.errors?.initFailed || 'Failed to initialize chat widget. Please try again.');
+            }
+            return false;
+        }
+
+        const data = await response.json();
+
+        // Store configuration
+        CONFIG.apiBaseUrl = data.api_base_url || baseUrl;
+        CONFIG.accessToken = data.access_token;
+        CONFIG.collectionId = data.collection_id;
+        CONFIG.collectionName = data.collection_name;
+        CONFIG.userId = data.user_id;
+        CONFIG.username = data.username;
+
+        // Update UI with collection name
+        if (elements.collectionName) {
+            elements.collectionName.textContent = data.collection_name || WCFG.branding?.appName || 'Chat Assistant';
+        }
+        // Use "Help Page" instead of "Widget" in the browser tab title
+        document.title = `${data.collection_name || 'Chat'} - ${WCFG.branding?.pageTitleSuffix || 'Help Page'}`;
+
+        // Verify the token is valid
+        const tokenValid = await verifyToken(CONFIG.accessToken);
+        if (!tokenValid) {
+            showError(WCFG.errors?.authFailed || 'Authentication failed. Please try refreshing the page.');
+            return false;
+        }
+
+        return true;
+    } catch (error) {
+        console.error('Widget lookup error:', error);
+        showError(WCFG.errors?.connectionError || 'Unable to connect to the chat service. Please check your connection.');
+        return false;
+    }
+}
+
+// Verify token with the backend (same endpoint used by plugin)
+async function verifyToken(token) {
+    if (!token) return false;
+
+    try {
+        const response = await fetch(`${CONFIG.apiBaseUrl}${CONFIG.tokenVerifyPath}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+                token: token,
+            }),
+        });
+
+        if (!response.ok) {
+            console.error('Token verification failed:', response.status);
+            return false;
+        }
+
+        const data = await response.json();
+
+        if (data.valid === true) {
+            // Store additional context from verification
+            if (data.user_id) CONFIG.userId = data.user_id;
+            if (data.username) CONFIG.username = data.username;
+            if (data.collection_id) CONFIG.collectionId = data.collection_id;
+            if (data.website_id) CONFIG.websiteId = data.website_id;
+            return true;
+        }
+
+        return false;
+    } catch (error) {
+        console.error('Token verification error:', error);
+        return false;
+    }
+}
+
+// Refresh token by re-calling the widget lookup endpoint
+async function refreshToken() {
+    const widgetToken = getWidgetToken();
+    if (!widgetToken) {
+        console.error('Cannot refresh: no widget token in URL');
+        return false;
+    }
+
+    try {
+        const baseUrl = CONFIG.apiBaseUrl || window.location.origin;
+        const response = await fetch(`${baseUrl}${CONFIG.widgetLookupPath}/${widgetToken}`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+
+        if (!response.ok) {
+            console.error('Token refresh failed:', response.status);
+            return false;
+        }
+
+        const data = await response.json();
+
+        // Update access token
+        CONFIG.accessToken = data.access_token;
+
+        // Re-verify the new token
+        const verified = await verifyToken(CONFIG.accessToken);
+        if (verified) {
+            console.log('Token refreshed successfully');
+            return true;
+        }
+
+        return false;
+    } catch (error) {
+        console.error('Token refresh error:', error);
+        return false;
+    }
+}
+
+// ===== Update Meta Tags with Dynamic URLs =====
+function updateMetaTags() {
+    // Get the base URL from config (based on current environment)
+    const baseUrl = WCFG.api?.baseUrl || window.location.origin;
+    const ogImageUrl = `${baseUrl}/chatbot/leto.png`;
+
+    // Update Open Graph image meta tag
+    const ogImageMeta = document.querySelector('meta[property="og:image"]');
+    if (ogImageMeta) {
+        ogImageMeta.setAttribute('content', ogImageUrl);
+    }
+
+    // Update Twitter Card image meta tag
+    const twitterImageMeta = document.querySelector('meta[name="twitter:image"]');
+    if (twitterImageMeta) {
+        twitterImageMeta.setAttribute('content', ogImageUrl);
+    }
+}
+
+// ===== Empty Chat State =============================================================
+function updateEmptyChatState() {
+
+    if (!elements.chatInterface) return;
+
+
+
+    if (state.messages.length === 0) {
+
+        elements.chatInterface.classList.add('chat-empty');
+
+    } else {
+
+        elements.chatInterface.classList.remove('chat-empty');
+
+    }
+
+}
+
+// ===== UI State =====
+function showError(message) {
+    elements.loadingScreen.classList.add('hidden');
+    elements.chatInterface.classList.add('hidden');
+    elements.errorMessage.textContent = message;
+    elements.errorScreen.classList.remove('hidden');
+}
+
+function showChatInterface() {
+    elements.loadingScreen.classList.add('hidden');
+    elements.errorScreen.classList.add('hidden');
+    elements.chatInterface.classList.remove('hidden');
+}
+
+// ===== Session Management =====
+function generateSessionId() {
+    return `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+}
+
+function startNewSession() {
+    const newId = generateSessionId();
+    state.sessionId = newId;
+    state.messages = [];
+
+    // Clear UI but don't save or add to history list yet
+    // The session will be created and saved only when the first message is sent
+    renderMessages();
+    updateEmptyChatState();
+    elements.messageInput.focus();
+
+    // Remove active class from history items
+    document.querySelectorAll('.history-item').forEach(item => {
+        item.classList.remove('active');
+    });
+}
+
+function loadSession(sessionId) {
+    const session = state.sessions.find(s => s.id === sessionId);
+    if (!session) return;
+
+    // Finalize any streaming message with full text before switching
+    if (state.currentTypingMessage && state.currentTypingFullText) {
+        state.currentTypingMessage.content = state.currentTypingFullText;
+        state.currentTypingMessage.streaming = false;
+        // Save the finalized message
+        saveSessions();
+    }
+
+    // Stop any typing animation
+    if (state.typingInterval) {
+        clearInterval(state.typingInterval);
+        state.typingInterval = null;
+    }
+    state.currentTypingMessage = null;
+    state.currentTypingFullText = null;
+    state.isStreaming = false;
+    state.isLoading = false;  // Reset loading state
+
+    // Reset button states - show send button, hide stop button
+    showSendButton();
+
+    state.sessionId = sessionId;
+    state.messages = session.messages || [];
+
+    renderHistory();
+    renderMessages();
+    scrollToBottom();
+    closeMobileSidebar();
+    updateEmptyChatState();
+}
+
+function deleteSession(sessionId) {
+    state.sessions = state.sessions.filter(s => s.id !== sessionId);
+    saveSessions();
+
+    // If deleted current session, start new one
+    if (sessionId === state.sessionId) {
+        if (state.sessions.length > 0) {
+            loadSession(state.sessions[0].id);
+        } else {
+            startNewSession();
+        }
+    } else {
+        renderHistory();
+    }
+}
+
+function updateSessionTitle(sessionId, firstMessage) {
+    const session = state.sessions.find(s => s.id === sessionId);
+    // Only auto-update if it's still "New Chat" or we track manual renames (simplified here)
+    if (session && session.title === 'New Chat') {
+        session.title = firstMessage.slice(0, 40) + (firstMessage.length > 40 ? '...' : '');
+        saveSessions();
+        renderHistory();
+    }
+}
+
+function renameSession(sessionId) {
+    const session = state.sessions.find(s => s.id === sessionId);
+    if (!session) return;
+
+    // Find the DOM element
+    const historyItem = document.querySelector(`.history-item-content[data-id="${sessionId}"]`);
+    if (!historyItem) return;
+
+    const titleEl = historyItem.querySelector('.history-item-title');
+    const currentTitle = session.title;
+
+    // Create input element
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = currentTitle;
+    input.className = 'history-item-input';
+
+    // Replace title with input
+    titleEl.style.display = 'none';
+    historyItem.insertBefore(input, titleEl);
+    input.focus();
+    input.select();
+
+    // Handle save/cancel
+    const save = () => {
+        const newTitle = input.value.trim();
+        if (newTitle && newTitle !== currentTitle) {
+            session.title = newTitle;
+            saveSessions();
+        }
+        renderHistory(); // Re-render to show text again
+    };
+
+    const cancel = () => {
+        renderHistory(); // Revert to original
+    };
+
+    input.addEventListener('keydown', (e) => {
+        e.stopPropagation(); // Prevent triggering other listeners
+        if (e.key === 'Enter') {
+            save();
+        } else if (e.key === 'Escape') {
+            cancel();
+        }
+    });
+
+    input.addEventListener('click', (e) => e.stopPropagation());
+
+    // Save on blur (click away)
+    input.addEventListener('blur', () => {
+        // slight delay to allow click events on other buttons to register if needed
+        setTimeout(save, 100);
+    });
+}
+
+function saveSessions() {
+    // Update current session's messages
+    const session = state.sessions.find(s => s.id === state.sessionId);
+    if (session) {
+        session.messages = state.messages;
+        session.timestamp = Date.now();
+    }
+
+    // Save to localStorage with widget-specific key
+    const storageKey = `${WCFG.behavior?.storageKeyPrefix || 'widget_sessions_'}${CONFIG.collectionId}`;
+    try {
+        localStorage.setItem(storageKey, JSON.stringify(state.sessions));
+    } catch (e) {
+        console.warn('Failed to save sessions to localStorage:', e);
+    }
+}
+
+// Save a response to a session that is NOT the current session (background request completion)
+function saveBackgroundSession(sessionId, assistantMessage) {
+    if (!sessionId || !assistantMessage) return;
+
+    const session = state.sessions.find(s => s.id === sessionId);
+    if (!session) {
+        console.warn('Background save: session not found:', sessionId);
+        return;
+    }
+
+    // Add the assistant message to that session's messages
+    // Mark as not streaming since we're saving the complete message
+    assistantMessage.streaming = false;
+    session.messages = session.messages || [];
+    session.messages.push(assistantMessage);
+    session.timestamp = Date.now();
+
+    // Save to localStorage
+    const storageKey = `${WCFG.behavior?.storageKeyPrefix || 'widget_sessions_'}${CONFIG.collectionId}`;
+    try {
+        localStorage.setItem(storageKey, JSON.stringify(state.sessions));
+        console.log('Background response saved to session:', sessionId);
+    } catch (e) {
+        console.warn('Failed to save background session:', e);
+    }
+
+    // If user navigated back to this session, update the UI
+    if (state.sessionId === sessionId) {
+        state.messages = session.messages;
+        renderMessages();
+    }
+}
+
+function loadSessions() {
+    const storageKey = `${WCFG.behavior?.storageKeyPrefix || 'widget_sessions_'}${CONFIG.collectionId}`;
+    try {
+        const saved = localStorage.getItem(storageKey);
+        if (saved) {
+            state.sessions = JSON.parse(saved);
+            // Load the most recent session
+            if (state.sessions.length > 0) {
+                state.sessionId = state.sessions[0].id;
+                state.messages = state.sessions[0].messages || [];
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to load sessions from localStorage:', e);
+        state.sessions = [];
+    }
+
+    renderHistory();
+    renderMessages();
+    updateEmptyChatState();
+}
+
+// ===== Rendering =====
+function renderHistory() {
+    elements.historyList.innerHTML = '';
+
+    state.sessions.forEach(session => {
+        const item = document.createElement('div');
+        item.className = `history-item ${session.id === state.sessionId ? 'active' : ''}`;
+        item.innerHTML = `
+            <div class="history-item-content" data-id="${session.id}">
+                <div class="history-item-title">${escapeHtml(session.title)}</div>
+            </div>
+            <div class="history-item-actions">
+                <button class="history-action-btn edit" title="Edit" data-id="${session.id}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                    </svg>
+                </button>
+                <button class="history-action-btn delete" title="Delete" data-id="${session.id}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                </button>
+            </div>
+        `;
+
+        // Click to load session
+        item.addEventListener('click', () => {
+            loadSession(session.id);
+        });
+
+        // Edit button
+        item.querySelector('.history-action-btn.edit').addEventListener('click', (e) => {
+            e.stopPropagation();
+            renameSession(session.id);
+        });
+
+        // Delete button
+        item.querySelector('.history-action-btn.delete').addEventListener('click', (e) => {
+            e.stopPropagation();
+            deleteSession(session.id);
+        });
+
+        elements.historyList.appendChild(item);
+    });
+}
+
+function renderMessages() {
+    if (state.messages.length === 0) {
+        elements.messagesList.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-content">
+                    <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                    </svg>
+                    <p class="empty-state-text">${WCFG.branding?.emptyStateMessage || 'How can I help you?'}</p>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    elements.messagesList.innerHTML = '';
+
+    state.messages.forEach(msg => {
+        const msgEl = createMessageElement(msg);
+        elements.messagesList.appendChild(msgEl);
+    });
+
+    scrollToBottom();
+}
+
+function createMessageElement(msg) {
+    const div = document.createElement('div');
+    div.className = `message-row ${msg.role}`;
+    div.dataset.id = msg.id;
+
+    const time = formatTime(msg.timestamp);
+    let sourcesHtml = '';
+
+    if (msg.sources && msg.sources.length > 0) {
+        const sourceItems = msg.sources.map(source => {
+            const isWeb = source.url || source.source_type === 'web_crawl';
+            const icon = isWeb ?
+                `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>` :
+                `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>`;
+
+            if (isWeb && source.url) {
+                return `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener" class="source-item web">
+                    ${icon}
+                    <span>${escapeHtml(source.file_name || 'Link')}</span>
+                </a>`;
+            } else {
+                const dataRef = escapeAttribute(source.file_id || source.file_name);
+                const dataName = escapeAttribute(source.file_name);
+                const dataId = source.file_id ? `data-source-id="${escapeAttribute(source.file_id)}"` : '';
+
+                return `<button type="button" class="source-item file source-download" ${dataId} data-source-ref="${dataRef}" data-source-name="${dataName}">
+                    ${icon}
+                    <span>${escapeHtml(source.file_name)}</span>
+                </button>`;
+            }
+        }).join('');
+
+        sourcesHtml = `
+            <div class="message-sources">
+                <div class="sources-label">Sources</div>
+                <div class="sources-list">${sourceItems}</div>
+            </div>
+        `;
+    }
+
+    div.innerHTML = `
+        <div class="message-content">
+            <div class="message-text-wrapper">
+                <div class="message-body">
+                    ${formatMessageContent(msg.content)}
+                </div>
+                ${sourcesHtml}
+            </div>
+            <div class="message-time">${time}</div>
+        </div>
+    `;
+
+    return div;
+}
+
+function addTypingIndicator() {
+    const div = document.createElement('div');
+    div.className = 'message-row assistant';
+    div.id = 'typing-indicator';
+    div.innerHTML = `
+        <div class="message-content">
+            <div class="thinking-container">
+                <img src="${WCFG.branding?.logoPath || 'leto.svg'}" alt="Logo" class="thinking-logo">
+                <div class="thinking-wrapper">
+                    <span class="thinking-text">${WCFG.branding?.thinkingText || 'Leto is thinking'}</span>
+                    <span class="typing-dots">
+                        <span class="dot">.</span>
+                        <span class="dot">.</span>
+                        <span class="dot">.</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+    `;
+    elements.messagesList.appendChild(div);
+    scrollToBottom(true); // Force scroll for first indicator
+}
+
+function removeTypingIndicator() {
+    const indicator = document.getElementById('typing-indicator');
+    if (indicator) {
+        indicator.remove();
+    }
+}
+
+function formatMessageContent(content) {
+    if (!content) return '';
+
+    // 1. Remove the "---" separator (often found at end of generic responses)
+    //    Regex matches: newline, optional spaces, 3 or more dashes, optional spaces, end of string or newline
+    let formatted = content.replace(/\n\s*-{3,}\s*(\n|$)/g, '$1');
+
+    // 2. Escape HTML to prevent XSS (basic)
+    formatted = escapeHtml(formatted);
+
+    // 3. Headers (H6 to H1)
+    //    We process H6 first so H1 regex doesn't match part of H6 (###### vs #)
+    //    Use replace with regex for each level
+    formatted = formatted.replace(/^######\s+(.+)$/gm, '<h6>$1</h6>');
+    formatted = formatted.replace(/^#####\s+(.+)$/gm, '<h5>$1</h5>');
+    formatted = formatted.replace(/^####\s+(.+)$/gm, '<h4>$1</h4>');
+    formatted = formatted.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+    formatted = formatted.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+    formatted = formatted.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
+
+    // 4. Bold text: **text**
+    formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+    // 5. Italic text: *text* (careful not to break bold)
+    formatted = formatted.replace(/(^|[^*])\*([^*]+?)\*/g, '$1<em>$2</em>');
+
+    // 6. Unordered lists
+    //    Match lines starting with "- " or "* "
+    //    This is a simple replacement; proper nested lists would need a real parser.
+    //    We'll verify if it's part of a list and wrap items in <li>.
+    //    For a simple implementation, we can turn "- item" into "<li>item</li>".
+    //    Then, if we have consecutive <li>s, we might want a <ul> wrapper, 
+    //    but often just <li> styling is enough if CSS supports it or we rely on line breaks.
+    //    Let's try a slightly safer per-line approach for now.
+    formatted = formatted.replace(/^\s*[-*]\s+(.+)$/gm, '<li>$1</li>');
+
+    // Wrap groups of <li> into <ul> (optional but better HTML)
+    // This simple regex might overlap, so let's check if we can do it effectively.
+    // If not, standard <br> separation works for now, but <li> is better.
+    // Let's stick to simple <li> replacement and rely on CSS or global <ul> structure if needed,
+    // usually raw <li> elements are invalid without `<ul>`.
+    // Valid approach for simple rich text:
+    // We can replace the whole block of <li>s with <ul>...</ul>.
+    formatted = formatted.replace(/(<li>.*<\/li>\s*)+/g, (match) => {
+        return `<ul>${match}</ul>`;
+    });
+
+    // 7. Auto-link URLs
+    //    Regex for http/https URLs
+    const urlRegex = /(https?:\/\/[^\s<]+)/g;
+    formatted = formatted.replace(urlRegex, (url) => {
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+    });
+
+    // 8. Auto-link Emails
+    const emailRegex = /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/g;
+    formatted = formatted.replace(emailRegex, (email) => {
+        return `<a href="mailto:${email}">${email}</a>`;
+    });
+
+    // 9. Convert remaining newlines to <br> 
+    //    (but NOT inside ul/ol/hTags to avoid huge gaps)
+    //    We only convert newlines that aren't adjacent to block-level tags we just created.
+    //    Actually, simplest is to just swap \n for <br>, but that adds extra space after specific blocks.
+    //    Let's try to be smart: remove newlines around block tags.
+
+    // Normalize newlines first
+    formatted = formatted.replace(/\r\n/g, '\n');
+
+    // Remove newlines after headers and list closes
+    formatted = formatted.replace(/(<\/h[1-6]>|<\/ul>|<\/li>)\n/g, '$1');
+
+    // Convert remaining newlines to <br>
+    formatted = formatted.replace(/\n/g, '<br>');
+
+    return formatted;
+}
+
+function formatTime(timestamp) {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function scrollToBottom(force = false) {
+    if (!elements.messagesContainer || !elements.messagesEnd) return;
+
+    // Don't auto-scroll if user has manually scrolled during streaming (unless forced)
+    if (!force && state.userScrolledDuringStream) {
+        return;
+    }
+
+    state.isAutoScrolling = true;
+    elements.messagesEnd.scrollIntoView({ behavior: 'smooth', block: 'end' });
+
+    // Reset auto-scrolling flag after a short delay
+    setTimeout(() => {
+        state.isAutoScrolling = false;
+    }, 150);
+}
+
+// ===== Chat Functionality =====
+function handleInputChange() {
+    const hasText = elements.messageInput.value.trim().length > 0;
+    elements.sendBtn.disabled = !hasText || state.isLoading;
+}
+
+// ===== Button State Helpers =====
+function showProcessingState() {
+    if (elements.sendBtn) elements.sendBtn.style.display = 'none';
+    if (elements.stopBtn) elements.stopBtn.style.display = 'flex';
+    console.log('🛑 Stop button shown');
+}
+
+function showSendButton() {
+    if (elements.sendBtn) {
+        elements.sendBtn.style.display = '';  // Reset to CSS default
+        elements.sendBtn.disabled = elements.messageInput.value.trim().length === 0;
+    }
+    if (elements.stopBtn) elements.stopBtn.style.display = 'none';
+}
+
+// ===== Stop Button Handler =====
+function handleStop() {
+    // Abort any ongoing fetch request
+    if (state.abortController) {
+        state.abortController.abort();
+        state.abortController = null;
+    }
+
+    // Stop any typing animation immediately
+    if (state.typingInterval) {
+        clearInterval(state.typingInterval);
+        state.typingInterval = null;
+    }
+
+    // Finalize any streaming message with full text (exactly like plugin)
+    if (state.currentTypingMessage && state.currentTypingFullText) {
+        // Update the message content to full text
+        state.currentTypingMessage.content = state.currentTypingFullText;
+        state.currentTypingMessage.streaming = false;
+    } else {
+        // Fallback: find any streaming messages in the array and finalize them
+        state.messages.forEach(msg => {
+            if (msg.streaming) {
+                msg.streaming = false;
+            }
+        });
+    }
+
+    // Clear tracking variables
+    const hadTypingMessage = state.currentTypingMessage !== null;
+    state.currentTypingMessage = null;
+    state.currentTypingFullText = null;
+    state.isStreaming = false;
+    state.isLoading = false;
+    state.currentRequestId = null;
+
+    // Remove typing indicator (the "thinking..." spinner)
+    removeTypingIndicator();
+
+    // Re-render to show full text and sources
+    renderMessages();
+
+    // Save the finalized message
+    if (hadTypingMessage) {
+        saveSessions();
+    }
+
+    // Restore send button and focus input
+    showSendButton();
+    elements.messageInput.focus();
+
+    // Scroll to show the complete message
+    scrollToBottom();
+}
+
+async function handleSubmit(e) {
+    e.preventDefault();
+
+    const content = elements.messageInput.value.trim();
+    if (!content || state.isLoading) return;
+
+    // Clear input
+    elements.messageInput.value = '';
+    elements.sendBtn.disabled = true;
+
+    // Add user message
+    const userMessage = {
+        id: `user_${Date.now()}`,
+        role: 'user',
+        content: content,
+        timestamp: new Date().toISOString(),
+    };
+
+    // If this is a new session and not in history yet, add it now
+    let session = state.sessions.find(s => s.id === state.sessionId);
+    if (!session) {
+        session = {
+            id: state.sessionId,
+            title: 'New Chat',
+            timestamp: Date.now(),
+            messages: [],
+        };
+        state.sessions.unshift(session);
+        renderHistory();
+    }
+
+    state.messages.push(userMessage);
+    renderMessages();
+    updateEmptyChatState();
+    updateSessionTitle(state.sessionId, content);
+
+    // Send to API
+    await sendMessage(content);
+}
+
+async function sendMessage(content) {
+    state.isLoading = true;
+    state.userScrolledDuringStream = false; // Reset scroll flag for new message
+    showProcessingState(); // Show stop button, hide send
+    addTypingIndicator();
+
+    // Capture session ID and generate unique request ID at the start
+    const requestSessionId = state.sessionId;
+    const requestId = Date.now() + Math.random();
+    state.currentRequestId = requestId;
+    state.abortController = new AbortController(); // Added for stopping requests
+
+    // ===== Design/Mock Mode - Return mock response =====
+    if (WCFG.mockMode) {
+        // Simulate network delay
+        await new Promise(resolve => setTimeout(resolve, 800));
+        removeTypingIndicator();
+
+        // Mock response with sample data
+        const mockResponses = [
+            "This is a **mock response** for design mode. The chat interface is working correctly!",
+            "I'm running in design mode, so no backend is connected. You can test the UI and styling here.",
+            "Welcome to design mode! Feel free to test the chat layout and interactions.",
+            "This is sample text to help you design the chat interface. *Italic* and **bold** formatting works too!",
+        ];
+        const mockContent = mockResponses[Math.floor(Math.random() * mockResponses.length)];
+
+        const assistantMessage = {
+            id: `assistant_${Date.now()}`,
+            role: 'assistant',
+            content: mockContent,
+            timestamp: new Date().toISOString(),
+            sources: [
+                { file_name: 'Sample Document.pdf', source_type: 'file' },
+                { file_name: 'Example Page', url: 'https://example.com', source_type: 'web_crawl' },
+            ],
+        };
+
+        state.messages.push(assistantMessage);
+        await streamAssistantResponse(assistantMessage.id, mockContent);
+        saveSessions();
+        state.isLoading = false;
+        showSendButton(); // Reset button states
+        return;
+    }
+
+    // ===== Normal Mode - API call =====
+    try {
+        const conversationHistory = state.messages.slice(-(WCFG.behavior?.conversationHistoryLimit || 20)).map(msg => ({
+            role: msg.role,
+            content: msg.content,
+            timestamp: msg.timestamp,
+        }));
+
+        const payload = {
+            question: content,
+            session_id: requestSessionId, // Use captured session ID
+            conversation_history: conversationHistory,
+            maintain_context: conversationHistory.length > 0,
+            collection_id: CONFIG.collectionId,
+        };
+
+        // Include website_id if available (same as plugin)
+        if (CONFIG.websiteId) {
+            payload.website_id = CONFIG.websiteId;
+        }
+
+        const response = await fetch(`${CONFIG.apiBaseUrl}${CONFIG.chatEndpoint}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${CONFIG.accessToken}`,
+            },
+            body: JSON.stringify(payload),
+            signal: state.abortController.signal, // Added for stopping requests
+        });
+
+        removeTypingIndicator();
+
+        // Handle 401 - token expired, try to refresh
+        if (response.status === 401) {
+            const refreshed = await refreshToken();
+            if (refreshed) {
+                // Retry the request with new token
+                return sendMessage(content);
+            } else {
+                throw new Error(WCFG.errors?.sessionExpired || 'Session expired. Please refresh the page.');
+            }
+        }
+
+        if (!response.ok) {
+            throw new Error(`API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // Process response
+        let assistantContent = data.answer || data.response || data.content || 'I was unable to generate a response.';
+
+        // Clean up sources section from content
+        assistantContent = assistantContent
+            .replace(/\r?\n+[\s>*-]*\*{0,2}\s*Sources?\s*:?\s*\*{0,2}\s*[\s\S]*$/i, '')
+            .replace(/\r?\n+Sources?\s*:[\s\S]*$/i, '')
+            .trim();
+
+        // Extract sources
+        let sources = [];
+        if (Array.isArray(data.sources)) {
+            sources = data.sources
+                .filter(item => item && item.file_name)
+                .map(item => ({
+                    file_name: item.file_name,
+                    file_id: item.file_id,
+                    source_type: item.source_type,
+                    url: item.url,
+                }))
+                .slice(0, WCFG.behavior?.maxSourcesDisplay || 4);
+        }
+
+        // Add assistant message
+        const assistantMessage = {
+            id: `assistant_${Date.now()}`,
+            role: 'assistant',
+            content: assistantContent,
+            timestamp: new Date().toISOString(),
+            sources: sources.length > 0 ? sources : undefined,
+            streaming: true,
+        };
+
+        // Check if session changed during the request
+        if (state.currentRequestId !== requestId || state.sessionId !== requestSessionId) {
+            // Session changed - save to the original session in background
+            console.log('Session changed during request, saving to background session:', requestSessionId);
+            saveBackgroundSession(requestSessionId, assistantMessage);
+            // Reset loading state for the new session so user can continue
+            state.isLoading = false;
+            state.abortController = null;
+            showSendButton();
+            return;
+        }
+
+        // Session is still the same - update UI normally
+        state.messages.push(assistantMessage);
+        await streamAssistantResponse(assistantMessage.id, assistantContent);
+
+        saveSessions();
+
+    } catch (error) {
+        // Don't show error if request was aborted by user
+        if (error.name === 'AbortError') {
+            console.log('Request aborted by user');
+            return;
+        }
+
+        console.error('Chat error:', error);
+        removeTypingIndicator();
+
+        // Only show error in current session if we're still in the same session
+        if (state.sessionId === requestSessionId && state.currentRequestId === requestId) {
+            // Add error message
+            const errorMessage = {
+                id: `assistant_error_${Date.now()}`,
+                role: 'assistant',
+                content: WCFG.errors?.genericError || 'Sorry, I encountered an error. Please try again.',
+                timestamp: new Date().toISOString(),
+            };
+
+            state.messages.push(errorMessage);
+            renderMessages();
+        }
+    } finally {
+        // Only update loading state if this is still the active request
+        if (state.currentRequestId === requestId) {
+            state.isLoading = false;
+            state.abortController = null;
+            showSendButton();
+        }
+    }
+}
+
+async function streamAssistantResponse(messageId, fullContent) {
+    return new Promise((resolve) => {
+        state.isStreaming = true;
+        const msgIndex = state.messages.findIndex(m => m.id === messageId);
+        if (msgIndex === -1) {
+            resolve();
+            return;
+        }
+
+        // Track current typing message and full text for session switch handling
+        state.currentTypingMessage = state.messages[msgIndex];
+        state.currentTypingFullText = fullContent;
+
+        // Create the element in UI first
+        renderMessages();
+        const messageBodyEl = elements.messagesList.querySelector(
+            `[data-id="${messageId}"] .message-body`
+        );
+        const sourcesEl = elements.messagesList.querySelector(
+            `[data-id="${messageId}"] .message-sources`
+        );
+
+        if (sourcesEl) sourcesEl.style.display = 'none'; // Hide sources while streaming
+
+        if (state.typingInterval) clearInterval(state.typingInterval);
+
+        const startTime = Date.now();
+        const typingSpeed = WCFG.behavior?.typingSpeed || 10;
+
+        state.typingInterval = setInterval(() => {
+            // content update based on elapsed time to handle background tab throttling
+            const elapsed = Date.now() - startTime;
+            const currentIndex = Math.floor(elapsed / typingSpeed);
+
+            const partialContent = fullContent.slice(0, currentIndex);
+
+            // Update the message content in state and UI
+            state.messages[msgIndex].content = partialContent;
+            if (messageBodyEl) {
+                messageBodyEl.innerHTML = formatMessageContent(partialContent);
+            }
+
+            scrollToBottom();
+
+            if (currentIndex >= fullContent.length) {
+                clearInterval(state.typingInterval);
+                state.typingInterval = null;
+                state.isStreaming = false;
+                state.messages[msgIndex].streaming = false;
+
+                // Ensure full content is set at the end
+                state.messages[msgIndex].content = fullContent;
+
+                // Clear typing message tracking
+                state.currentTypingMessage = null;
+                state.currentTypingFullText = null;
+
+                // Force a full re-render to ensure sources and final content are displayed correctly
+                renderMessages();
+                resolve();
+            }
+        }, 30); // Run at 30ms interval (approx 30fps) - sufficient for smooth update but robust against throttling
+    });
+}
+
+// ===== Sidebar =====
+function toggleSidebar() {
+    elements.sidebar.classList.toggle('collapsed');
+    state.sidebarOpen = !elements.sidebar.classList.contains('collapsed');
+}
+
+function toggleMobileSidebar() {
+    const isOpen = elements.sidebar.classList.contains('open');
+    if (isOpen) {
+        closeMobileSidebar();
+    } else {
+        openMobileSidebar();
+    }
+}
+
+function openMobileSidebar() {
+    elements.sidebar.classList.add('open');
+    // Add overlay
+    let overlay = document.querySelector('.sidebar-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'sidebar-overlay visible';
+        document.body.appendChild(overlay);
+    } else {
+        overlay.classList.add('visible');
+    }
+}
+
+function closeMobileSidebar() {
+    elements.sidebar.classList.remove('open');
+    const overlay = document.querySelector('.sidebar-overlay');
+    if (overlay) {
+        overlay.classList.remove('visible');
+    }
+}
+
+// ===== Theme =====
+function loadTheme() {
+    const savedTheme = localStorage.getItem(WCFG.behavior?.themeStorageKey || 'widget_theme') || WCFG.theme?.defaultTheme || 'light';
+    setTheme(savedTheme);
+}
+
+function toggleTheme() {
+    const newTheme = state.theme === 'light' ? 'dark' : 'light';
+    setTheme(newTheme);
+    localStorage.setItem(WCFG.behavior?.themeStorageKey || 'widget_theme', newTheme);
+}
+
+function setTheme(theme) {
+    state.theme = theme;
+    document.documentElement.setAttribute('data-theme', theme);
+
+    // Toggle icons
+    const sunIcon = elements.themeToggle.querySelector('.sun-icon');
+    const moonIcon = elements.themeToggle.querySelector('.moon-icon');
+
+    if (theme === 'dark') {
+        sunIcon.classList.add('hidden');
+        moonIcon.classList.remove('hidden');
+    } else {
+        sunIcon.classList.remove('hidden');
+        moonIcon.classList.add('hidden');
+    }
+}
+
+// ===== Utilities =====
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function escapeAttribute(value) {
+    return `${value ?? ""}`.replace(/[&"'<>]/g, (char) => {
+        switch (char) {
+            case "&": return "&amp;";
+            case '"': return "&quot;";
+            case "'": return "&#39;";
+            case "<": return "&lt;";
+            case ">": return "&gt;";
+            default: return "";
+        }
+    });
+}
+
+// ===== Download Handlers =====
+async function handleDownloadSource(sourceRef, downloadName, button) {
+    if (!sourceRef && !downloadName) return;
+
+    let originalHtml = '';
+    if (button) {
+        originalHtml = button.innerHTML;
+    }
+
+    try {
+        if (button) {
+            button.disabled = true;
+            button.classList.add("is-loading");
+            // Show loading spinner and text
+            button.innerHTML = `
+                <svg class="animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; margin-right: 6px; animation: spin 1s linear infinite;">
+                    <circle cx="12" cy="12" r="10" stroke-opacity="0.25" stroke="currentColor" stroke-width="4"></circle>
+                    <path opacity="0.75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>Downloading...</span>
+            `;
+        }
+
+        const token = CONFIG.accessToken;
+        if (!token) {
+            // Try to refresh if possible, otherwise error
+            const refreshed = await refreshToken();
+            if (!refreshed) throw new Error("Missing authentication token");
+        }
+
+        const headers = { Authorization: `Bearer ${CONFIG.accessToken}` };
+        const normalizedName = (downloadName || "").trim();
+        const ref = (sourceRef || "").trim();
+
+        // Remove trailing slash if present
+        const base = (CONFIG.apiBaseUrl || "").replace(/\/+$/, "");
+
+        const effectiveRef = button?.dataset?.sourceId || ref || normalizedName;
+
+        if (!effectiveRef) {
+            throw new Error("Missing file reference");
+        }
+
+        const encodedRef = encodeURIComponent(effectiveRef);
+        // Use configured download endpoint or fallback to appending /rag/... if not present
+        const endpoint = CONFIG.downloadEndpoint || '/rag/files/download';
+        const downloadUrl = `${base}${endpoint}/${encodedRef}`;
+
+        const response = await fetch(downloadUrl, { headers });
+        if (!response.ok) {
+            // Attempt token refresh on 401
+            if (response.status === 401) {
+                const refreshed = await refreshToken();
+                if (refreshed) {
+                    // Retry once
+                    const retryHeaders = { Authorization: `Bearer ${CONFIG.accessToken}` };
+                    const retryResponse = await fetch(downloadUrl, { headers: retryHeaders });
+                    if (!retryResponse.ok) throw new Error(`Download failed (${retryResponse.status})`);
+
+                    const blob = await retryResponse.blob();
+                    const filename = normalizedName || ref || "source";
+                    triggerBrowserDownload(blob, filename);
+                    return;
+                }
+            }
+            throw new Error(`Download failed (${response.status})`);
+        }
+
+        const blob = await response.blob();
+        const filename = normalizedName || ref || "source";
+        triggerBrowserDownload(blob, filename);
+
+    } catch (err) {
+        console.error("Download error:", err);
+        if (button) {
+            button.classList.add("download-error");
+            // Optionally show error state briefly
+            button.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; margin-right: 6px; color: #ef4444;">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+                <span>Failed</span>
+            `;
+        }
+        // Show a temporary error toast or alert
+        alert("Unable to download this file. Access may be restricted or the file may be removed.");
+
+        // Restore button after delay if error
+        if (button) {
+            setTimeout(() => {
+                button.disabled = false;
+                button.classList.remove("is-loading");
+                button.classList.remove("download-error");
+                button.innerHTML = originalHtml;
+            }, 2000);
+            return; // Exit here so finally block doesn't immediately overwrite
+        }
+    }
+
+    // Success path restoration
+    if (button) {
+        button.disabled = false;
+        button.classList.remove("is-loading");
+        button.innerHTML = originalHtml;
+    }
+}
+
+function triggerBrowserDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename || "download";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}

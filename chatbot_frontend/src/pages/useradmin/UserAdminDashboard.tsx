@@ -39,6 +39,7 @@ import {
 import { User, UserRole, FileItem, Prompt, Collection } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost, apiPut, apiDelete, apiUpload } from '@/utils/api';
+import CrawlerView from '@/components/CrawlerView';
 
 type CollectionSummary = {
   collection_id: string;
@@ -55,7 +56,7 @@ export default function UserAdminDashboard() {
   const [collection, setCollection] = useState<Collection | null>(null);
   const [selectedCollectionId, setSelectedCollectionId] = useState<string>('');
   const [collectionDetails, setCollectionDetails] = useState<Collection | null>(null);
-  const [knowledgeTab, setKnowledgeTab] = useState<'files' | 'prompts'>('files');
+  const [knowledgeTab, setKnowledgeTab] = useState<'files' | 'prompts' | 'crawler'>('files');
 
   const [users, setUsers] = useState<User[]>([]);
   const [isLoadingCollections, setIsLoadingCollections] = useState(true);
@@ -77,6 +78,7 @@ export default function UserAdminDashboard() {
   const [isFileDialogOpen, setIsFileDialogOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<Record<string, UploadStatus>>({});
+  const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null);
 
   const [isPromptDialogOpen, setIsPromptDialogOpen] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState<Prompt | null>(null);
@@ -121,7 +123,6 @@ export default function UserAdminDashboard() {
           setCollection(null);
         }
       } catch (error) {
-        console.debug('Failed to fetch collection details', error);
         setCollectionDetails(null);
         setCollection(null);
       }
@@ -155,7 +156,6 @@ export default function UserAdminDashboard() {
         setCollection(null);
       }
     } catch (error) {
-      console.error('Failed to load knowledge bases', error);
       toast.error('Unable to load knowledge bases.');
       setSelectedCollectionId('');
       setCollection(null);
@@ -185,7 +185,6 @@ export default function UserAdminDashboard() {
         setUsers([]);
       }
     } catch (error) {
-      console.debug('Failed to fetch users', error);
       setUsers([]);
     } finally {
       setIsLoadingUsers(false);
@@ -212,7 +211,6 @@ export default function UserAdminDashboard() {
         setFiles([]);
       }
     } catch (error) {
-      console.debug('Failed to fetch files', error);
       setFiles([]);
     } finally {
       setFilesLoading(false);
@@ -239,7 +237,6 @@ export default function UserAdminDashboard() {
         setPrompts([]);
       }
     } catch (error) {
-      console.debug('Failed to fetch prompts', error);
       setPrompts([]);
     } finally {
       setPromptsLoading(false);
@@ -283,7 +280,7 @@ export default function UserAdminDashboard() {
   }, [selectedCollectionId, activeSection, knowledgeTab, fetchCollectionDetails, fetchUsers, fetchFiles, fetchPrompts]);
 
   const handleKnowledgeTabChange = (value: string) => {
-    if (value === 'files' || value === 'prompts') {
+    if (value === 'files' || value === 'prompts' || value === 'crawler') {
       setKnowledgeTab(value);
     }
   };
@@ -432,6 +429,13 @@ export default function UserAdminDashboard() {
       return;
     }
 
+    // Limit to maximum 10 files
+    if (selectedFiles.length > 10) {
+      toast.error(`You can only upload a maximum of 10 files at once. You selected ${selectedFiles.length} files.`);
+      event.target.value = ''; // Reset the file input
+      return;
+    }
+
     setIsUploading(true);
     const filesArray = Array.from(selectedFiles);
     const progress: Record<string, UploadStatus> = {};
@@ -462,7 +466,7 @@ export default function UserAdminDashboard() {
             errorMessage = errorData.detail;
           }
         } catch (parseError) {
-          console.debug('Failed to parse upload error response', parseError);
+          // Failed to parse upload error
         }
 
         setUploadProgress((prev) => {
@@ -496,7 +500,6 @@ export default function UserAdminDashboard() {
       event.target.value = '';
       closeFileDialog();
     } catch (error) {
-      console.error('Failed to upload files', error);
       toast.error(error instanceof Error ? error.message : 'Failed to upload files');
     } finally {
       setIsUploading(false);
@@ -504,6 +507,7 @@ export default function UserAdminDashboard() {
   };
 
   const handleDownloadFile = async (fileId: string, fileName: string) => {
+    setDownloadingFileId(fileId);
     try {
       const response = await apiGet(
         `${import.meta.env.VITE_API_BASE_URL}/files/download/${fileId}`,
@@ -525,6 +529,52 @@ export default function UserAdminDashboard() {
       window.URL.revokeObjectURL(url);
     } catch (error) {
       toast.error('Failed to download file');
+    } finally {
+      setDownloadingFileId(null);
+    }
+  };
+
+  const handleDownloadCrawlData = async (file: FileItem) => {
+    if (!file.crawl_job_id && !file.file_id.startsWith('crawl_')) return;
+
+    const jobId = file.crawl_job_id || file.file_id.replace('crawl_', '');
+    setDownloadingFileId(file.file_id);
+
+    try {
+      const response = await apiGet(
+        `${import.meta.env.VITE_API_BASE_URL}/files/download/crawl_${jobId}`,
+        user?.access_token
+      );
+
+      if (!response.ok) {
+        throw new Error('Download failed');
+      }
+
+      const blob = await response.blob();
+
+      // Try to infer filename from Content-Disposition header if present
+      const disposition = response.headers.get('content-disposition') || '';
+      let filename = '';
+      const match = disposition.match(/filename="?(?<name>[^"]+)"?/i);
+      if (match && match.groups?.name) {
+        filename = match.groups.name;
+      } else {
+        filename = `crawl_data_${jobId}.json`;
+      }
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Failed to download crawl data', error);
+      toast.error('Failed to download crawl data');
+    } finally {
+      setDownloadingFileId(null);
     }
   };
 
@@ -736,7 +786,7 @@ export default function UserAdminDashboard() {
           <Card>
             <CardHeader>
               <CardTitle>
-              {collection.name ? `  ${collection.name}` : ''} Knowledge Base
+                {collection.name ? `  ${collection.name}` : ''} Knowledge Base
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -777,7 +827,7 @@ export default function UserAdminDashboard() {
                       <Users className="h-5 w-5" />
                       Users
                     </CardTitle>
-                   
+
                   </div>
                   <Button onClick={() => openUserDialog()} disabled={isLoadingUsers}>
                     <Plus className="mr-2 h-4 w-4" />
@@ -939,7 +989,12 @@ export default function UserAdminDashboard() {
             <TabsList>
               <TabsTrigger value="files">Files</TabsTrigger>
               <TabsTrigger value="prompts">Prompts</TabsTrigger>
+              <TabsTrigger value="crawler">Web Crawler</TabsTrigger>
             </TabsList>
+
+            <TabsContent value="crawler">
+              <CrawlerView collectionId={selectedCollectionId} />
+            </TabsContent>
 
             <TabsContent value="files" className="space-y-6">
               <Card>
@@ -950,7 +1005,7 @@ export default function UserAdminDashboard() {
                         <Database className="h-5 w-5" />
                         Files
                       </CardTitle>
-                      
+
                     </div>
                     <Button onClick={() => setIsFileDialogOpen(true)}>
                       <Upload className="mr-2 h-4 w-4" />
@@ -1006,11 +1061,26 @@ export default function UserAdminDashboard() {
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => handleDownloadFile(file.file_id, file.file_name)}
-                                  disabled={file.processing_status !== 'completed'}
+                                  onClick={() => {
+                                    if (file.source_type === 'crawled' || file.file_id.startsWith('crawl_')) {
+                                      handleDownloadCrawlData(file);
+                                    } else {
+                                      handleDownloadFile(file.file_id, file.file_name);
+                                    }
+                                  }}
+                                  disabled={file.processing_status !== 'completed' || downloadingFileId === file.file_id}
                                 >
-                                  <Download className="h-4 w-4 mr-1" />
-                                  Download
+                                  {downloadingFileId === file.file_id ? (
+                                    <>
+                                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                      Downloading...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Download className="h-4 w-4 mr-1" />
+                                      Download
+                                    </>
+                                  )}
                                 </Button>
                                 <Button
                                   variant="ghost"
@@ -1034,9 +1104,9 @@ export default function UserAdminDashboard() {
               <Dialog open={isFileDialogOpen} onOpenChange={setIsFileDialogOpen}>
                 <DialogContent className="max-w-lg">
                   <DialogHeader>
-                    <DialogTitle>Upload File</DialogTitle>
+                    <DialogTitle>Upload Files</DialogTitle>
                     <DialogDescription>
-                      Upload documents to this knowledge base (PDF, DOC, DOCX, PPTX, XLSX, TXT, CSV – max 10MB each).
+                      Upload up to 10 documents to this knowledge base (PDF, DOC, DOCX, PPTX, XLSX, TXT, CSV – max 10MB each).
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4">
@@ -1061,13 +1131,12 @@ export default function UserAdminDashboard() {
                                 {fileName}
                               </span>
                               <span
-                                className={`text-xs font-semibold ${
-                                  status === 'success'
-                                    ? 'text-green-600'
-                                    : status === 'error'
+                                className={`text-xs font-semibold ${status === 'success'
+                                  ? 'text-green-600'
+                                  : status === 'error'
                                     ? 'text-red-600'
                                     : 'text-muted-foreground'
-                                }`}
+                                  }`}
                               >
                                 {status === 'pending' && 'Uploading...'}
                                 {status === 'success' && 'Uploaded'}

@@ -32,7 +32,7 @@ class SystemPrompt(Base):
     
     # AI Model Configuration
     model_name = Column(String(100), default="claude-3-haiku-20240307", nullable=False)
-    max_tokens = Column(Integer, default=1000, nullable=False)
+    max_tokens = Column(Integer, default=4096, nullable=False)
     temperature = Column(Float, default=0.0, nullable=False)
     
     # Usage tracking
@@ -114,7 +114,7 @@ class SystemPromptCreate(BaseModel):
     is_active: bool = True
     is_default: bool = False
     model_name: str = "claude-3-haiku-20240307"
-    max_tokens: int = 1000
+    max_tokens: int = 4096
     temperature: float = 0.0
 
 class SystemPromptUpdate(BaseModel):
