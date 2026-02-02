@@ -172,16 +172,27 @@ def _infer_conversation_state(history: List[ConversationMessage]) -> Dict[str, A
             if "Polus" in content or "Polus Solutions" in content:
                 state["scope"] = "Polus Solutions"
         
-        # 2. ENTITY & INTENT DETECTION (From Assistant Responses)
-        if msg.role == "assistant":
+        # 2. ENTITY & INTENT DETECTION (From User and Assistant)
+        if msg.role == "user" and not state["active_entity"]:
+            # User asked about Fibi/product - set context for follow-ups like "the latest", "its features"
+            if re.search(r"\bfibi\b", content, re.I) or "Fibi Grants" in content or "Fibi Compliance" in content:
+                state["active_entity"] = {"person_name": "Fibi Product Suite"}
+                state["last_intent"] = "person_profile"
+        elif msg.role == "assistant":
             # Header Pattern: ## [Name] -> Person Entity
             match_person = re.search(r'^##\s+([A-Z][a-zA-Z\s\-\.]+?)$', content, re.MULTILINE)
             if match_person and not state["active_entity"]:
                 name = match_person.group(1).strip()
-                if len(name) < 40 and " " in name:
+                if len(name) < 40 and (" " in name or len(name) > 3):
                     state["active_entity"] = {"person_name": name}
                     if not state["last_intent"]:
                         state["last_intent"] = "person_profile"
+
+            # Fallback: Fibi/product discussion (e.g. "Fibi Product Suite", "Fibi Grants Management")
+            if not state["active_entity"] and ("Fibi" in content or "fibi" in content.lower()):
+                state["active_entity"] = {"person_name": "Fibi Product Suite"}
+                if not state["last_intent"]:
+                    state["last_intent"] = "person_profile"
 
             # Leadership Pattern: "Polus Solutions Leadership" or list of names
             if not state["last_intent"]:
@@ -200,6 +211,70 @@ def _infer_conversation_state(history: List[ConversationMessage]) -> Dict[str, A
         pass
 
     return state
+
+
+def _expand_followup_query(question: str, conversation_history: List[ConversationMessage]) -> str:
+    """
+    Expand short/vague follow-up queries using prior user questions.
+    E.g. "yes about its features" after "What is FIBI" -> "FIBI features"
+    """
+    if not question or not conversation_history or len(conversation_history) < 2:
+        return question
+
+    q_lower = question.strip().lower()
+    words = q_lower.split()
+
+    # Follow-up indicators: short replies or phrases that reference prior context
+    followup_phrases = [
+        "yes", "yeah", "yep", "sure", "ok", "about", "about its", "about it",
+        "its", "features", "featutes", "feature", "more", "details", "explain",
+        "tell me more", "that one", "the first", "the second"
+    ]
+    is_followup = (
+        len(words) <= 6 or
+        any(phrase in q_lower for phrase in followup_phrases)
+    )
+    if not is_followup:
+        return question
+
+    # Get last user message (prior to current question)
+    last_user_msg = None
+    for msg in reversed(conversation_history):
+        if msg.role == "user":
+            last_user_msg = msg.content
+            break
+    if not last_user_msg or len(last_user_msg) < 3:
+        return question
+
+    # Extract key entities from prior question (capitalized words, product names)
+    prior = last_user_msg.strip()
+    entities = re.findall(r"\b[A-Z][A-Za-z0-9]+\b", prior)
+    # Skip common question words
+    skip = {"What", "How", "When", "Which", "Where", "Who", "Why", "Tell", "Show"}
+    entity = next((e for e in entities if e not in skip), entities[0] if entities else None)
+
+    # Extract aspect from current query (features, details, etc.)
+    aspects = []
+    if "feature" in q_lower or "featute" in q_lower:
+        aspects.append("features")
+    if "detail" in q_lower or "more" in q_lower:
+        aspects.append("details")
+    if "explain" in q_lower:
+        aspects.append("explanation")
+    if "capability" in q_lower or "can it" in q_lower:
+        aspects.append("capabilities")
+
+    if entity and aspects:
+        expanded = f"{entity} {' '.join(aspects)}"
+        prior_preview = prior[:50] + "..." if len(prior) > 50 else prior
+        logger.info(f"[QUERY EXPANSION] '{question}' -> '{expanded}' (from prior: '{prior_preview}')")
+        return expanded
+    if entity and len(q_lower) < 15:
+        expanded = f"{entity} {question}"
+        logger.info(f"[QUERY EXPANSION] '{question}' -> '{expanded}'")
+        return expanded
+
+    return question
 
 
 def _process_chat_request(
@@ -301,10 +376,13 @@ def _process_chat_request(
     # FIX 20: Request-Level Cache for Single-Pass Retrieval
     request_cache = {}
 
+    # Expand follow-up queries using conversation history (e.g. "yes about its features" -> "FIBI features")
+    retrieval_question = _expand_followup_query(question, conversation_history) if conversation_history else question
+
     # Pass prior_context to retrieve_chunks
     chunks = rag_instance.retrieve_chunks(
-        question, 
-        top_k=top_k, 
+        retrieval_question,
+        top_k=top_k,
         collection_id=effective_collection_id,
         prior_context=prior_context,
         request_cache=request_cache # FIX 20
@@ -407,11 +485,14 @@ def _process_chat_request(
         logger.info(f"[SOURCE FILTER] Filtered out {filtered_sources_count} low-confidence sources (threshold: {source_min_score})")
 
     # Step 2: Check if follow-up is needed (BEFORE answer generation)
-    # Use normalized query for consistency
+    # Use retrieval_question when expanded - avoids pronoun follow-up on "yes about its features"
+    # Pass conversation_state so gating can skip follow-ups when context is resolved (e.g. "the latest" after Fibi discussion)
+    followup_query = retrieval_question if retrieval_question != question else question
     followup_result = rag_instance.needs_followup(
-        query=question,
+        query=followup_query,
         chunks=chunks,
-        conversation_history=[m.dict() for m in conversation_history] if conversation_history else None
+        conversation_history=[m.dict() for m in conversation_history] if conversation_history else None,
+        conversation_state=state
     )
     
     needs_followup = followup_result.get("needs_followup", False)
@@ -466,7 +547,7 @@ def _process_chat_request(
             # Convert Pydantic models to dicts for RAG
             history_dicts = [m.dict() for m in conversation_history]
             rag_result = rag_instance.answer_with_context(
-                question,
+                retrieval_question,  # Use expanded query for retrieval (e.g. "FIBI features")
                 history_dicts,
                 top_k=top_k,
                 collection_id=effective_collection_id,
@@ -477,7 +558,7 @@ def _process_chat_request(
         else:
             logger.debug("[CONTEXT] Using basic RAG without context")
             rag_result = rag_instance.answer(
-                question,
+                retrieval_question,
                 top_k=top_k,
                 collection_id=effective_collection_id,
                 prior_context=prior_context,

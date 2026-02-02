@@ -4,7 +4,7 @@ from sqlalchemy import Column, String, DateTime, Integer, Text, ForeignKey, Bool
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.models.base import Base
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List, Dict, Any
 import uuid
 import json
@@ -98,6 +98,7 @@ class QueryLog(Base):
 
 class QueryLogCreate(BaseModel):
     """Pydantic model for creating query logs"""
+    model_config = ConfigDict(protected_namespaces=())
     user_id: str
     website_id: str
     session_id: Optional[str] = None
@@ -116,6 +117,7 @@ class QueryLogCreate(BaseModel):
 
 class QueryLogResponse(BaseModel):
     """Pydantic model for query log response"""
+    model_config = ConfigDict(protected_namespaces=())
     query_id: str
     user_id: str
     website_id: str

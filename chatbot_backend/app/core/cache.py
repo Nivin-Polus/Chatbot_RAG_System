@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 RETRIEVAL_TTL = 900  # 15 minutes
 ANSWER_TTL = 900     # 15 minutes
 SHORT_TERM_TTL = 60  # 1 minute for NO_DATA or extensive failures
-CACHE_VERSION = "v6"  # Increment this when making breaking changes to invalidate cached results
+CACHE_VERSION = "v7"  # Increment this when making breaking changes to invalidate cached results
 
 class RAGCache:
     """

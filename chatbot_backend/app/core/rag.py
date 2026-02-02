@@ -94,7 +94,6 @@ LEADERSHIP_TITLE_KEYWORDS = [
     "director", "chairman", "ceo", "cfo", "cto", "coo",
     "associate director", "vice president", "vp", "president",
     "chief", "head of", "founder", "managing director",
-    "partner", "exec", "architect and ceo",
 ]
 
 
@@ -194,19 +193,11 @@ def is_probable_person_name(name: str) -> bool:
         return False
     
     # Check capitalization - at least 2 capitalized words (first name + last name)
-    tokens = [t for t in name.split() if t.strip()]
+    tokens = name.split()
     capitalized = sum(1 for t in tokens if t[:1].isupper())
     if capitalized < 2:
         return False
     
-    # Reject if the name itself looks like a role title
-    if is_leadership_role(name):
-        return False
-    
-    # Reject lines that are all uppercase (usually section headers) if they are 3+ words
-    if len(tokens) >= 3 and name.isupper():
-        return False
-        
     return True
 
 
@@ -229,122 +220,151 @@ def extract_leadership_entities(
     target_org: Optional[str] = None,
     query_type: Optional[str] = None,
 ) -> Tuple[List[Dict], List[Dict]]:
-    """Extract verified leadership entities from retrieved chunks.
-    Scans both metadata AND chunk text to find multiple people per chunk.
+    """Extract verified leadership entities (name, title) from retrieved chunks.
+    Now includes org-aware filtering to exclude external organization leaders.
+    
+    Returns:
+        Tuple of (entities, contributing_chunks) where contributing_chunks are only
+        the chunks that actually produced entities in the response.
     """
     seen_names: Set[str] = set()
     entities: List[Dict] = []
-    contributing_chunks: List[Dict] = []
+    contributing_chunks: List[Dict] = []  # Track which chunks contributed
     
+    # Normalize target org for matching
     target_org_lower = (target_org or "polus").lower().strip()
-    target_org_parts = [p for p in target_org_lower.split() if len(p) > 2 and p not in ["solutions", "private", "limited", "ltd"]]
     
+    # External org keywords to reject
     EXTERNAL_ORG_KEYWORDS = [
         "mit", "massachusetts institute", "harvard", "stanford", "yale",
         "ado travel", "edu-suite", "microsoft", "google", "amazon",
     ]
     
-    def validate_and_add(name: str, title: str, chunk: Dict) -> bool:
-        """Helper to validate an entity and add to list if unique."""
-        name = name.strip().lstrip("-•*> ").strip()
-        # Clean common prefixes
+    logger.info(f"[LEADERSHIP EXTRACT] Processing {len(chunks)} chunks for org='{target_org_lower}'")
+    
+    for i, c in enumerate(chunks):
+        payload = c.get("payload", {})
+        name = (payload.get("person_name") or "").strip()
+        title = (payload.get("person_title") or "").strip()
+        text = (c.get("text") or payload.get("text") or "").strip()
+        url = (payload.get("url") or c.get("url") or "").lower()
+        file_name = (payload.get("file_name") or c.get("file_name") or "").lower()
+        
+        # Clean up names starting with special chars (e.g., "- Charley Beerman" -> "Charley Beerman")
+        if name.startswith(("-", "•", "*", ">")):
+            name = name.lstrip("-•*> ").strip()
+        
+        # Clean up names with "Mr.", "Mrs.", "Dr." prefixes for consistency
         for prefix in ["Mr. ", "Mrs. ", "Ms. ", "Dr. "]:
             if name.startswith(prefix):
                 name = name[len(prefix):]
         
-        if not name or name == "Unknown" or not title:
-            return False
-            
-        if not is_leadership_role(title):
-            return False
-            
-        if not is_probable_person_name(name):
-            return False
-            
-        if is_role_only_name(name):
-            return False
-            
-        # Org filtering
+        logger.debug(f"[LEADERSHIP EXTRACT] Chunk {i}: name='{name}', title='{title}', url='{url[:50]}...'")
+        
+        # FIX: Organization filtering based on URL/source
+        # If URL is from target org's domain, it's internal
+        is_from_target_org = target_org_lower in url or target_org_lower in file_name
+        
+        # Check if title mentions external organization
         title_lower = title.lower()
-        mentions_external = any(ext in title_lower for ext in EXTERNAL_ORG_KEYWORDS)
-        mentions_target = target_org_lower in title_lower or any(p in title_lower for p in target_org_parts)
+        mentions_external_org = any(ext in title_lower for ext in EXTERNAL_ORG_KEYWORDS)
         
-        # Determine source org
-        payload = chunk.get("payload", {})
-        url = (payload.get("url") or chunk.get("url") or "").lower()
-        file_name = (payload.get("file_name") or chunk.get("file_name") or "").lower()
-        is_from_target = any(p in url or p in file_name for p in target_org_parts) or target_org_lower in url
+        # Check if title mentions target org
+        mentions_target_org = target_org_lower in title_lower
         
-        if mentions_external and not mentions_target:
-            return False
-            
-        if not is_from_target and not mentions_target:
-             chunk_org = (payload.get("organization") or "").lower().strip()
-             if chunk_org:
-                 if not (target_org_lower in chunk_org or chunk_org in target_org_lower):
-                     return False
-             else:
-                 return False
-                 
+        # FIX: Detect titles that explicitly reference a different organization
+        # Patterns like "CEO at GrowthScale", "CEO, ConnAct.Online", "Director of XYZ Corp"
+        # If the title contains "at [OrgName]" or ", [OrgName]" and it's NOT the target org, reject
+        title_has_external_org = False
+        
+        # Common department/function words that should NOT be treated as company names
+        DEPARTMENT_KEYWORDS = {
+            "product", "engineering", "strategy", "operations", "finance", "sales",
+            "marketing", "hr", "human", "resources", "technology", "it", "services",
+            "customer", "business", "development", "delivery", "research", "analytics",
+            "administration", "management", "partnerships", "communications", "legal",
+        }
+        
+        # Pattern 1: "at [OrgName]" (e.g., "CEO at GrowthScale")
+        at_match = re.search(r'\bat\s+([A-Z][A-Za-z0-9\.\-]+)', title)
+        if at_match:
+            attached_org = at_match.group(1).lower()
+            # Only treat as external org if it's NOT the target org AND NOT a department keyword
+            if (target_org_lower not in attached_org and 
+                attached_org not in target_org_lower and
+                not any(dept in attached_org for dept in DEPARTMENT_KEYWORDS)):
+                title_has_external_org = True
+        
+        # Pattern 2: "[Role], [OrgName]" or "[Role] - [OrgName]" (e.g., "CEO, ConnAct.Online")
+        # Check for comma or dash followed by what looks like an org name
+        # BUT only if it doesn't look like a department/function
+        comma_match = re.search(r'[,\-]\s*([A-Z][A-Za-z0-9\.\-]+(?:\s+[A-Z][A-Za-z0-9\.\-]+)*)$', title)
+        if comma_match:
+            attached_text = comma_match.group(1).lower()
+            # Check if this looks like a department rather than a company
+            is_department = any(dept in attached_text for dept in DEPARTMENT_KEYWORDS)
+            if (not is_department and 
+                target_org_lower not in attached_text and 
+                attached_text not in target_org_lower):
+                title_has_external_org = True
+        
+        # Combine with existing check
+        mentions_external_org = mentions_external_org or title_has_external_org
+        
+        # FIX 2: Correct logic for career pages vs leadership profiles
+        if is_career_chunk(c):
+            if looks_like_job_posting(text) and not is_leadership_role(title):
+                 logger.debug("[LEADERSHIP DROP] job posting: %s", name)
+                 continue
+            if not is_leadership_role(title):
+                 logger.debug("[LEADERSHIP DROP] career chunk without leadership: %s", name)
+                 continue
+
+        if not name or name == "Unknown":
+            logger.debug(f"[LEADERSHIP DROP] empty/unknown name: '{name}'")
+            continue
+        if not is_leadership_role(title):
+            logger.debug(f"[LEADERSHIP DROP] not leadership role: name='{name}' | title='{title}'")
+            continue
+        if not is_probable_person_name(name):
+            logger.info(f"[LEADERSHIP DROP] not person name: '{name}' (tokens={name.split()}, caps={sum(1 for t in name.split() if t[:1].isupper())})")
+            continue
+        if is_role_only_name(name):
+            logger.info(f"[LEADERSHIP DROP] role-only name: '{name}'")
+            continue
+        
+        # KEY FIX: Organization filtering
+        # Rule 1: If title mentions external org, REJECT (unless also mentions target)
+        if mentions_external_org and not mentions_target_org:
+            logger.info(f"[LEADERSHIP DROP] external org in title: '{name}' | title='{title}'")
+            continue
+        
+        # Rule 2: If not from target org's pages AND doesn't mention target org, REJECT
+        if not is_from_target_org and not mentions_target_org:
+            # Exception: If org metadata explicitly matches
+            chunk_org = payload.get("organization", "")
+            if chunk_org and target_org_lower not in chunk_org.lower():
+                logger.info(f"[LEADERSHIP DROP] not from target org: '{name}' | org='{chunk_org}'")
+                continue
+            # For unknown org, check URL more carefully
+            if not chunk_org:
+                # Check common external domain patterns
+                external_domains = ["mit.edu", "harvard.edu", "stanford.edu", "yale.edu"]
+                if any(ext in url for ext in external_domains):
+                    logger.info(f"[LEADERSHIP DROP] external domain: '{name}' | url='{url[:60]}'")
+                    continue
+        
+        # Deduplicate
         key = normalize_text(name)
         if key in seen_names:
-            return False
-            
+            logger.debug(f"[LEADERSHIP DROP] duplicate: '{name}'")
+            continue
         seen_names.add(key)
         entities.append({"name": name, "title": title})
-        if chunk not in contributing_chunks:
-            contributing_chunks.append(chunk)
+        contributing_chunks.append(c)  # Track this chunk as a source
         logger.info(f"[LEADERSHIP ACCEPT] name='{name}', title='{title}'")
-        return True
-
-    for i, c in enumerate(chunks):
-        payload = c.get("payload", {})
-        text = (c.get("text") or payload.get("text") or "").strip()
-        
-        # 1. Try metadata first
-        meta_name = (payload.get("person_name") or "").strip()
-        meta_title = (payload.get("person_title") or "").strip()
-        validate_and_add(meta_name, meta_title, c)
-        
-        # 2. Scan text for more people
-        # Look for Name\nTitle or Name - Title patterns
-        lines = [l.strip() for l in text.split('\n') if l.strip()]
-        for idx, line in enumerate(lines):
-            # Pattern A: Name - Title
-            if " - " in line or " – " in line or " — " in line:
-                parts = re.split(r' [-\–\—] ', line, 1)
-                if len(parts) == 2:
-                    p_name, p_title = parts[0], parts[1]
-                    validate_and_add(p_name, p_title, c)
-            
-            # Pattern B: Name (line idx) followed by Title (line idx + 1)
-            if is_leadership_role(line):
-                # Try line before
-                if idx > 0:
-                    p_name = lines[idx-1]
-                    if is_probable_person_name(p_name):
-                        validate_and_add(p_name, line, c)
-                # Try line itself if it has a colon "Title: Name" (rare but possible)
-                if ":" in line:
-                    parts = line.split(":", 1)
-                    if is_leadership_role(parts[0]):
-                        validate_and_add(parts[1], parts[0], c)
-                        
-            # Pattern C: Check if line is a name and title is in the SAME line but without hyphen
-            # e.g. "John Doe Director of Engineering"
-            # This is riskier so we only check if the line starts with a probable name
-            words = line.split()
-            if len(words) >= 3:
-                # find index of first leadership keyword
-                for kw in LEADERSHIP_TITLE_KEYWORDS:
-                    if kw in line.lower():
-                        kw_idx = line.lower().find(kw)
-                        p_name = line[:kw_idx].strip().strip("-–—: ")
-                        p_title = line[kw_idx:].strip()
-                        if p_name and is_probable_person_name(p_name):
-                            validate_and_add(p_name, p_title, c)
-                        break
-
+    
+    logger.info(f"[LEADERSHIP EXTRACT] Total entities extracted: {len(entities)}, contributing chunks: {len(contributing_chunks)}")
     return entities, contributing_chunks
 
 
@@ -1807,12 +1827,13 @@ class RAG:
         min_score = getattr(settings, "RAG_MIN_SCORE", GENERAL_MIN_SCORE)
         
         # Dynamic adjustments
-        if person_detection["is_person_query"]:
+        # NOTE: Check leadership_list FIRST since it also sets is_person_query=True
+        if query_classification["query_type"] == "leadership_list":
+            search_top_k = 40  # FIX: Increase for leadership to get all potential directors
+            min_score = getattr(settings, "RAG_LEADERSHIP_MIN_SCORE", LEADERSHIP_MIN_SCORE)  # 0.15 for leadership
+        elif person_detection["is_person_query"]:
             search_top_k = 20 # Fetch more for person queries to ensure we find the right profile
             min_score = 0.15  # Lower threshold to capture potential matches before reranking
-        elif query_classification["query_type"] == "leadership_list":
-            search_top_k = 60  # FIX: Increase for leadership to get all potential directors
-            min_score = 0.10  # Lower threshold for leadership to capture brief profiles
         elif query_classification["query_type"] == "factual":
             min_score = 0.30  # Higher precision for facts
         elif query_classification["query_type"] == "procedural":
@@ -3365,7 +3386,7 @@ Answer:"""
                 chunks_with_sources, target_org=inferred_org, query_type="leadership_list"
             )
             top_score_val = chunks_with_sources[0].get("score", 0)
-            if leadership_entities and top_score_val >= 0.10:
+            if leadership_entities and top_score_val >= getattr(settings, "RAG_LEADERSHIP_MIN_SCORE", LEADERSHIP_MIN_SCORE):
                 org_display = inferred_org or "the organization"
                 answer_text = generate_leadership_response(leadership_entities, top_score_val, org_display)
                 
@@ -3392,7 +3413,7 @@ Answer:"""
                     "answer": answer_text,
                     "is_generic": False,
                     "answer_mode": final_mode,
-                    "source_files": source_files_lead,
+                    "sources": list(source_files_lead.keys()),
                     "chunk_count": len(contributing_chunks),  # Report contributing chunks, not all
                 }
         
@@ -3469,9 +3490,9 @@ Answer:"""
              elif intent == "leadership_list":
                  # Change 1 & 2: Use top_score and accept partial leadership data
                  top_score_val = chunks_with_sources[0].get("score", 0) if chunks_with_sources else 0
-                 leadership_entities, _ = extract_leadership_entities(
+                 leadership_entities = extract_leadership_entities(
                      chunks_with_sources, target_org=target_org, query_type="leadership_list"
-                 ) if chunks_with_sources else ([], [])
+                 ) if chunks_with_sources else []
                  if len(leadership_entities) >= 1:
                      if top_score_val >= 0.25:
                          answer_mode = AnswerMode.FULL
