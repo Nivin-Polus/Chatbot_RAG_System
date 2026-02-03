@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 RETRIEVAL_TTL = 900  # 15 minutes
 ANSWER_TTL = 900     # 15 minutes
 SHORT_TERM_TTL = 60  # 1 minute for NO_DATA or extensive failures
+EMBEDDING_TTL = 3600 # 1 hour (embeddings are deterministic)
 CACHE_VERSION = "v7"  # Increment this when making breaking changes to invalidate cached results
 
 class RAGCache:
@@ -17,6 +18,7 @@ class RAGCache:
     - Retrieval Cache: Dense vector/chunk results.
     - Answer Cache: Final LLM answers.
     - Short-Term Cache: Failure states or empty results (NO_DATA).
+    - Embedding Cache: Query embedding vectors (new).
     """
     _instance = None
 
@@ -36,6 +38,9 @@ class RAGCache:
         # Cache for "No Data" or empty results (Guardrail 2)
         # Prevents heavy retry loops on empty queries but expires quickly
         self._short_term_cache = TTLCache(maxsize=1000, ttl=SHORT_TERM_TTL)
+        
+        # Cache for query embedding vectors (deterministic, can cache longer)
+        self._embedding_cache = TTLCache(maxsize=500, ttl=EMBEDDING_TTL)
 
     def get_retrieval(self, key: Tuple) -> Optional[Any]:
         """Get from retrieval cache or short-term cache (if it was an empty result)."""
@@ -69,12 +74,23 @@ class RAGCache:
             self._short_term_cache[key] = value
         else:
             self._answer_cache[key] = value
+
+    def get_embedding(self, query: str) -> Optional[Any]:
+        """Get cached embedding vector for a query."""
+        key = query.strip().lower() if query else ""
+        return self._embedding_cache.get(key)
+    
+    def set_embedding(self, query: str, vector: Any):
+        """Cache embedding vector for a query."""
+        key = query.strip().lower() if query else ""
+        self._embedding_cache[key] = vector
             
     def clear(self):
         """Clear all caches (useful for testing)."""
         self._retrieval_cache.clear()
         self._answer_cache.clear()
         self._short_term_cache.clear()
+        self._embedding_cache.clear()
 
 # Global Accessor
 _rag_cache = RAGCache()

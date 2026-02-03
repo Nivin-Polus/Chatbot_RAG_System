@@ -231,8 +231,10 @@ def extract_leadership_entities(
     entities: List[Dict] = []
     contributing_chunks: List[Dict] = []  # Track which chunks contributed
     
-    # Normalize target org for matching
-    target_org_lower = (target_org or "polus").lower().strip()
+    # Normalize target org for matching - use provided org or infer from first chunk
+    if not target_org and chunks:
+        target_org = infer_org_from_chunks(chunks)
+    target_org_lower = (target_org or "the organization").lower().strip()
     
     # External org keywords to reject
     EXTERNAL_ORG_KEYWORDS = [
@@ -409,16 +411,67 @@ def format_entities(entities: List[Dict]) -> str:
 
 
 def infer_org_from_chunks(chunks: List[Dict]) -> Optional[str]:
-    """Cheap fallback: infer org name from chunk text/filenames (e.g. Polus in content or 'Polus Solutions | ...')."""
+    """Infer organization name from chunk metadata (domain, URL, or text content).
+    
+    Priority:
+    1. Explicit 'organization' field in payload
+    2. Domain name from URL
+    3. Page title patterns
+    """
     for c in chunks:
         payload = c.get("payload", {})
-        text = (c.get("text") or payload.get("text") or "").strip()
-        file_name = (c.get("file_name") or payload.get("file_name") or payload.get("page_title") or "").strip()
-        combined = f"{text} {file_name}"
-        if "Polus Solutions" in combined:
-            return "Polus Solutions"
-        if "Polus" in combined:
-            return "Polus"
+        
+        # Priority 1: Explicit organization field
+        org = payload.get("organization")
+        if org and isinstance(org, str) and org.strip():
+            return org.strip()
+        
+        # Priority 2: Extract from domain in URL
+        url = payload.get("url") or c.get("url") or ""
+        if url:
+            domain = extract_domain_name(url)
+            if domain:
+                return domain
+        
+        # Priority 3: Extract from page title (company name pattern)
+        page_title = payload.get("page_title") or payload.get("file_name") or ""
+        if " - " in page_title:
+            # Often format is "Page Title - Company Name"
+            parts = page_title.split(" - ")
+            if len(parts) >= 2:
+                potential_org = parts[-1].strip()
+                # Filter out generic suffixes
+                if potential_org.lower() not in ["home", "about", "contact", "blog", "news"]:
+                    return potential_org
+        if " | " in page_title:
+            parts = page_title.split(" | ")
+            if len(parts) >= 2:
+                potential_org = parts[-1].strip()
+                if potential_org.lower() not in ["home", "about", "contact", "blog", "news"]:
+                    return potential_org
+    
+    return None
+
+
+def extract_domain_name(url: str) -> Optional[str]:
+    """Extract a human-readable organization name from a URL domain.
+    
+    Examples:
+        https://www.example.com/page -> 'Example'
+        https://polussolutions.com/about -> 'Polussolutions' (or could be cleaned further)
+    """
+    import re
+    try:
+        # Extract domain from URL
+        match = re.search(r'https?://(?:www\.)?([^/]+)', url.lower())
+        if match:
+            domain = match.group(1)
+            # Remove TLD (.com, .org, etc.)
+            domain_name = domain.split('.')[0]
+            # Capitalize for display
+            return domain_name.capitalize()
+    except Exception:
+        pass
     return None
 
 
@@ -529,7 +582,7 @@ def format_person_context(chunks: List[Dict], person_detection: Dict) -> str:
             payload = p.get("payload", {})
             name = payload.get("person_name", "Unknown")
             title = payload.get("person_title", "Unknown Role")
-            org = payload.get("organization", "Polus Solutions")
+            org = payload.get("organization", "the organization")
             text = payload.get("text", "")
             context += f"Name: {name}\nTitle: {title}\nOrg: {org}\nDetails: {text}\n\n"
             
@@ -1055,7 +1108,7 @@ def rerank_results(
         is_external_domain = any(ext in chunk_url for ext in EXTERNAL_DOMAINS)
         
         # Check if URL is from target org
-        target_org_lower = (target_org or "polus").lower()
+        target_org_lower = (target_org or "").lower() if target_org else ""
         is_target_domain = target_org_lower in chunk_url
         
         is_internal = False
@@ -1685,36 +1738,17 @@ class RAG:
         }
 
     def _fetch_known_people(self) -> List[str]:
-        """Fetch all known person names from vector store with caching."""
-        import time
-        current_time = time.time()
+        """Get known person names from background-refreshed cache (zero latency).
         
-        # Cache for 1 hour (3600 seconds)
-        if hasattr(self, "known_person_cache") and self.known_person_cache and (current_time - getattr(self, "last_person_fetch_time", 0) < 3600):
-            return self.known_person_cache
-            
-        try:
-            # Fetch from vector store if initialized
-            if not self.vector_store:
-                return []
-
-            names = self.vector_store.get_all_unique_values(
-                field="person_name", 
-                filter_key="chunk_type", 
-                filter_value="person_profile",
-                allow_unsafe_scroll=True # TEMPORARY: Exempt from safety guard until person cache is moved to background
-            )
-            
-            # Filter valid names
-            valid_names = [n for n in names if n and isinstance(n, str) and len(n.split()) >= 1]
-            
-            self.known_person_cache = valid_names
-            self.last_person_fetch_time = current_time
-            logger.info(f"Refreshed known person cache: {len(valid_names)} people found")
-            return valid_names
-        except Exception as e:
-            logger.error(f"Failed to fetch known people: {e}")
-            return getattr(self, "known_person_cache", [])
+        The background cache is managed by PersonCacheManager which:
+        - Refreshes on startup (async, non-blocking)
+        - Refreshes every hour via background thread
+        - Can be triggered manually after crawl completion
+        
+        This replaces the expensive 9 Qdrant scroll calls that were blocking requests.
+        """
+        from app.core.background_cache import get_known_people
+        return get_known_people()
 
     def get_prompt_for_collection(self, collection_id: str) -> Optional[SystemPrompt]:
         """Get the active prompt for a specific collection from database"""
@@ -1776,13 +1810,13 @@ class RAG:
         
         query_classification = classify_query(normalized_query)
         
-        # FIX 1: Lock target organisation early
-        # Currently hardcoded to 'polus' as per instructions ("Polus present -> ALWAYS internal")
-        target_org = "polus"
+        # Target org will be inferred from chunks later
+        # Initialize with None - will be populated dynamically from collection/chunks
+        target_org = None  # Will be inferred from chunks after retrieval
         rag_state = {
             "intent": query_classification.get("query_type"),
             "target_org": target_org,
-            "target_org_confidence": 0.95
+            "target_org_confidence": 0.5  # Low confidence until we have chunks
         }
 
         
@@ -2044,8 +2078,8 @@ class RAG:
         
         # FIX 3: LEADERSHIP/EXECUTIVE INTENTS ARE COMPLETE
         kw = query.lower()
-        # If query explicitly mentions "polus" or "directors", it's specific enough
-        if "polus" in kw or "director" in kw or "leadership" in kw or "executive" in kw or "management team" in kw or (query_classification and query_classification.get("query_type") == "leadership_list"):
+        # If query contains leadership keywords, it's specific enough
+        if "director" in kw or "leadership" in kw or "executive" in kw or "management team" in kw or (query_classification and query_classification.get("query_type") == "leadership_list"):
              return {
                 "needs_followup": False,
                 "reason": "leadership_intent_complete",
@@ -2114,8 +2148,42 @@ class RAG:
         
         # ─────────────────────────────────────────────────────────
         # RULE 2: Detect incomplete or fragmented queries
+        # BUT: Skip if we have context with an active entity
         # ─────────────────────────────────────────────────────────
         
+        # Check if we have conversation state with an active entity
+        has_context_entity = False
+        active_entity = None
+        if conversation_state:
+            active_entity = conversation_state.get('active_entity')
+            has_context_entity = bool(active_entity)
+        
+        # Contextual/affirmative responses that should use existing context
+        contextual_patterns = [
+            r"^yes\b",
+            r"^yeah\b", 
+            r"^yep\b",
+            r"^sure\b",
+            r"^okay\b",
+            r"^ok\b",
+            r"\b(about|regarding|concerning)\s+(its|their|the)\s+\w+",
+            r"\b(features|details|information|more|pricing|benefits|capabilities)\b"
+        ]
+        
+        # If query matches contextual patterns AND we have an active entity, skip follow-up
+        if has_context_entity:
+            for pattern in contextual_patterns:
+                if re.search(pattern, query_lower, re.IGNORECASE):
+                    logger.info(f"[FOLLOWUP] Skipping: contextual response with active entity '{active_entity}'")
+                    return {
+                        "needs_followup": False,
+                        "reason": "context_entity_exists",
+                        "confidence": 1.0,
+                        "suggested_topics": [],
+                        "missing_context": []
+                    }
+        
+        # Original incomplete query patterns (only trigger if NO context entity)
         incomplete_patterns = [
             r"^(what about|how about|and)\s",  # "what about...", "and..."
             r"^(more|else|also)\s",             # "more on...", "also..."
@@ -2125,14 +2193,19 @@ class RAG:
         
         for pattern in incomplete_patterns:
             if re.match(pattern, query_lower):
-                result.update({
-                    "needs_followup": True,
-                    "reason": "incomplete_query",
-                    "confidence": 0.85,
-                    "missing_context": ["Could you provide more details about what you'd like to know?"]
-                })
-                logger.info("[FOLLOWUP_METRIC] Triggered: incomplete_query", extra={"query": query})
-                return result
+                # Only trigger if NO context entity exists
+                if not has_context_entity:
+                    result.update({
+                        "needs_followup": True,
+                        "reason": "incomplete_query",
+                        "confidence": 0.85,
+                        "missing_context": ["Could you provide more details about what you'd like to know?"]
+                    })
+                    logger.info("[FOLLOWUP_METRIC] Triggered: incomplete_query", extra={"query": query})
+                    return result
+                else:
+                    logger.info(f"[FOLLOWUP] Skipping incomplete_query: has context entity '{active_entity}'")
+
         
         # ─────────────────────────────────────────────────────────
         # RULE 3: No chunks found - check if query is valid
@@ -2767,6 +2840,158 @@ Questions should be:
         
         return fallback_questions
 
+    # ------------------------------------------------------------------
+    # Post-Answer Suggestion Generation
+    # ------------------------------------------------------------------
+    
+    def generate_post_answer_suggestions(
+        self,
+        query: str,
+        answer: str,
+        chunks: List[Dict],
+        query_classification: Optional[Dict] = None,
+        conversation_state: Optional[Dict] = None
+    ) -> List[str]:
+        """
+        Generate 2-3 intelligent follow-up suggestions based on the answer given.
+        
+        Args:
+            query: Original user query
+            answer: The answer that was provided
+            chunks: Retrieved chunks used to generate the answer
+            query_classification: Classification info from the query
+            conversation_state: Current conversation state with active entity
+            
+        Returns:
+            List of 2-3 suggested follow-up questions
+        """
+        try:
+            # Extract key entities and topics from the answer and chunks
+            entities = []
+            topics = []
+            
+            # Get active entity from conversation state
+            if conversation_state and conversation_state.get('active_entity'):
+                entity_data = conversation_state['active_entity']
+                if isinstance(entity_data, dict):
+                    entities.append(entity_data.get('person_name') or entity_data.get('name', ''))
+                else:
+                    entities.append(str(entity_data))
+            
+            # Extract topics from chunk content
+            for chunk in chunks[:5]:  # Top 5 most relevant chunks
+                payload = chunk.get('payload', {})
+                content = payload.get('text', chunk.get('text', ''))
+                content_lower = content.lower()
+                
+                # Topic detection
+                if 'feature' in content_lower:
+                    topics.append('features')
+                if 'benefit' in content_lower or 'advantage' in content_lower:
+                    topics.append('benefits')
+                if 'pricing' in content_lower or 'cost' in content_lower or 'price' in content_lower:
+                    topics.append('pricing')
+                if 'integration' in content_lower or 'integrate' in content_lower:
+                    topics.append('integration')
+                if 'support' in content_lower or 'help' in content_lower:
+                    topics.append('support')
+                if 'security' in content_lower:
+                    topics.append('security')
+                if 'compliance' in content_lower:
+                    topics.append('compliance')
+                if 'api' in content_lower:
+                    topics.append('API')
+                if 'demo' in content_lower or 'trial' in content_lower:
+                    topics.append('demo or trial')
+            
+            entities = list(set([e for e in entities if e]))[:2]  # Deduplicate and limit
+            topics = list(set(topics))[:5]
+            
+            # Build prompt for LLM to generate suggestions
+            answer_preview = answer[:500] + "..." if len(answer) > 500 else answer
+            
+            suggestion_prompt = f"""Based on the following conversation context, generate 2-3 specific follow-up questions the user might want to ask next.
+
+User's Question: {query}
+
+Answer Provided: {answer_preview}
+
+Available Topics in Knowledge Base: {', '.join(topics) if topics else 'general information'}
+Entities Mentioned: {', '.join(entities) if entities else 'none'}
+
+Generate 2-3 natural, specific questions that:
+1. Build on the information just provided
+2. Are answerable based on the knowledge base
+3. Cover different aspects (features, benefits, pricing, integration, support, etc.)
+4. Are phrased from the user's perspective
+
+Format your response as a JSON array of strings, like:
+["Question 1?", "Question 2?", "Question 3?"]
+
+Only return the JSON array, nothing else."""
+
+            # Call LLM to generate suggestions
+            response_text, _ = self.call_ai(
+                prompt=suggestion_prompt,
+                max_tokens=250,
+                temperature=0.7
+            )
+            
+            suggestions_text = response_text.strip()
+            
+            # Parse JSON response
+            import json
+            # Remove markdown code blocks if present
+            suggestions_text = suggestions_text.replace('```json', '').replace('```', '').strip()
+            
+            # Try to parse as JSON
+            try:
+                suggestions = json.loads(suggestions_text)
+            except json.JSONDecodeError:
+                # Fallback: Try to extract questions using regex
+                suggestions = re.findall(r'"([^"]+\?)"', suggestions_text)
+            
+            # Validate and limit to 3 suggestions
+            if isinstance(suggestions, list):
+                suggestions = [s for s in suggestions if isinstance(s, str) and len(s) > 10 and s.strip().endswith('?')][:3]
+                if suggestions:
+                    logger.info(f"[SUGGESTIONS] Generated {len(suggestions)} suggestions")
+                    return suggestions
+            
+            logger.warning("[SUGGESTIONS] Invalid suggestions format from LLM, using fallback")
+            return self._get_fallback_suggestions(query, conversation_state)
+                
+        except Exception as e:
+            logger.error(f"[SUGGESTIONS] Error generating suggestions: {str(e)}")
+            # Return fallback suggestions
+            return self._get_fallback_suggestions(query, conversation_state)
+
+    def _get_fallback_suggestions(
+        self,
+        query: str,
+        conversation_state: Optional[Dict] = None
+    ) -> List[str]:
+        """Fallback suggestions when LLM generation fails."""
+        entity = None
+        if conversation_state and conversation_state.get('active_entity'):
+            entity_data = conversation_state['active_entity']
+            if isinstance(entity_data, dict):
+                entity = entity_data.get('person_name') or entity_data.get('name')
+            else:
+                entity = str(entity_data)
+        
+        if entity:
+            return [
+                f"What are the key features of {entity}?",
+                f"How does {entity} compare to alternatives?"
+            ]
+        else:
+            # Generic fallback based on common topics
+            return [
+                "What are the main features?",
+                "How can I get started?"
+            ]
+
     def summarize_conversation(self, older_messages: List) -> str:
         """
         Summarize older conversation messages to preserve context without overwhelming the LLM.
@@ -3379,7 +3604,7 @@ Answer:"""
         ):
             # Infer target org FIRST so we can filter entities properly
             org_from_state = (conversation_state or {}).get("scope")
-            inferred_org = org_from_state or infer_org_from_chunks(chunks_with_sources) or "polus"
+            inferred_org = org_from_state or infer_org_from_chunks(chunks_with_sources) or "the organization"
             
             # Extract entities AND get the chunks that contributed to them
             leadership_entities, contributing_chunks = extract_leadership_entities(
@@ -3420,7 +3645,7 @@ Answer:"""
         # DETERMINE ANSWER MODE (Fix 4 & 8)
         person_detected = False
         leadership_detected = False
-        target_org = "polus" # Consistent with system
+        target_org = infer_org_from_chunks(chunks_with_sources) if chunks_with_sources else None
         has_internal_data = False
         
         if chunks_with_sources:

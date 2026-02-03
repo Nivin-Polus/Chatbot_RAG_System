@@ -169,6 +169,22 @@ async def startup_event():
         except Exception as e:
             logging.warning(f"⚠️ Crawler scheduler not started: {e}")
 
+        # Pre-warm embedding model (avoids cold start on first request)
+        try:
+            from app.core.model_singleton import get_embedding_model
+            get_embedding_model()
+            logging.info("✅ Embedding model pre-warmed")
+        except Exception as e:
+            logging.warning(f"⚠️ Embedding model pre-warm failed: {e}")
+
+        # Start background person cache refresh
+        try:
+            from app.core.background_cache import get_person_cache_manager
+            get_person_cache_manager().start_background_refresh()
+            logging.info("✅ Person cache background refresh started")
+        except Exception as e:
+            logging.warning(f"⚠️ Person cache background refresh not started: {e}")
+
         logging.info("✅ Application startup completed successfully")
     except Exception as e:
         logging.error(f"❌ Failed to initialize application: {str(e)}")

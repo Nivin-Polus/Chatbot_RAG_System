@@ -506,32 +506,44 @@ class ContentExtractor:
         Executes once per page.
         
         Logic:
-        1. Domain mapping (Hardcoded or Config-driven)
-        2. Title/Meta cues
-        3. Default to None (Unknown)
+        1. Extract domain name from URL
+        2. Check title for organization pattern ("Page - Company" or "Company | Page")
+        3. Default to domain name or None
         """
         if not url:
             return None
             
         url_lower = url.lower()
-        title_common = (title or "").lower()
+        title_str = (title or "").strip()
         
-        # 1. Known Domains (Extensible)
-        # TODO: Move to config
-        if "polussolutions.com" in url_lower:
-            return "polus"
-        if "polus" in title_common:
-            return "polus"
-            
-        # 2. Competitors / Partners (Examples)
-        if "databricks.com" in url_lower:
-            return "databricks"
-        if "openai.com" in url_lower:
-            return "openai"
-            
-        # 3. Generic Heuristic from Title (Fallback - be careful not to over-infer)
-        # If title is "About Us - Acme Corp", extract "Acme Corp"?
-        # For now, safe default is None (Unknown) to adhere to "Unknown != External"
+        # 1. Extract organization from domain
+        try:
+            import re
+            match = re.search(r'https?://(?:www\.)?([^/]+)', url_lower)
+            if match:
+                domain = match.group(1)
+                # Remove TLD and common suffixes
+                domain_parts = domain.split('.')
+                if len(domain_parts) >= 2:
+                    # e.g., "polussolutions.com" -> "polussolutions"
+                    # e.g., "example.co.uk" -> "example"
+                    org_name = domain_parts[0]
+                    # Capitalize for display
+                    return org_name.capitalize()
+        except Exception:
+            pass
+        
+        # 2. Extract from title patterns
+        if title_str:
+            # Pattern: "Page Title - Company Name" or "Page Title | Company Name"
+            for sep in [' - ', ' | ']:
+                if sep in title_str:
+                    parts = title_str.split(sep)
+                    if len(parts) >= 2:
+                        potential_org = parts[-1].strip()
+                        # Filter out generic page names
+                        if potential_org.lower() not in ['home', 'about', 'contact', 'blog', 'news', 'products', 'services']:
+                            return potential_org
         
         return None
     

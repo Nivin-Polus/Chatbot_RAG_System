@@ -60,6 +60,7 @@ class ChatResponse(BaseModel):
     chunk_count: int = 0  # NEW: Number of chunks retrieved
     answer_mode: Optional[str] = "FULL"  # NEW: Answer mode (FULL, PARTIAL_TRANSPARENT, FOLLOWUP)
     person_presence: Optional[Dict] = None
+    suggestions: Optional[List[str]] = None  # NEW: AI-generated follow-up suggestions
 
 
 class PublicChatRequest(ChatRequest):
@@ -168,16 +169,31 @@ def _infer_conversation_state(history: List[ConversationMessage]) -> Dict[str, A
         
         # 1. SCOPE DETECTION (Organization)
         # Check for explicit scope mentions in assistant or user text
+        # Generic: Extract org from page title patterns like "Company Name | Page" or "Page - Company Name"
         if not state["scope"]:
-            if "Polus" in content or "Polus Solutions" in content:
-                state["scope"] = "Polus Solutions"
+            # Look for org in page title patterns from assistant response
+            org_patterns = [
+                r'\|\s*([A-Z][A-Za-z\s]+?)\s*$',  # "Page Title | Company Name"
+                r'-\s*([A-Z][A-Za-z\s]+?)\s*$',   # "Page Title - Company Name"
+            ]
+            for pattern in org_patterns:
+                match = re.search(pattern, content)
+                if match:
+                    potential_org = match.group(1).strip()
+                    if len(potential_org) > 2 and potential_org.lower() not in ['home', 'about', 'contact']:
+                        state["scope"] = potential_org
+                        break
         
         # 2. ENTITY & INTENT DETECTION (From User and Assistant)
         if msg.role == "user" and not state["active_entity"]:
-            # User asked about Fibi/product - set context for follow-ups like "the latest", "its features"
-            if re.search(r"\bfibi\b", content, re.I) or "Fibi Grants" in content or "Fibi Compliance" in content:
-                state["active_entity"] = {"person_name": "Fibi Product Suite"}
-                state["last_intent"] = "person_profile"
+            # Look for product/entity mentions in user query
+            # Pattern: "What is [Entity]" or capitalized proper nouns
+            what_is_match = re.search(r'what\s+is\s+([A-Z][A-Za-z0-9\s]+)', content, re.I)
+            if what_is_match:
+                entity_name = what_is_match.group(1).strip()
+                if len(entity_name) > 2:
+                    state["active_entity"] = {"person_name": entity_name}
+                    state["last_intent"] = "person_profile"
         elif msg.role == "assistant":
             # Header Pattern: ## [Name] -> Person Entity
             match_person = re.search(r'^##\s+([A-Z][a-zA-Z\s\-\.]+?)$', content, re.MULTILINE)
@@ -188,39 +204,30 @@ def _infer_conversation_state(history: List[ConversationMessage]) -> Dict[str, A
                     if not state["last_intent"]:
                         state["last_intent"] = "person_profile"
 
-            # Fallback: Fibi/product discussion (e.g. "Fibi Product Suite", "Fibi Grants Management")
-            if not state["active_entity"] and ("Fibi" in content or "fibi" in content.lower()):
-                state["active_entity"] = {"person_name": "Fibi Product Suite"}
-                if not state["last_intent"]:
-                    state["last_intent"] = "person_profile"
-
-            # Leadership Pattern: "Polus Solutions Leadership" or list of names
+            # Leadership Pattern: Any leadership mention (generic)
             if not state["last_intent"]:
-                if "Leadership" in content and ("Chairman" in content or "Director" in content):
+                if "Leadership" in content and ("Chairman" in content or "Director" in content or "CEO" in content):
                      state["last_intent"] = "leadership_list"
-                     # If we found a leadership list, the "Active Entity" is the Team, 
-                     # but we key it as a special entity type if needed, or just rely on last_intent.
                      state["active_entity"] = {"type": "team", "name": "Leadership Team"}
 
-    # Default Scope Fallback (If deep history implies it, or we assume it for this specific bot instance)
-    if not state["scope"]:
-        # Optimization: Scan older history if needed, or default if allowed. 
-        # For now, let's look deeper unique case? 
-        # Actually, let's hardcode "Polus Solutions" if we see "Leadership" to fix the "Which company" bug forcefully
-        # if the user asks about leadership without company name.
-        pass
+    # No hardcoded scope fallback - let org be inferred from chunks dynamically
 
     return state
 
 
-def _expand_followup_query(question: str, conversation_history: List[ConversationMessage]) -> str:
+def _expand_followup_query(
+    question: str, 
+    conversation_history: List[ConversationMessage],
+    conversation_state: Optional[Dict] = None
+) -> str:
     """
-    Expand short/vague follow-up queries using prior user questions.
+    Expand short/vague follow-up queries using prior user questions and conversation state.
     E.g. "yes about its features" after "What is FIBI" -> "FIBI features"
+    Now uses conversation_state for better entity resolution.
     """
-    if not question or not conversation_history or len(conversation_history) < 2:
+    if not question:
         return question
-
+    
     q_lower = question.strip().lower()
     words = q_lower.split()
 
@@ -228,7 +235,8 @@ def _expand_followup_query(question: str, conversation_history: List[Conversatio
     followup_phrases = [
         "yes", "yeah", "yep", "sure", "ok", "about", "about its", "about it",
         "its", "features", "featutes", "feature", "more", "details", "explain",
-        "tell me more", "that one", "the first", "the second"
+        "tell me more", "that one", "the first", "the second", "pricing", 
+        "benefits", "capabilities", "integration"
     ]
     is_followup = (
         len(words) <= 6 or
@@ -237,40 +245,75 @@ def _expand_followup_query(question: str, conversation_history: List[Conversatio
     if not is_followup:
         return question
 
-    # Get last user message (prior to current question)
-    last_user_msg = None
-    for msg in reversed(conversation_history):
-        if msg.role == "user":
-            last_user_msg = msg.content
-            break
-    if not last_user_msg or len(last_user_msg) < 3:
-        return question
-
-    # Extract key entities from prior question (capitalized words, product names)
-    prior = last_user_msg.strip()
-    entities = re.findall(r"\b[A-Z][A-Za-z0-9]+\b", prior)
-    # Skip common question words
-    skip = {"What", "How", "When", "Which", "Where", "Who", "Why", "Tell", "Show"}
-    entity = next((e for e in entities if e not in skip), entities[0] if entities else None)
+    # PRIORITY 1: Use conversation_state if available (most reliable)
+    entity = None
+    if conversation_state and conversation_state.get('active_entity'):
+        entity_data = conversation_state['active_entity']
+        if isinstance(entity_data, dict):
+            entity = entity_data.get('person_name') or entity_data.get('name')
+        else:
+            entity = str(entity_data)
+        logger.info(f"[QUERY EXPANSION] Using entity from state: {entity}")
+    
+    # PRIORITY 2: Search ALL user messages in history for entities
+    if not entity and conversation_history and len(conversation_history) >= 1:
+        potential_entities = []
+        for msg in conversation_history:
+            if msg.role == "user":
+                content = msg.content
+                # Pattern 1: "What is X"
+                match = re.search(r"what\s+is\s+(\w+(?:\s+\w+)?)", content, re.IGNORECASE)
+                if match:
+                    potential_entities.append(match.group(1).strip())
+                
+                # Pattern 2: Capitalized words (likely entities)
+                capitalized = re.findall(r"\b[A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+)*\b", content)
+                skip = {"What", "How", "When", "Which", "Where", "Who", "Why", "Tell", "Show", "Can", "Does", "Is", "Are"}
+                for cap in capitalized:
+                    if cap not in skip and len(cap) > 2:
+                        potential_entities.append(cap)
+        
+        if potential_entities:
+            # Use the most recent non-skipped entity
+            entity = potential_entities[-1] if potential_entities else None
+            if entity:
+                logger.info(f"[QUERY EXPANSION] Extracted entity from history: {entity}")
 
     # Extract aspect from current query (features, details, etc.)
+    aspect_mapping = {
+        "feature": "features",
+        "featute": "features",
+        "detail": "details",
+        "more": "details",
+        "explain": "explanation",
+        "capability": "capabilities",
+        "can it": "capabilities",
+        "pricing": "pricing",
+        "cost": "pricing",
+        "benefit": "benefits",
+        "advantage": "benefits",
+        "integration": "integration",
+        "support": "support"
+    }
+    
     aspects = []
-    if "feature" in q_lower or "featute" in q_lower:
-        aspects.append("features")
-    if "detail" in q_lower or "more" in q_lower:
-        aspects.append("details")
-    if "explain" in q_lower:
-        aspects.append("explanation")
-    if "capability" in q_lower or "can it" in q_lower:
-        aspects.append("capabilities")
+    for keyword, aspect in aspect_mapping.items():
+        if keyword in q_lower and aspect not in aspects:
+            aspects.append(aspect)
 
+    # Build expanded query
     if entity and aspects:
         expanded = f"{entity} {' '.join(aspects)}"
-        prior_preview = prior[:50] + "..." if len(prior) > 50 else prior
-        logger.info(f"[QUERY EXPANSION] '{question}' -> '{expanded}' (from prior: '{prior_preview}')")
+        logger.info(f"[QUERY EXPANSION] '{question}' -> '{expanded}'")
         return expanded
-    if entity and len(q_lower) < 15:
+    elif entity and len(q_lower) < 20:
+        # Short query with entity - combine them
         expanded = f"{entity} {question}"
+        logger.info(f"[QUERY EXPANSION] '{question}' -> '{expanded}'")
+        return expanded
+    elif entity:
+        # Longer query but we have entity - prepend it
+        expanded = f"Tell me about {entity}"
         logger.info(f"[QUERY EXPANSION] '{question}' -> '{expanded}'")
         return expanded
 
@@ -376,8 +419,8 @@ def _process_chat_request(
     # FIX 20: Request-Level Cache for Single-Pass Retrieval
     request_cache = {}
 
-    # Expand follow-up queries using conversation history (e.g. "yes about its features" -> "FIBI features")
-    retrieval_question = _expand_followup_query(question, conversation_history) if conversation_history else question
+    # Expand follow-up queries using conversation history and state (e.g. "yes about its features" -> "FIBI features")
+    retrieval_question = _expand_followup_query(question, conversation_history, state) if conversation_history else question
 
     # Pass prior_context to retrieve_chunks
     chunks = rag_instance.retrieve_chunks(
@@ -766,6 +809,20 @@ def _process_chat_request(
     logger.info(f"[API RESPONSE] Final answer content:\n{answer_text}")
     logger.info(f"[API RESPONSE] is_generic: {is_generic}, sources count: {len(sources_payload)}")
     
+    # Generate intelligent suggestions for follow-up questions (skip for generic responses)
+    suggestions = []
+    if not is_generic and answer_text:
+        try:
+            suggestions = rag_instance.generate_post_answer_suggestions(
+                query=retrieval_question,
+                answer=answer_text,
+                chunks=chunks,
+                conversation_state=state
+            )
+            logger.info(f"[API RESPONSE] Generated {len(suggestions)} suggestions")
+        except Exception as e:
+            logger.error(f"[API RESPONSE] Failed to generate suggestions: {str(e)}")
+    
     return ChatResponse(
         answer=answer_text, 
         session_id=effective_session_id, 
@@ -773,7 +830,8 @@ def _process_chat_request(
         sources=sources_payload, 
         chunk_count=len(chunks), 
         answer_mode=answer_mode,
-        person_presence=rag_result.get("person_presence")
+        person_presence=rag_result.get("person_presence"),
+        suggestions=suggestions if suggestions else None
     )
 
 
