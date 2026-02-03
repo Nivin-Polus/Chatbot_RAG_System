@@ -697,7 +697,25 @@ def detect_person_query(normalized_query: str, prior_context: Optional[Dict] = N
         has_pronoun = any(p in query_words for p in pronouns)
         is_continuation = any(c in normalized_query for c in continuations)
         
-        if is_short or has_pronoun or is_continuation:
+        # FIX: Prevent false positives for factual queries (e.g. "What is Fibi")
+        # If query starts with factual indicators AND has no pronouns, it's likely a new topic
+        factual_starts = ("what is", "what are", "define", "explain", "describe")
+        is_factual = normalized_query.startswith(factual_starts)
+        
+        # If it matches the entity name exactly (e.g. "what is fibi" when context is "fibi")
+        # We should treat it as a fresh lookup to get full context, not just person-continuation
+        mentions_entity_name = False
+        if prior_context.get("person_name"):
+             p_name = prior_context["person_name"].lower()
+             if p_name in normalized_query:
+                 mentions_entity_name = True
+
+        # Logic: 
+        # 1. If it's factual AND has no pronouns -> New Query (False)
+        # 2. If it explicitly names the person -> New Query (False)
+        should_skip = (is_factual and not has_pronoun) or mentions_entity_name
+        
+        if not should_skip and (is_short or has_pronoun or is_continuation):
             # Inherit context!
             result["is_person_query"] = True
             result["person_name"] = prior_context["person_name"]
@@ -1578,6 +1596,75 @@ def extract_available_topics(chunks: List[Dict]) -> List[str]:
     return unique_topics[:10]  # Max 10 topics
 
 
+def get_query_type_instructions(query_type: str) -> str:
+    """Get query-type specific instructions for comprehensive answers.
+    
+    These instructions guide the LLM to provide appropriately structured
+    and detailed responses based on the type of question asked.
+    """
+    instructions = {
+        "factual": """
+**Answer Structure for This Query:**
+This is a factual/definitional question about a product, service, or concept.
+You MUST include:
+- A clear definition or explanation of what it is
+- List ALL modules, components, or sub-products mentioned in context
+- List ALL features and capabilities mentioned anywhere in context
+- List ALL benefits or use cases if mentioned
+- Integration capabilities if mentioned
+Organize with headers for each major section. Be EXHAUSTIVE - include every detail from context.""",
+        
+        "person": """
+**Answer Structure for This Query:**
+This is a query about a person. Your answer should include:
+- Full name and current role/title
+- Organization they belong to
+- Professional background and achievements
+- Contact information if available""",
+        
+        "leadership_list": """
+**Answer Structure for This Query:**
+List all leadership/team members found. For each person include:
+- Name and title
+- Role responsibilities if mentioned
+Use bullet points for the list.""",
+        
+        "procedural": """
+**Answer Structure for This Query:**
+This is a how-to question. Provide:
+- Step-by-step instructions (numbered)
+- Prerequisites if any
+- Key tips or warnings
+- Expected outcomes""",
+        
+        "comparison": """
+**Answer Structure for This Query:**
+This is a comparison question. Structure as:
+- Brief overview of each item
+- Key differences
+- Similarities
+- Recommendation if applicable""",
+        
+        "troubleshooting": """
+**Answer Structure for This Query:**
+This is a troubleshooting question. Provide:
+- Likely causes of the issue
+- Step-by-step solution
+- Alternative approaches if the first doesn't work
+- How to prevent the issue""",
+        
+        "exploratory": """
+**Answer Structure for This Query:**
+Provide a comprehensive overview covering:
+- Main concept or topic
+- Key features, capabilities, or aspects
+- Benefits or use cases
+- Related topics from the context"""
+    }
+    
+    return instructions.get(query_type, instructions["exploratory"])
+
+
 class RAG:
     def __init__(self, db_session=None):
         self.db_session = db_session
@@ -1862,14 +1949,17 @@ class RAG:
         
         # Dynamic adjustments
         # NOTE: Check leadership_list FIRST since it also sets is_person_query=True
+        # Check factual BEFORE person to handle product questions correctly
         if query_classification["query_type"] == "leadership_list":
             search_top_k = 40  # FIX: Increase for leadership to get all potential directors
             min_score = getattr(settings, "RAG_LEADERSHIP_MIN_SCORE", LEADERSHIP_MIN_SCORE)  # 0.15 for leadership
+        elif query_classification["query_type"] == "factual":
+            # Factual/product queries - check BEFORE person detection to avoid misclassifying products as people
+            search_top_k = 40  # More context for product/factual questions
+            min_score = 0.20  # Lower threshold to capture all relevant features/components
         elif person_detection["is_person_query"]:
             search_top_k = 20 # Fetch more for person queries to ensure we find the right profile
             min_score = 0.15  # Lower threshold to capture potential matches before reranking
-        elif query_classification["query_type"] == "factual":
-            min_score = 0.30  # Higher precision for facts
         elif query_classification["query_type"] == "procedural":
             search_top_k = 15 # More context for steps
             
@@ -1910,8 +2000,13 @@ class RAG:
              # CRITICAL: Do NOT add generic leadership terms here
              
         elif query_classification["query_type"] == "factual":
-             # Minimal expansion for factual queries
-             pass
+             # Expansion for product/factual queries to get comprehensive context
+             # Extract the key subject from the query
+             subject = query.replace("what is", "").replace("what are", "").replace("?", "").strip()
+             if subject:
+                 expanded_queries.append(f"{subject} features capabilities")
+                 expanded_queries.append(f"{subject} components modules products")
+                 expanded_queries.append(f"{subject} benefits use cases")
         else:
              # Basic keyword expansion for other types
              if len(query.split()) < 4:
@@ -1974,9 +2069,10 @@ class RAG:
             if r["score"] >= min_score:
                 final_results.append(r)
                 
-        # Hard limit - use search_top_k for leadership to get more results
-        # This ensures all potential directors are included before entity extraction
-        final_top_k = search_top_k if query_classification.get("query_type") == "leadership_list" else top_k
+        # Hard limit - use search_top_k for leadership and factual to get more comprehensive results
+        # This ensures all potential features/details are included
+        query_type = query_classification.get("query_type")
+        final_top_k = search_top_k if query_type in ["leadership_list", "factual"] else top_k
         final_results = final_results[:final_top_k]
         
         logger.info(f"[RAG FINAL] Selected {len(final_results)} chunks after reranking (Top-K: {final_top_k})")
@@ -2869,6 +2965,7 @@ Questions should be:
             # Extract key entities and topics from the answer and chunks
             entities = []
             topics = []
+            specific_items = []  # NEW: Extract specific product/module/feature names
             
             # Get active entity from conversation state
             if conversation_state and conversation_state.get('active_entity'):
@@ -2878,11 +2975,30 @@ Questions should be:
                 else:
                     entities.append(str(entity_data))
             
+            # NEW: Extract specific items mentioned in the answer (product names, modules, features)
+            # Look for patterns like "**Module Name**" or capitalized terms
+            if answer:
+                # Extract bold headers (likely module/section names)
+                bold_items = re.findall(r'\*\*([A-Z][A-Za-z0-9\s\-]+)\*\*', answer)
+                specific_items.extend([item.strip() for item in bold_items if len(item) < 50])
+                
+                # Extract capitalized multi-word terms (likely product/feature names)
+                cap_terms = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b', answer)
+                specific_items.extend([term for term in cap_terms if len(term) > 3 and len(term) < 40])
+            
             # Extract topics from chunk content
             for chunk in chunks[:5]:  # Top 5 most relevant chunks
                 payload = chunk.get('payload', {})
                 content = payload.get('text', chunk.get('text', ''))
                 content_lower = content.lower()
+                
+                # Extract page title for entity context
+                page_title = payload.get('page_title', payload.get('file_name', ''))
+                if page_title and ' - ' in page_title:
+                    # Extract product/company from title
+                    parts = page_title.split(' - ')
+                    if len(parts) >= 2:
+                        specific_items.append(parts[0].strip())
                 
                 # Topic detection
                 if 'feature' in content_lower:
@@ -2892,7 +3008,7 @@ Questions should be:
                 if 'pricing' in content_lower or 'cost' in content_lower or 'price' in content_lower:
                     topics.append('pricing')
                 if 'integration' in content_lower or 'integrate' in content_lower:
-                    topics.append('integration')
+                    topics.append('integrations')
                 if 'support' in content_lower or 'help' in content_lower:
                     topics.append('support')
                 if 'security' in content_lower:
@@ -2903,32 +3019,41 @@ Questions should be:
                     topics.append('API')
                 if 'demo' in content_lower or 'trial' in content_lower:
                     topics.append('demo or trial')
+                if 'workflow' in content_lower or 'process' in content_lower:
+                    topics.append('workflows')
+                if 'report' in content_lower or 'analytics' in content_lower:
+                    topics.append('reporting')
             
             entities = list(set([e for e in entities if e]))[:2]  # Deduplicate and limit
-            topics = list(set(topics))[:5]
+            topics = list(set(topics))[:6]
+            specific_items = list(set([s for s in specific_items if s]))[:5]  # Deduplicate
             
             # Build prompt for LLM to generate suggestions
-            answer_preview = answer[:500] + "..." if len(answer) > 500 else answer
+            answer_preview = answer[:800] + "..." if len(answer) > 800 else answer
             
-            suggestion_prompt = f"""Based on the following conversation context, generate 2-3 specific follow-up questions the user might want to ask next.
+            suggestion_prompt = f"""Based on the following Q&A, generate 2-3 highly specific follow-up questions.
 
 User's Question: {query}
 
-Answer Provided: {answer_preview}
+Answer Provided:
+{answer_preview}
 
-Available Topics in Knowledge Base: {', '.join(topics) if topics else 'general information'}
-Entities Mentioned: {', '.join(entities) if entities else 'none'}
+Specific Items Mentioned: {', '.join(specific_items) if specific_items else 'general content'}
+Available Topics: {', '.join(topics) if topics else 'general information'}
+Key Entities: {', '.join(entities) if entities else 'none'}
 
-Generate 2-3 natural, specific questions that:
-1. Build on the information just provided
-2. Are answerable based on the knowledge base
-3. Cover different aspects (features, benefits, pricing, integration, support, etc.)
-4. Are phrased from the user's perspective
+Generate 2-3 natural follow-up questions that:
+1. Drill deeper into specific items/modules mentioned in the answer
+2. Explore UNCOVERED aspects (e.g., if features were explained, ask about pricing, integrations, or implementation)
+3. Are practical and actionable (e.g., "How do I get started with X?", "What are the requirements for Y?")
+4. If applicable, include a role-based question like "As a [role], how would I use..."
 
-Format your response as a JSON array of strings, like:
+Make questions SPECIFIC to the content, not generic.
+
+Format as JSON array:
 ["Question 1?", "Question 2?", "Question 3?"]
 
-Only return the JSON array, nothing else."""
+Only return the JSON array."""
 
             # Call LLM to generate suggestions
             response_text, _ = self.call_ai(
@@ -3096,6 +3221,20 @@ Summary:"""
             system_prompt = db_prompt.system_prompt
         else:
             system_prompt = self.default_system_prompt
+        
+        # ANSWER QUALITY ENHANCEMENT: Always append comprehensive answer instructions
+        # This works with any user-configured prompt from the database
+        system_prompt += """
+
+ANSWER QUALITY GUIDELINES (CRITICAL - Always Apply):
+- Be EXHAUSTIVE: Read ALL context carefully and include EVERY relevant detail, feature, component, and capability mentioned
+- For product questions: List ALL modules/components, ALL features, ALL benefits mentioned anywhere in context
+- Be STRUCTURED: Use headers (**bold**) and bullet points to organize information clearly
+- SYNTHESIZE: Combine information from multiple context snippets into one cohesive answer
+- Don't abbreviate or summarize when more detail is available - include everything
+- Infer organization name from context (page titles, URLs, content)
+- Do NOT add disclaimers about "limited context" or "additional documentation needed"
+- Do NOT mention what is missing - answer confidently with what you have"""
             
         # FIX 2: SCOPE INJECTION
         if scope:
@@ -3872,12 +4011,19 @@ Response Guidelines for Person Queries:
         # FIX 17 & 22: Add classification instruction
         full_system_prompt = f"{prompt_header}\n\n{CLASSIFICATION_INSTRUCTION}"
 
-        # Construct final user prompt
+        # Get query-type specific instructions for comprehensive answers
+        query_type = query_classification.get("query_type", "exploratory")
+        query_type_instruction = get_query_type_instructions(query_type)
+
+        # Construct final user prompt with enhanced instructions
         user_prompt = f"""Context information is below.
 ---------------------
 {context}
 ---------------------
-Given the context information and not prior knowledge, answer the query.
+
+{query_type_instruction}
+
+Given the context information (and not prior knowledge), provide a COMPREHENSIVE answer.
 Query: {query}
 Answer:"""
 
