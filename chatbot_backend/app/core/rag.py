@@ -1596,73 +1596,7 @@ def extract_available_topics(chunks: List[Dict]) -> List[str]:
     return unique_topics[:10]  # Max 10 topics
 
 
-def get_query_type_instructions(query_type: str) -> str:
-    """Get query-type specific instructions for comprehensive answers.
-    
-    These instructions guide the LLM to provide appropriately structured
-    and detailed responses based on the type of question asked.
-    """
-    instructions = {
-        "factual": """
-**Answer Structure for This Query:**
-This is a factual/definitional question about a product, service, or concept.
-You MUST include:
-- A clear definition or explanation of what it is
-- List ALL modules, components, or sub-products mentioned in context
-- List ALL features and capabilities mentioned anywhere in context
-- List ALL benefits or use cases if mentioned
-- Integration capabilities if mentioned
-Organize with headers for each major section. Be EXHAUSTIVE - include every detail from context.""",
-        
-        "person": """
-**Answer Structure for This Query:**
-This is a query about a person. Your answer should include:
-- Full name and current role/title
-- Organization they belong to
-- Professional background and achievements
-- Contact information if available""",
-        
-        "leadership_list": """
-**Answer Structure for This Query:**
-List all leadership/team members found. For each person include:
-- Name and title
-- Role responsibilities if mentioned
-Use bullet points for the list.""",
-        
-        "procedural": """
-**Answer Structure for This Query:**
-This is a how-to question. Provide:
-- Step-by-step instructions (numbered)
-- Prerequisites if any
-- Key tips or warnings
-- Expected outcomes""",
-        
-        "comparison": """
-**Answer Structure for This Query:**
-This is a comparison question. Structure as:
-- Brief overview of each item
-- Key differences
-- Similarities
-- Recommendation if applicable""",
-        
-        "troubleshooting": """
-**Answer Structure for This Query:**
-This is a troubleshooting question. Provide:
-- Likely causes of the issue
-- Step-by-step solution
-- Alternative approaches if the first doesn't work
-- How to prevent the issue""",
-        
-        "exploratory": """
-**Answer Structure for This Query:**
-Provide a comprehensive overview covering:
-- Main concept or topic
-- Key features, capabilities, or aspects
-- Benefits or use cases
-- Related topics from the context"""
-    }
-    
-    return instructions.get(query_type, instructions["exploratory"])
+
 
 
 class RAG:
@@ -4011,17 +3945,13 @@ Response Guidelines for Person Queries:
         # FIX 17 & 22: Add classification instruction
         full_system_prompt = f"{prompt_header}\n\n{CLASSIFICATION_INSTRUCTION}"
 
-        # Get query-type specific instructions for comprehensive answers
-        query_type = query_classification.get("query_type", "exploratory")
-        query_type_instruction = get_query_type_instructions(query_type)
+
 
         # Construct final user prompt with enhanced instructions
         user_prompt = f"""Context information is below.
 ---------------------
 {context}
 ---------------------
-
-{query_type_instruction}
 
 Given the context information (and not prior knowledge), provide a COMPREHENSIVE answer.
 Query: {query}
