@@ -236,16 +236,17 @@ export default function SuperadminDashboard() {
     <DashboardLayout>
       {confirmDialog}
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <div>
             <h1 className="text-3xl font-bold">Knowledge Base</h1>
 
           </div>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-              <Button className="shadow-glow">
+              <Button className="shadow-glow whitespace-nowrap">
                 <Plus className="mr-2 h-4 w-4" />
-                Create Knowledge Base
+                <span className="hidden sm:inline">Create Knowledge Base</span>
+                <span className="sm:hidden">Create</span>
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl sm:max-h-[85vh] overflow-y-auto">
@@ -466,10 +467,10 @@ export default function SuperadminDashboard() {
                 <TableBody>
                   {filteredCollections.map((collection) => (
                     <TableRow key={collection.collection_id}>
-                      <TableCell className="font-medium">
+                      <TableCell className="font-medium align-top">
                         <button
                           onClick={() => navigate(`/superadmin/knowledge-base/${collection.collection_id}`)}
-                          className="text-primary hover:text-primary/80 hover:underline font-medium"
+                          className="block w-full text-left text-primary hover:text-primary/80 hover:underline font-medium leading-relaxed"
                         >
                           {collection.name}
                         </button>

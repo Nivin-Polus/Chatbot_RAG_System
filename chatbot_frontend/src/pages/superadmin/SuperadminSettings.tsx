@@ -320,7 +320,7 @@ export default function SuperadminSettings() {
 
         <div className="grid gap-6">
           {/* Token Usage Overview */}
-          <Card>
+          <Card className="min-w-0">
             <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div className="flex items-center gap-2">
                 <Activity className="h-5 w-5" />
@@ -518,7 +518,7 @@ export default function SuperadminSettings() {
                     <div className="space-y-4">
                       <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Detailed Website Usage</h3>
                       <div className="overflow-hidden rounded-xl border">
-                        <table className="w-full text-sm">
+                        <table className="min-w-full text-[9px] md:text-sm">
                           <thead>
                             <tr className="bg-muted/50 text-left font-medium">
                               <th className="p-3">Website</th>

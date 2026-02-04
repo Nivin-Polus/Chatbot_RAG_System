@@ -874,7 +874,7 @@ export default function KnowledgeBaseDetails() {
           <TabsContent value="files" className="space-y-6">
             <Card>
               <CardHeader>
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">{/* kebin */}
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <Database className="h-5 w-5" />
@@ -884,22 +884,22 @@ export default function KnowledgeBaseDetails() {
                       Manage sources for this knowledge base
                     </CardDescription>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <Tabs value={sourceType} onValueChange={(v) => setSourceType(v as 'files' | 'crawl')} className="w-[400px]">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+                    <Tabs value={sourceType} onValueChange={(v) => setSourceType(v as 'files' | 'crawl')} className="w-full sm:w-auto">{/* kebin */}
                       <TabsList className="grid w-full grid-cols-2">
                         <TabsTrigger value="files">Files</TabsTrigger>
                         <TabsTrigger value="crawl">Crawled Data</TabsTrigger>
                       </TabsList>
                     </Tabs>
                     {sourceType === 'crawl' && (
-                      <Button variant="outline" onClick={() => navigate(`/superadmin/crawler?collectionId=${id}`)}>
+                      <Button variant="outline" onClick={() => navigate(`/superadmin/crawler?collectionId=${id}`)} className="w-full sm:w-auto">{/* kebin */}
                         Go to Crawler
                       </Button>
                     )}
                     {sourceType === 'files' && (
                       <Dialog open={isFileDialogOpen} onOpenChange={setIsFileDialogOpen} >
                         <DialogTrigger asChild>
-                          <Button>
+                          <Button className="w-full sm:w-auto">{/* kebin */}
                             <Upload className="mr-2 h-4 w-4" />
                             Upload File
                           </Button>
@@ -1075,8 +1075,8 @@ export default function KnowledgeBaseDetails() {
                   </div>
                   <Dialog open={isPromptDialogOpen} onOpenChange={setIsPromptDialogOpen}>
                     <DialogTrigger asChild>
-                      <Button>
-                        <Plus className="mr-2 h-4 w-4" />
+                      <Button size="sm">
+                        <Plus className="mr-1 h-3 w-3" />{/* kebin */}
                         Create Prompt
                       </Button>
                     </DialogTrigger>

@@ -1231,18 +1231,18 @@ export default function SuperadminChat() {
   return (
     <DashboardLayout>
       <div className="flex flex-col space-y-6 min-h-[calc(100vh-140px)]">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-foreground dark:text-white">Leto Chat</h1>
 
           </div>
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="flex items-center gap-2">
               <span className="text-sm font-medium text-muted-foreground dark:text-gray-300">
                 Select Knowledge Base:
               </span>
               <Select value={selectedCollection} onValueChange={setSelectedCollection}>
-                <SelectTrigger className="w-64 bg-background dark:bg-gray-800 text-foreground dark:text-white">
+                <SelectTrigger className="w-full sm:w-64 bg-background dark:bg-gray-800 text-foreground dark:text-white">
                   <SelectValue placeholder="Select a knowledge base" />
                 </SelectTrigger>
                 <SelectContent className="bg-background dark:bg-gray-800 text-foreground dark:text-white">
