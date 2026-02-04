@@ -1,10 +1,11 @@
-*,
-*::before,
-*::after {
+/* Scoped under unique root so plugin never affects host page */
+.rag-chatbot-widget *,
+.rag-chatbot-widget *::before,
+.rag-chatbot-widget *::after {
   box-sizing: border-box;
 }
 
-:root {
+.rag-chatbot-widget {
   --chat-primary-angle: 135deg;
   --chat-primary-start: #4562BB;
   --chat-primary-end: #02F17C;
@@ -15,8 +16,24 @@
   --chat-header-text: #ffffff;
 }
 
-.chat-toggle,
-.plugin-chat-toggle {
+/* Injected logo in host header - unique class so only our logo is styled */
+.rag-chatbot-widget-global-logo {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+@media (max-width: 480px) {
+  .rag-chatbot-widget-global-logo {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+.rag-chatbot-widget .chat-toggle,
+.rag-chatbot-widget .plugin-chat-toggle {
   position: fixed;
   bottom: 20px;
   right: 20px;
@@ -38,47 +55,47 @@
   z-index: 1000;
 }
 
-.chat-toggle:hover,
-.plugin-chat-toggle:hover {
+.rag-chatbot-widget .chat-toggle:hover,
+.rag-chatbot-widget .plugin-chat-toggle:hover {
   transform: scale(1.08) translateY(-2px);
   box-shadow:
     0 8px 24px rgba(0, 0, 0, 0.3),
     0 0 0 4px rgba(69, 98, 187, 0.15);
 }
 
-.chat-toggle:active,
-.plugin-chat-toggle:active {
+.rag-chatbot-widget .chat-toggle:active,
+.rag-chatbot-widget .plugin-chat-toggle:active {
   transform: scale(0.95);
   transition: transform 0.1s ease;
 }
 
-.chat-toggle .icon,
-.plugin-chat-toggle .plugin-icon,
-.plugin-chat-toggle .icon,
-.chat-toggle .plugin-icon {
+.rag-chatbot-widget .chat-toggle .icon,
+.rag-chatbot-widget .plugin-chat-toggle .plugin-icon,
+.rag-chatbot-widget .plugin-chat-toggle .icon,
+.rag-chatbot-widget .chat-toggle .plugin-icon {
   width: 24px;
   height: 24px;
   display: block;
   transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.chat-toggle.is-active,
-.plugin-chat-toggle.plugin-is-active {
+.rag-chatbot-widget .chat-toggle.is-active,
+.rag-chatbot-widget .plugin-chat-toggle.plugin-is-active {
   transform: scale(1.05) rotate(0deg);
   box-shadow:
     0 8px 24px rgba(0, 0, 0, 0.28),
     0 0 0 3px rgba(69, 98, 187, 0.2);
 }
 
-.chat-toggle.is-active .icon,
-.plugin-chat-toggle.plugin-is-active .icon,
-.chat-toggle.is-active .plugin-icon,
-.plugin-chat-toggle.plugin-is-active .plugin-icon {
+.rag-chatbot-widget .chat-toggle.is-active .icon,
+.rag-chatbot-widget .plugin-chat-toggle.plugin-is-active .icon,
+.rag-chatbot-widget .chat-toggle.is-active .plugin-icon,
+.rag-chatbot-widget .plugin-chat-toggle.plugin-is-active .plugin-icon {
   transform: none;
 }
 
-.chat-panel,
-.plugin-chat-panel {
+.rag-chatbot-widget .chat-panel,
+.rag-chatbot-widget .plugin-chat-panel {
   position: fixed;
   bottom: 90px;
   right: 20px;
@@ -107,8 +124,8 @@
     box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.chat-panel.is-open,
-.plugin-chat-panel.plugin-is-open {
+.rag-chatbot-widget .chat-panel.is-open,
+.rag-chatbot-widget .plugin-chat-panel.plugin-is-open {
   opacity: 1;
   transform: translateY(0) scale(1);
   pointer-events: auto;
@@ -124,8 +141,8 @@
     box-shadow 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.chat-header,
-.plugin-chat-header {
+.rag-chatbot-widget .chat-header,
+.rag-chatbot-widget .plugin-chat-header {
   background: var(--chat-primary);
   color: var(--chat-header-text);
   padding: 14px;
@@ -140,21 +157,21 @@
   border-radius: 16px 16px 0 0;
 }
 
-.chat-header-left,
-.plugin-chat-header-left {
+.rag-chatbot-widget .chat-header-left,
+.rag-chatbot-widget .plugin-chat-header-left {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
 }
 
-.chat-title,
-.plugin-chat-title {
+.rag-chatbot-widget .chat-title,
+.rag-chatbot-widget .plugin-chat-title {
   font-size: 16px;
   font-weight: 600;
 }
 
-.context-indicator {
+.rag-chatbot-widget .context-indicator {
   font-size: 12px;
   opacity: 0.8;
   background: rgba(255, 255, 255, 0.1);
@@ -164,8 +181,8 @@
 }
 
 
-.chat-header-right,
-.plugin-chat-header-right {
+.rag-chatbot-widget .chat-header-right,
+.rag-chatbot-widget .plugin-chat-header-right {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -174,17 +191,17 @@
   z-index: 1;
 }
 
-.chat-header-right button[data-tooltip],
-.plugin-chat-header-right button[data-tooltip],
-.chat-header-right [data-tooltip],
-.plugin-chat-header-right [data-tooltip] {
+.rag-chatbot-widget .chat-header-right button[data-tooltip],
+.rag-chatbot-widget .plugin-chat-header-right button[data-tooltip],
+.rag-chatbot-widget .chat-header-right [data-tooltip],
+.rag-chatbot-widget .plugin-chat-header-right [data-tooltip] {
   position: relative;
 }
 
-.chat-header-right button[data-tooltip]::after,
-.plugin-chat-header-right button[data-tooltip]::after,
-.chat-header-right [data-tooltip]::after,
-.plugin-chat-header-right [data-tooltip]::after {
+.rag-chatbot-widget .chat-header-right button[data-tooltip]::after,
+.rag-chatbot-widget .plugin-chat-header-right button[data-tooltip]::after,
+.rag-chatbot-widget .chat-header-right [data-tooltip]::after,
+.rag-chatbot-widget .plugin-chat-header-right [data-tooltip]::after {
   content: attr(data-tooltip);
   position: absolute;
   bottom: calc(100% + 8px);
@@ -204,10 +221,10 @@
   z-index: 10001;
 }
 
-.chat-header-right button[data-tooltip]::before,
-.plugin-chat-header-right button[data-tooltip]::before,
-.chat-header-right [data-tooltip]::before,
-.plugin-chat-header-right [data-tooltip]::before {
+.rag-chatbot-widget .chat-header-right button[data-tooltip]::before,
+.rag-chatbot-widget .plugin-chat-header-right button[data-tooltip]::before,
+.rag-chatbot-widget .chat-header-right [data-tooltip]::before,
+.rag-chatbot-widget .plugin-chat-header-right [data-tooltip]::before {
   content: '';
   position: absolute;
   bottom: calc(100% + 2px);
@@ -225,73 +242,73 @@
   filter: drop-shadow(0 2px 4px rgba(15, 23, 42, 0.1));
 }
 
-.chat-header-right button[data-tooltip]:hover::after,
-.chat-header-right button[data-tooltip]:focus-visible::after,
-.plugin-chat-header-right button[data-tooltip]:hover::after,
-.plugin-chat-header-right button[data-tooltip]:focus-visible::after,
-.chat-header-right [data-tooltip]:hover::after,
-.chat-header-right [data-tooltip]:focus-visible::after,
-.plugin-chat-header-right [data-tooltip]:hover::after,
-.plugin-chat-header-right [data-tooltip]:focus-visible::after {
+.rag-chatbot-widget .chat-header-right button[data-tooltip]:hover::after,
+.rag-chatbot-widget .chat-header-right button[data-tooltip]:focus-visible::after,
+.rag-chatbot-widget .plugin-chat-header-right button[data-tooltip]:hover::after,
+.rag-chatbot-widget .plugin-chat-header-right button[data-tooltip]:focus-visible::after,
+.rag-chatbot-widget .chat-header-right [data-tooltip]:hover::after,
+.rag-chatbot-widget .chat-header-right [data-tooltip]:focus-visible::after,
+.rag-chatbot-widget .plugin-chat-header-right [data-tooltip]:hover::after,
+.rag-chatbot-widget .plugin-chat-header-right [data-tooltip]:focus-visible::after {
   opacity: 1;
   transform: translate(-50%, 0) scale(1);
 }
 
-.chat-header-right button[data-tooltip]:hover::before,
-.chat-header-right button[data-tooltip]:focus-visible::before,
-.plugin-chat-header-right button[data-tooltip]:hover::before,
-.plugin-chat-header-right button[data-tooltip]:focus-visible::before,
-.chat-header-right [data-tooltip]:hover::before,
-.chat-header-right [data-tooltip]:focus-visible::before,
-.plugin-chat-header-right [data-tooltip]:hover::before,
-.plugin-chat-header-right [data-tooltip]:focus-visible::before {
+.rag-chatbot-widget .chat-header-right button[data-tooltip]:hover::before,
+.rag-chatbot-widget .chat-header-right button[data-tooltip]:focus-visible::before,
+.rag-chatbot-widget .plugin-chat-header-right button[data-tooltip]:hover::before,
+.rag-chatbot-widget .plugin-chat-header-right button[data-tooltip]:focus-visible::before,
+.rag-chatbot-widget .chat-header-right [data-tooltip]:hover::before,
+.rag-chatbot-widget .chat-header-right [data-tooltip]:focus-visible::before,
+.rag-chatbot-widget .plugin-chat-header-right [data-tooltip]:hover::before,
+.rag-chatbot-widget .plugin-chat-header-right [data-tooltip]:focus-visible::before {
   opacity: 1;
 }
 
 /* Expanded state tooltip overrides (show at bottom) */
-.plugin-chat-panel.is-expanded .plugin-chat-header-right [data-tooltip]::after {
+.rag-chatbot-widget .plugin-chat-panel.is-expanded .plugin-chat-header-right [data-tooltip]::after {
   bottom: auto;
   top: calc(100% + 8px);
   transform: translate(-50%, -6px) scale(0.95);
 }
 
-.plugin-chat-panel.is-expanded .plugin-chat-header-right [data-tooltip]::before {
+.rag-chatbot-widget .plugin-chat-panel.is-expanded .plugin-chat-header-right [data-tooltip]::before {
   bottom: auto;
   top: calc(100% + 2px);
   border-top: none;
   border-bottom: 4px solid #ffffff;
 }
 
-.plugin-chat-panel.is-expanded .plugin-chat-header-right [data-tooltip]:hover::after,
-.plugin-chat-panel.is-expanded .plugin-chat-header-right [data-tooltip]:focus-visible::after {
+.rag-chatbot-widget .plugin-chat-panel.is-expanded .plugin-chat-header-right [data-tooltip]:hover::after,
+.rag-chatbot-widget .plugin-chat-panel.is-expanded .plugin-chat-header-right [data-tooltip]:focus-visible::after {
   transform: translate(-50%, 0) scale(1);
 }
 
 /* Branding within chat header */
-.chat-brand,
-.plugin-chat-brand {
+.rag-chatbot-widget .chat-brand,
+.rag-chatbot-widget .plugin-chat-brand {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.chat-logo,
-.plugin-chat-logo {
+.rag-chatbot-widget .chat-logo,
+.rag-chatbot-widget .plugin-chat-logo {
   width: 24px;
   height: 24px;
   object-fit: contain;
 }
 
-.bot-avatar,
-.plugin-bot-avatar {
+.rag-chatbot-widget .bot-avatar,
+.rag-chatbot-widget .plugin-bot-avatar {
   width: 18px;
   height: 18px;
   object-fit: contain;
 }
 
-/* Logo injected into page header */
-.chat-global-logo,
-.plugin-chat-global-logo {
+/* Logo inside widget only - injected header logo uses .rag-chatbot-widget-global-logo */
+.rag-chatbot-widget .chat-global-logo,
+.rag-chatbot-widget .plugin-chat-global-logo {
   width: 28px;
   height: 28px;
   object-fit: contain;
@@ -299,13 +316,13 @@
   vertical-align: middle;
 }
 
-button {
+.rag-chatbot-widget button {
   padding: 0px;
   margin: 0px;
 }
 
-.icon.icon-refresh,
-.icon.icon-close {
+.rag-chatbot-widget .icon.icon-refresh,
+.rag-chatbot-widget .icon.icon-close {
   width: 18px;
   height: 18px;
   display: block;
@@ -314,18 +331,18 @@ button {
   mask-size: contain;
 }
 
-.icon-refresh {
+.rag-chatbot-widget .icon-refresh {
   -webkit-mask-image: url('${CONFIG.ui.iconsBaseUrl}/refresh.svg');
   mask-image: url('${CONFIG.ui.iconsBaseUrl}/refresh.svg');
 }
 
-.icon-close {
+.rag-chatbot-widget .icon-close {
   -webkit-mask-image: url('${CONFIG.ui.iconsBaseUrl}/close.svg');
   mask-image: url('${CONFIG.ui.iconsBaseUrl}/close.svg');
 }
 
-.new-chat-btn,
-.chat-close {
+.rag-chatbot-widget .new-chat-btn,
+.rag-chatbot-widget .chat-close {
   background: white;
   border: 1px solid rgba(17, 24, 39, 0.12);
   width: 40px;
@@ -344,14 +361,14 @@ button {
   border-color: rgba(17, 24, 39, 0.2);
 } */
 
-.new-chat-btn:focus-visible,
-.chat-close:focus-visible {
+.rag-chatbot-widget .new-chat-btn:focus-visible,
+.rag-chatbot-widget .chat-close:focus-visible {
   outline: 3px solid rgba(17, 24, 39, 0.2);
   outline-offset: 2px;
 }
 
-.chat-header-right .icon,
-.plugin-chat-header-right .icon {
+.rag-chatbot-widget .chat-header-right .icon,
+.rag-chatbot-widget .plugin-chat-header-right .icon {
   width: 18px;
   height: 18px;
   display: block;
@@ -368,8 +385,8 @@ button {
   mask-size: contain;
 }
 
-.new-chat-btn.is-cooldown,
-.plugin-new-chat-btn.is-cooldown {
+.rag-chatbot-widget .new-chat-btn.is-cooldown,
+.rag-chatbot-widget .plugin-new-chat-btn.is-cooldown {
   cursor: not-allowed;
   opacity: 0.5;
   background: #f3f4f6;
@@ -378,22 +395,22 @@ button {
   pointer-events: none;
 }
 
-.new-chat-btn.is-cooldown .icon,
-.plugin-new-chat-btn.is-cooldown .icon {
+.rag-chatbot-widget .new-chat-btn.is-cooldown .icon,
+.rag-chatbot-widget .plugin-new-chat-btn.is-cooldown .icon {
   opacity: 0.4;
   filter: grayscale(100%);
 }
 
-.chat-header-right button:hover:not(:disabled),
-.plugin-chat-header-right button:hover:not(:disabled),
-.chat-header-right .new-chat-btn:hover,
-.plugin-chat-header-right .new-chat-btn:hover,
-.chat-header-right .chat-close:hover,
-.plugin-chat-header-right .chat-close:hover {
+.rag-chatbot-widget .chat-header-right button:hover:not(:disabled),
+.rag-chatbot-widget .plugin-chat-header-right button:hover:not(:disabled),
+.rag-chatbot-widget .chat-header-right .new-chat-btn:hover,
+.rag-chatbot-widget .plugin-chat-header-right .new-chat-btn:hover,
+.rag-chatbot-widget .chat-header-right .chat-close:hover,
+.rag-chatbot-widget .plugin-chat-header-right .chat-close:hover {
   transform: translateY(-1px);
 }
 
-.chat-box {
+.rag-chatbot-widget .chat-box {
   flex: 1;
   padding: 12px;
   overflow-y: auto;
@@ -401,7 +418,7 @@ button {
   position: relative;
 }
 
-.chat-empty {
+.rag-chatbot-widget .chat-empty {
   position: absolute;
   top: 64px;
   bottom: 64px;
@@ -416,23 +433,23 @@ button {
   pointer-events: none;
 }
 
-.chat-empty .empty-logo {
+.rag-chatbot-widget .chat-empty .empty-logo {
   width: 56px;
   height: 56px;
   object-fit: contain;
 }
 
-.chat-empty .empty-title {
+.rag-chatbot-widget .chat-empty .empty-title {
   font-weight: 600;
 }
 
-.chat-empty .empty-subtitle {
+.rag-chatbot-widget .chat-empty .empty-subtitle {
   color: #6b7280;
   text-align: center;
   max-width: 80%;
 }
 
-.chat-empty {
+.rag-chatbot-widget .chat-empty {
   position: absolute;
   inset: 64px 0 64px 0;
   display: flex;
@@ -444,25 +461,25 @@ button {
   pointer-events: none;
 }
 
-.empty-logo {
+.rag-chatbot-widget .empty-logo {
   width: 56px;
   height: 56px;
   object-fit: contain;
 }
 
-.empty-title {
+.rag-chatbot-widget .empty-title {
   font-size: 18px;
   font-weight: 600;
 }
 
-.empty-subtitle {
+.rag-chatbot-widget .empty-subtitle {
   font-size: 14px;
   color: #4b5563;
   text-align: center;
   max-width: 80%;
 }
 
-.msg {
+.rag-chatbot-widget .msg {
   margin: 8px 0;
   padding: 8px;
   border-radius: 10px;
@@ -474,7 +491,7 @@ button {
   gap: 8px;
 }
 
-.msg.user {
+.rag-chatbot-widget .msg.user {
   background: var(--chat-primary);
   color: #fff;
   margin-left: auto;
@@ -482,46 +499,46 @@ button {
   flex-direction: row-reverse;
 }
 
-.msg.bot {
+.rag-chatbot-widget .msg.bot {
   background: #e5e7eb;
   color: #111;
   margin-right: auto;
   max-width: 95%;
 }
 
-.msg-avatar {
+.rag-chatbot-widget .msg-avatar {
   display: none;
 }
 
-.msg-content {
+.rag-chatbot-widget .msg-content {
   flex: 1;
   min-width: 0;
 }
 
-.msg.bot.error {
+.rag-chatbot-widget .msg.bot.error {
   background: #fee2e2;
   color: #dc2626;
   border: 1px solid #fecaca;
 }
 
-.msg.bot.welcome {
+.rag-chatbot-widget .msg.bot.welcome {
   background: #dbeafe;
   color: #1e40af;
   border: 1px solid #bfdbfe;
 }
 
-.msg.bot .msg-content {
+.rag-chatbot-widget .msg.bot .msg-content {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.msg.bot .sources-section-wrapper {
+.rag-chatbot-widget .msg.bot .sources-section-wrapper {
   margin-bottom: 0;
   padding-bottom: 0;
 }
 
-.msg.bot .source-section-title {
+.rag-chatbot-widget .msg.bot .source-section-title {
   font-weight: 600;
   color: #1f2937;
   margin-top: 8px;
@@ -531,8 +548,7 @@ button {
 }
 
 /* Container for source file buttons */
-/* Container for source file buttons */
-.msg.bot .sources-container {
+.rag-chatbot-widget .msg.bot .sources-container {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -542,17 +558,17 @@ button {
   align-items: stretch;
 }
 
-.prose .sources-section-wrapper:last-child,
-.prose .sources-section-wrapper+* {
+.rag-chatbot-widget .prose .sources-section-wrapper:last-child,
+.rag-chatbot-widget .prose .sources-section-wrapper+* {
   margin-top: 0;
 }
 
-.prose .sources-section-wrapper {
+.rag-chatbot-widget .prose .sources-section-wrapper {
   margin-bottom: 0;
   padding-bottom: 0;
 }
 
-.msg.bot .sources-overflow {
+.rag-chatbot-widget .msg.bot .sources-overflow {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -566,7 +582,7 @@ button {
   white-space: nowrap;
 }
 
-.msg.bot .source-download {
+.rag-chatbot-widget .msg.bot .source-download {
   display: inline-flex;
   align-items: flex-start;
   gap: 6px;
@@ -588,41 +604,41 @@ button {
   text-align: left;
 }
 
-.msg.bot .source-download::before {
+.rag-chatbot-widget .msg.bot .source-download::before {
   font-size: 14px;
   line-height: 1;
 }
 
-.msg.bot .source-download:hover {
+.rag-chatbot-widget .msg.bot .source-download:hover {
   background: linear-gradient(135deg, rgba(69, 98, 187, 0.1), rgba(2, 241, 124, 0.1));
   border-color: rgba(69, 98, 187, 0.3);
   box-shadow: 0 3px 8px rgba(69, 98, 187, 0.15);
   transform: translateY(-1px);
 }
 
-.msg.bot .source-download:active {
+.rag-chatbot-widget .msg.bot .source-download:active {
   transform: translateY(0);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.msg.bot .source-download.is-loading {
+.rag-chatbot-widget .msg.bot .source-download.is-loading {
   cursor: wait;
   opacity: 0.7;
   pointer-events: none;
 }
 
-.msg.bot .source-download.is-loading::before {
+.rag-chatbot-widget .msg.bot .source-download.is-loading::before {
   content: "⏳";
 }
 
-.msg.bot .source-download.download-error {
+.rag-chatbot-widget .msg.bot .source-download.download-error {
   border-color: #dc2626;
   color: #dc2626;
   background: #fee2e2;
 }
 
 /* Web crawl source links that open in new tab */
-.msg.bot .source-link {
+.rag-chatbot-widget .msg.bot .source-link {
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
@@ -646,13 +662,13 @@ button {
   text-align: left;
 }
 
-.msg.bot .source-link-text {
+.rag-chatbot-widget .msg.bot .source-link-text {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.msg.bot .source-link-icon {
+.rag-chatbot-widget .msg.bot .source-link-icon {
   flex-shrink: 0;
   width: 14px;
   height: 14px;
@@ -661,7 +677,7 @@ button {
   transition: opacity 0.2s ease, color 0.2s ease;
 }
 
-.msg.bot .source-link:hover {
+.rag-chatbot-widget .msg.bot .source-link:hover {
   background: linear-gradient(135deg, rgba(69, 98, 187, 0.1), rgba(2, 241, 124, 0.1));
   border-color: rgba(69, 98, 187, 0.3);
   box-shadow: 0 3px 8px rgba(69, 98, 187, 0.15);
@@ -669,31 +685,29 @@ button {
   text-decoration: none;
 }
 
-.msg.bot .source-link:hover .source-link-icon {
+.rag-chatbot-widget .msg.bot .source-link:hover .source-link-icon {
   opacity: 1;
   color: #2563eb;
 }
 
-.msg.bot .source-link:active {
+.rag-chatbot-widget .msg.bot .source-link:active {
   transform: translateY(0);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.msg.bot .sources-container .source-download,
-.msg.bot .sources-container .source-link {
+.rag-chatbot-widget .msg.bot .sources-container .source-download,
+.rag-chatbot-widget .msg.bot .sources-container .source-link {
   margin: 0;
   width: 100%;
 }
 
-
-
-.msg.bot .msg-body {
+.rag-chatbot-widget .msg.bot .msg-body {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.msg.bot .msg-source {
+.rag-chatbot-widget .msg.bot .msg-source {
   margin-top: auto;
   font-size: 12px;
   color: #4b5563;
@@ -702,85 +716,85 @@ button {
   opacity: 0.85;
 }
 
-.msg.bot .source-label {
+.rag-chatbot-widget .msg.bot .source-label {
   font-weight: 600;
   color: #1f2937;
   margin-right: 4px;
 }
 
 /* Enhanced formatting for bot messages */
-.msg.bot strong {
+.rag-chatbot-widget .msg.bot strong {
   font-weight: 600;
   color: #1f2937;
 }
 
-.msg.bot br {
+.rag-chatbot-widget .msg.bot br {
   margin: 0;
   display: none;
 }
 
 /* Better spacing for structured content */
-.msg.bot {
+.rag-chatbot-widget .msg.bot {
   white-space: pre-wrap;
 }
 
-.msg.bot div {
+.rag-chatbot-widget .msg.bot div {
   margin: 2px 0;
 }
 
 /* Better bullet point spacing and formatting */
-.msg.bot span {
+.rag-chatbot-widget .msg.bot span {
   display: inline;
 }
 
 /* Enhanced bullet point styling */
-.msg.bot div {
+.rag-chatbot-widget .msg.bot div {
   line-height: 1.4;
 }
 
 /* Ensure proper spacing for bullet points */
-.msg.bot div[style*="margin: 4px 0"] {
+.rag-chatbot-widget .msg.bot div[style*="margin: 4px 0"] {
   padding-left: 8px;
   text-indent: -8px;
 }
 
-.text-sm {
+.rag-chatbot-widget .text-sm {
   font-size: 14px;
   line-height: 1.5;
 }
 
-.max-w-none {
+.rag-chatbot-widget .max-w-none {
   max-width: none;
 }
 
-.prose {
+.rag-chatbot-widget .prose {
   color: #111827;
   line-height: 1.5;
 }
 
-.prose strong {
+.rag-chatbot-widget .prose strong {
   font-weight: 600;
   color: #111827;
 }
 
-.prose div,
-.prose p {
+.rag-chatbot-widget .prose div,
+.rag-chatbot-widget .prose p {
   margin: 2px 0;
 }
 
-.prose br {
+.rag-chatbot-widget .prose br {
   display: none;
 }
 
-.prose-sm {
+.rag-chatbot-widget .prose-sm {
   font-size: 14px;
 }
 
-.prose-sm strong {
+.rag-chatbot-widget .prose-sm strong {
   font-weight: 600;
 }
 
-.msg.bot div[style*="font-weight: bold"] {
+.rag-chatbot-widget .msg.bot div[style*="font-weight: bold"] {
   border-left: 3px solid var(--chat-primary-solid);
   padding-left: 8px;
   background: rgba(37, 99, 235, 0.05);
@@ -788,33 +802,33 @@ button {
 }
 
 /* Tables inside bot messages */
-.msg.bot table.chat-table,
-.plugin-msg table.plugin-table {
+.rag-chatbot-widget .msg.bot table.chat-table,
+.rag-chatbot-widget .plugin-msg table.plugin-table {
   width: 100%;
   border-collapse: collapse;
   margin: 8px 0 4px 0;
   background: #fff;
 }
 
-.msg.bot table.chat-table th,
-.msg.bot table.chat-table td,
-.plugin-msg table.plugin-table th,
-.plugin-msg table.plugin-table td {
+.rag-chatbot-widget .msg.bot table.chat-table th,
+.rag-chatbot-widget .msg.bot table.chat-table td,
+.rag-chatbot-widget .plugin-msg table.plugin-table th,
+.rag-chatbot-widget .plugin-msg table.plugin-table td {
   border: 1px solid rgba(17, 24, 39, 0.12);
   padding: 8px 10px;
   text-align: left;
   vertical-align: top;
 }
 
-.msg.bot table.chat-table thead th,
-.plugin-msg table.plugin-table thead th {
+.rag-chatbot-widget .msg.bot table.chat-table thead th,
+.rag-chatbot-widget .plugin-msg table.plugin-table thead th {
   background: rgba(37, 99, 235, 0.06);
   color: #1f2937;
   font-weight: 600;
 }
 
 /* Structured headings generated by formatter */
-.msg-heading {
+.rag-chatbot-widget .msg-heading {
   margin: 16px 0 8px 0;
   padding: 10px 12px;
   border-left: 3px solid var(--chat-primary-solid);
@@ -824,20 +838,20 @@ button {
   color: #1f2937;
 }
 
-.msg-heading.heading-1 {
+.rag-chatbot-widget .msg-heading.heading-1 {
   font-size: 18px;
 }
 
-.msg-heading.heading-2 {
+.rag-chatbot-widget .msg-heading.heading-2 {
   font-size: 17px;
 }
 
-.msg-heading.heading-3 {
+.rag-chatbot-widget .msg-heading.heading-3 {
   font-size: 16px;
 }
 
 /* Markdown headings in bot messages */
-.msg.bot .chat-heading {
+.rag-chatbot-widget .msg.bot .chat-heading {
   font-weight: 600;
   color: #1f2937;
   margin: 0;
@@ -845,38 +859,38 @@ button {
   line-height: 1.3;
 }
 
-.msg.bot .chat-heading-1 {
+.rag-chatbot-widget .msg.bot .chat-heading-1 {
   font-size: 20px;
   margin-top: 8px;
   margin-bottom: 4px;
 }
 
-.msg.bot .chat-heading-2 {
+.rag-chatbot-widget .msg.bot .chat-heading-2 {
   font-size: 18px;
   margin-top: 6px;
   margin-bottom: 3px;
 }
 
-.msg.bot .chat-heading-3 {
+.rag-chatbot-widget .msg.bot .chat-heading-3 {
   font-size: 16px;
   margin-top: 5px;
   margin-bottom: 2px;
 }
 
-.msg.bot .chat-heading-4 {
+.rag-chatbot-widget .msg.bot .chat-heading-4 {
   font-size: 15px;
   margin-top: 4px;
   margin-bottom: 2px;
 }
 
-.msg.bot .chat-heading-5 {
+.rag-chatbot-widget .msg.bot .chat-heading-5 {
   font-size: 14px;
   margin-top: 4px;
   margin-bottom: 2px;
   font-weight: 600;
 }
 
-.msg.bot .chat-heading-6 {
+.rag-chatbot-widget .msg.bot .chat-heading-6 {
   font-size: 14px;
   margin-top: 4px;
   margin-bottom: 2px;
@@ -886,52 +900,45 @@ button {
 /* Typing dots animation removed from here as it is redefined below with .dot class support */
 
 /* Thinking indicator styles */
-.thinking-indicator,
-.plugin-thinking-indicator {
+.rag-chatbot-widget .thinking-indicator,
+.rag-chatbot-widget .plugin-thinking-indicator {
   display: flex;
   align-items: center;
-  /* Changed from flex-start to center */
   white-space: normal;
-  /* Override pre-wrap from .msg.bot */
 }
 
-.thinking-content,
-.plugin-thinking-content {
+.rag-chatbot-widget .thinking-content,
+.rag-chatbot-widget .plugin-thinking-content {
   display: flex;
-  /* Changed from inline-block to allow proper alignment */
   align-items: center;
   gap: 8px;
-  /* Restoring gap potentially needed if inner structure relies on it, though inner has its own flax now */
-  /* background-color, border, border-radius removed to blend with parent msg bubble */
   padding: 0;
-  /* Remove padding as parent msg has padding */
   width: 100%;
-  /* Ensure it takes available space in the flex container */
 }
 
-.thinking-inner,
-.plugin-thinking-inner {
+.rag-chatbot-widget .thinking-inner,
+.rag-chatbot-widget .plugin-thinking-inner {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.thinking-status,
-.plugin-thinking-status {
+.rag-chatbot-widget .thinking-status,
+.rag-chatbot-widget .plugin-thinking-status {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.thinking-logo,
-.plugin-thinking-logo {
+.rag-chatbot-widget .thinking-logo,
+.rag-chatbot-widget .plugin-thinking-logo {
   width: 16px;
   height: 16px;
   flex-shrink: 0;
 }
 
-.thinking-spinner,
-.plugin-thinking-spinner {
+.rag-chatbot-widget .thinking-spinner,
+.rag-chatbot-widget .plugin-thinking-spinner {
   width: 16px;
   height: 16px;
   animation: spin 1s linear infinite;
@@ -939,8 +946,8 @@ button {
   flex-shrink: 0;
 }
 
-.thinking-text,
-.plugin-thinking-text {
+.rag-chatbot-widget .thinking-text,
+.rag-chatbot-widget .plugin-thinking-text {
   font-size: 14px;
   color: #6b7280;
   line-height: 1.5;
@@ -953,7 +960,7 @@ button {
 }
 
 /* Typing Dots Animation */
-.typing-dots {
+.rag-chatbot-widget .typing-dots {
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -961,9 +968,8 @@ button {
   vertical-align: middle;
 }
 
-.typing-dots .dot {
+.rag-chatbot-widget .typing-dots .dot {
   display: inline-block;
-  /* Required for transform animation */
   font-size: 1.5rem;
   line-height: 1;
   color: #6b7280;
@@ -974,15 +980,15 @@ button {
   opacity: 1;
 }
 
-.typing-dots .dot:nth-child(1) {
+.rag-chatbot-widget .typing-dots .dot:nth-child(1) {
   animation-delay: 0s;
 }
 
-.typing-dots .dot:nth-child(2) {
+.rag-chatbot-widget .typing-dots .dot:nth-child(2) {
   animation-delay: 0.2s;
 }
 
-.typing-dots .dot:nth-child(3) {
+.rag-chatbot-widget .typing-dots .dot:nth-child(3) {
   animation-delay: 0.4s;
 }
 
@@ -1000,7 +1006,7 @@ button {
   }
 }
 
-.chat-input {
+.rag-chatbot-widget .chat-input {
   display: flex;
   align-items: center;
   border-top: 1px solid #ddd;
@@ -1009,16 +1015,16 @@ button {
   gap: 8px;
 }
 
-.chat-input-field {
+.rag-chatbot-widget .chat-input-field {
   position: relative;
   flex: 1;
 }
 
-.chat-input-field input {
+.rag-chatbot-widget .chat-input-field input {
   width: 100%;
 }
 
-.custom-placeholder {
+.rag-chatbot-widget .custom-placeholder {
   position: absolute;
   top: 50%;
   left: 16px;
@@ -1035,18 +1041,18 @@ button {
   transition: opacity 0.2s ease, visibility 0.2s ease;
 }
 
-.custom-placeholder-highlight {
+.rag-chatbot-widget .custom-placeholder-highlight {
   color: var(--chat-placeholder-highlight-solid, #007bff);
   font-weight: 600;
 }
 
-.chat-input-field.has-value .custom-placeholder,
-.chat-input-field.is-focused .custom-placeholder {
+.rag-chatbot-widget .chat-input-field.has-value .custom-placeholder,
+.rag-chatbot-widget .chat-input-field.is-focused .custom-placeholder {
   opacity: 0;
   visibility: hidden;
 }
 
-.chat-input input {
+.rag-chatbot-widget .chat-input input {
   flex: 1;
   border: 1px solid #d1d5db;
   border-radius: 8px;
@@ -1058,17 +1064,17 @@ button {
   min-height: 20px;
 }
 
-.chat-input input:focus {
+.rag-chatbot-widget .chat-input input:focus {
   border-color: #2563eb;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
-.chat-input input:disabled {
+.rag-chatbot-widget .chat-input input:disabled {
   background-color: #f3f4f6;
   color: #6b7280;
 }
 
-.chat-input button {
+.rag-chatbot-widget .chat-input button {
   background: #fff;
   color: #111827;
   border: 2px solid transparent;
@@ -1091,11 +1097,11 @@ button {
 }
 
 /* Stop button matches header icon style */
-#chat-stop {
+.rag-chatbot-widget #chat-stop {
   min-width: 44px;
 }
 
-#chat-stop .icon {
+.rag-chatbot-widget #chat-stop .icon {
   width: 18px;
   height: 18px;
   display: block;
@@ -1112,43 +1118,42 @@ button {
   mask-size: contain;
 }
 
-.chat-input button:hover:not(:disabled) {
+.rag-chatbot-widget .chat-input button:hover:not(:disabled) {
   box-shadow: 0 6px 14px rgba(69, 98, 187, 0.25);
   transform: translateY(-1px);
 }
 
-.chat-input button:disabled {
+.rag-chatbot-widget .chat-input button:disabled {
   background-image: linear-gradient(#f3f4f6, #f3f4f6), linear-gradient(135deg, #d1d5db, #9ca3af);
   color: #9ca3af;
   cursor: not-allowed;
   box-shadow: none;
 }
 
-.chat-input button .icon {
+.rag-chatbot-widget .chat-input button .icon {
   width: 18px;
   height: 18px;
   display: block;
   background-color: var(--chat-primary);
-  /* filter: brightness(0) saturate(100%) invert(22%) sepia(61%) saturate(1031%) hue-rotate(195deg) brightness(98%) contrast(98%); */
 }
 
 /* Responsive layout adjustments */
 @media (max-width: 768px) {
 
-  .chat-panel,
-  .plugin-chat-panel {
+  .rag-chatbot-widget .chat-panel,
+  .rag-chatbot-widget .plugin-chat-panel {
     right: 12px;
     bottom: 80px;
     width: min(92vw, 420px);
     height: min(80vh, 600px);
   }
 
-  .chat-input input {
+  .rag-chatbot-widget .chat-input input {
     padding: 14px;
     font-size: 14px;
   }
 
-  .chat-input button {
+  .rag-chatbot-widget .chat-input button {
     padding: 14px 16px;
     min-width: 44px;
     font-size: 15px;
@@ -1157,8 +1162,8 @@ button {
 
 @media (max-width: 480px) {
 
-  .chat-toggle,
-  .plugin-chat-toggle {
+  .rag-chatbot-widget .chat-toggle,
+  .rag-chatbot-widget .plugin-chat-toggle {
     bottom: max(12px, env(safe-area-inset-bottom));
     right: 12px;
     width: 56px;
@@ -1166,8 +1171,8 @@ button {
     font-size: 24px;
   }
 
-  .chat-panel,
-  .plugin-chat-panel {
+  .rag-chatbot-widget .chat-panel,
+  .rag-chatbot-widget .plugin-chat-panel {
     left: 8px;
     right: 8px;
     bottom: max(72px, calc(env(safe-area-inset-bottom) + 56px));
@@ -1177,34 +1182,34 @@ button {
     border-radius: 12px;
   }
 
-  .chat-header,
-  .plugin-chat-header {
+  .rag-chatbot-widget .chat-header,
+  .rag-chatbot-widget .plugin-chat-header {
     padding: 12px;
     font-size: 15px;
     border-radius: 12px 12px 0 0;
   }
 
-  .ai-disclaimer,
-  .plugin-ai-disclaimer {
+  .rag-chatbot-widget .ai-disclaimer,
+  .rag-chatbot-widget .plugin-ai-disclaimer {
     border-radius: 0 0 12px 12px;
   }
 
-  .chat-title,
-  .plugin-chat-title {
+  .rag-chatbot-widget .chat-title,
+  .rag-chatbot-widget .plugin-chat-title {
     font-size: 15px;
   }
 
-  .chat-global-logo,
-  .plugin-chat-global-logo {
+  .rag-chatbot-widget .chat-global-logo,
+  .rag-chatbot-widget .plugin-chat-global-logo {
     width: 24px;
     height: 24px;
   }
 
-  .chat-box {
+  .rag-chatbot-widget .chat-box {
     padding: 10px;
   }
 
-  .msg {
+  .rag-chatbot-widget .msg {
     max-width: 95%;
     gap: 6px;
   }
@@ -1213,8 +1218,8 @@ button {
 /* Extra-small devices: ensure full-bleed fit and readable inputs */
 @media (max-width: 360px) {
 
-  .chat-panel,
-  .plugin-chat-panel {
+  .rag-chatbot-widget .chat-panel,
+  .rag-chatbot-widget .plugin-chat-panel {
     left: 6px;
     right: 6px;
     bottom: max(68px, calc(env(safe-area-inset-bottom) + 52px));
@@ -1223,31 +1228,31 @@ button {
     border-radius: 10px;
   }
 
-  .chat-input input {
+  .rag-chatbot-widget .chat-input input {
     padding: 12px;
     font-size: 14px;
   }
 
-  .chat-input button {
+  .rag-chatbot-widget .chat-input button {
     padding: 12px 14px;
     min-width: 42px;
     font-size: 14px;
   }
 
-  .chat-header,
-  .plugin-chat-header {
+  .rag-chatbot-widget .chat-header,
+  .rag-chatbot-widget .plugin-chat-header {
     border-radius: 10px 10px 0 0;
   }
 
-  .ai-disclaimer,
-  .plugin-ai-disclaimer {
+  .rag-chatbot-widget .ai-disclaimer,
+  .rag-chatbot-widget .plugin-ai-disclaimer {
     border-radius: 0 0 10px 10px;
   }
 }
 
 /* AI Disclaimer */
-.ai-disclaimer,
-.plugin-ai-disclaimer {
+.rag-chatbot-widget .ai-disclaimer,
+.rag-chatbot-widget .plugin-ai-disclaimer {
   font-size: 11px;
   color: #6b7280;
   text-align: center;
@@ -1261,37 +1266,37 @@ button {
 
 @media (max-width: 768px) {
 
-  .ai-disclaimer,
-  .plugin-ai-disclaimer {
+  .rag-chatbot-widget .ai-disclaimer,
+  .rag-chatbot-widget .plugin-ai-disclaimer {
     font-size: 10px;
     padding: 3px 6px;
   }
 }
 
 /* Expanded State */
-.plugin-chat-panel.is-expanded {
+.rag-chatbot-widget .plugin-chat-panel.is-expanded {
   width: 80vw;
   height: 90vh;
   max-width: none;
   max-height: 90vh;
 }
 
-.plugin-chat-panel.is-expanded .plugin-chat-body {
+.rag-chatbot-widget .plugin-chat-panel.is-expanded .plugin-chat-body {
   padding: 0;
 }
 
-.plugin-chat-panel.is-expanded .plugin-chat-header {
+.rag-chatbot-widget .plugin-chat-panel.is-expanded .plugin-chat-header {
   padding: 8px;
 }
 
-.plugin-chat-body {
+.rag-chatbot-widget .plugin-chat-body {
   display: flex;
   flex: 1;
   overflow: hidden;
   height: 100%;
 }
 
-.plugin-chat-main {
+.rag-chatbot-widget .plugin-chat-main {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -1300,21 +1305,19 @@ button {
   background: #f9fafb;
 }
 
-.plugin-chat-sidebar {
+.rag-chatbot-widget .plugin-chat-sidebar {
   width: 260px;
   background: #f9fafb;
   border-right: 1px solid rgba(17, 24, 39, 0.1);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  /* Smoother transition */
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), margin 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
-  /* Prevent content squishing/flashing */
   white-space: nowrap;
 }
 
-.plugin-chat-sidebar.is-hidden {
+.rag-chatbot-widget .plugin-chat-sidebar.is-hidden {
   width: 0 !important;
   min-width: 0 !important;
   border-right: none;
@@ -1322,7 +1325,7 @@ button {
 }
 
 /* Sidebar header now contains toggle */
-.plugin-sidebar-header {
+.rag-chatbot-widget .plugin-sidebar-header {
   padding: 16px;
   border-bottom: 1px solid rgba(17, 24, 39, 0.06);
   background: #fff;
@@ -1331,15 +1334,15 @@ button {
   align-items: center;
 }
 
-.plugin-sidebar-header h3 {
+.rag-chatbot-widget .plugin-sidebar-header h3 {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
   color: #1f2937;
 }
 
-.plugin-sidebar-content,
-.sidebar-content {
+.rag-chatbot-widget .plugin-sidebar-content,
+.rag-chatbot-widget .sidebar-content {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -1349,10 +1352,9 @@ button {
 }
 
 /* Sidebar Toggle Button Styles */
-.sidebar-toggle,
-.sidebar-show-btn {
+.rag-chatbot-widget .sidebar-toggle,
+.rag-chatbot-widget .sidebar-show-btn {
   display: none;
-  /* Default hidden */
   background: white;
   border: 1px solid rgba(17, 24, 39, 0.1);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
@@ -1365,13 +1367,13 @@ button {
   z-index: 10;
 }
 
-.sidebar-toggle:hover,
-.sidebar-show-btn:hover {
+.rag-chatbot-widget .sidebar-toggle:hover,
+.rag-chatbot-widget .sidebar-show-btn:hover {
   background: #f3f4f6;
 }
 
-.sidebar-toggle .icon,
-.sidebar-show-btn .icon {
+.rag-chatbot-widget .sidebar-toggle .icon,
+.rag-chatbot-widget .sidebar-show-btn .icon {
   width: 20px;
   height: 20px;
   background-color: #374151;
@@ -1385,35 +1387,26 @@ button {
   mask-position: center;
 }
 
-/* Only show sidebar-toggle (close btn) inside header when expanded */
-/* Since it's inside the sidebar, it's visible if sidebar is visible */
-.plugin-chat-panel.is-expanded .sidebar-toggle {
+.rag-chatbot-widget .plugin-chat-panel.is-expanded .sidebar-toggle {
   display: flex;
 }
 
-/* Position show button in main area when sidebar is hidden but expanded */
-.sidebar-show-btn {
+.rag-chatbot-widget .sidebar-show-btn {
   align-self: flex-start;
   margin: 12px 0 0 12px;
 }
 
-/* Logic: If sidebar is hidden AND expanded, show sidebar-show-btn */
-/* We can target the sidebar-show-btn inside .chat-main if .chat-sidebar has .is-hidden */
-/* Note: chat-sidebar and chat-main are siblings. */
-
-.plugin-chat-panel.is-expanded .plugin-chat-sidebar.is-hidden+.plugin-chat-main .sidebar-show-btn {
+.rag-chatbot-widget .plugin-chat-panel.is-expanded .plugin-chat-sidebar.is-hidden+.plugin-chat-main .sidebar-show-btn {
   display: flex;
 }
 
-/* If sidebar is NOT hidden (and expanded), the check is implied by default being display:none */
-
-.plugin-history-list {
+.rag-chatbot-widget .plugin-history-list {
   flex: 1;
   overflow-y: auto;
   padding: 12px;
 }
 
-.plugin-history-item {
+.rag-chatbot-widget .plugin-history-item {
   padding: 10px 12px;
   border-radius: 8px;
   cursor: pointer;
@@ -1424,11 +1417,11 @@ button {
   justify-content: space-between;
 }
 
-.plugin-history-item:hover {
+.rag-chatbot-widget .plugin-history-item:hover {
   background: rgba(17, 24, 39, 0.05);
 }
 
-.plugin-history-item.is-active {
+.rag-chatbot-widget .plugin-history-item.is-active {
   background: #fff;
   box-shadow: 0 4px 12px rgba(69, 98, 187, 0.12);
   border: 1px solid transparent;
@@ -1439,13 +1432,13 @@ button {
   z-index: 1;
 }
 
-.plugin-history-content {
+.rag-chatbot-widget .plugin-history-content {
   flex: 1;
   min-width: 0;
   margin-right: 8px;
 }
 
-.plugin-history-title {
+.rag-chatbot-widget .plugin-history-title {
   font-size: 14px;
   font-weight: 500;
   color: #374151;
@@ -1454,20 +1447,20 @@ button {
   text-overflow: ellipsis;
 }
 
-.plugin-history-date {
+.rag-chatbot-widget .plugin-history-date {
   font-size: 11px;
   color: #9ca3af;
   margin-top: 2px;
 }
 
-.plugin-history-actions {
+.rag-chatbot-widget .plugin-history-actions {
   opacity: 1;
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-.plugin-history-delete {
+.rag-chatbot-widget .plugin-history-delete {
   background: none;
   border: none;
   cursor: pointer;
@@ -1479,7 +1472,7 @@ button {
   justify-content: center;
 }
 
-.plugin-history-delete .icon {
+.rag-chatbot-widget .plugin-history-delete .icon {
   width: 16px !important;
   height: 16px !important;
   background: #dc2626 !important;
@@ -1493,16 +1486,15 @@ button {
   mask-size: contain;
 }
 
-.plugin-history-delete:hover {
+.rag-chatbot-widget .plugin-history-delete:hover {
   background: #fee2e2;
 }
 
-
-.plugin-history-delete:hover .icon {
+.rag-chatbot-widget .plugin-history-delete:hover .icon {
   background: #b91c1c !important;
 }
 
-.plugin-history-edit {
+.rag-chatbot-widget .plugin-history-edit {
   background: none;
   border: none;
   cursor: pointer;
@@ -1514,7 +1506,7 @@ button {
   justify-content: center;
 }
 
-.plugin-history-edit .icon {
+.rag-chatbot-widget .plugin-history-edit .icon {
   width: 16px !important;
   height: 16px !important;
   background: #6b7280 !important;
@@ -1528,15 +1520,15 @@ button {
   mask-size: contain;
 }
 
-.plugin-history-edit:hover {
+.rag-chatbot-widget .plugin-history-edit:hover {
   background: #f3f4f6;
 }
 
-.plugin-history-edit:hover .icon {
+.rag-chatbot-widget .plugin-history-edit:hover .icon {
   background: #4b5563 !important;
 }
 
-.plugin-history-rename-input {
+.rag-chatbot-widget .plugin-history-rename-input {
   width: 100%;
   padding: 4px 6px;
   border: 1px solid var(--chat-primary);
@@ -1544,17 +1536,16 @@ button {
   font-size: 14px;
   outline: none;
   margin: -5px 0 -5px -6px;
-  /* Align with text */
 }
 
-.plugin-history-empty {
+.rag-chatbot-widget .plugin-history-empty {
   text-align: center;
   color: #6b7280;
   padding: 20px;
   font-size: 14px;
 }
 
-.plugin-chat-icon-btn {
+.rag-chatbot-widget .plugin-chat-icon-btn {
   background: white;
   border: 1px solid rgba(17, 24, 39, 0.12);
   width: 40px;
@@ -1567,22 +1558,21 @@ button {
   transition: all 0.2s ease;
 }
 
-.plugin-chat-icon-btn:hover {
+.rag-chatbot-widget .plugin-chat-icon-btn:hover {
   transform: translateY(-1px);
 }
 
-
-.plugin-settings-panel {
+.rag-chatbot-widget .plugin-settings-panel {
   padding: 16px;
   flex: 1;
   overflow-y: auto;
 }
 
-.plugin-settings-item {
+.rag-chatbot-widget .plugin-settings-item {
   margin-bottom: 20px;
 }
 
-.plugin-settings-back {
+.rag-chatbot-widget .plugin-settings-back {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1596,11 +1586,11 @@ button {
   padding: 0;
 }
 
-.plugin-settings-back:hover {
+.rag-chatbot-widget .plugin-settings-back:hover {
   text-decoration: underline;
 }
 
-.plugin-settings-item label {
+.rag-chatbot-widget .plugin-settings-item label {
   display: block;
   font-size: 13px;
   font-weight: 600;
@@ -1608,12 +1598,12 @@ button {
   margin-bottom: 6px;
 }
 
-.plugin-settings-item span {
+.rag-chatbot-widget .plugin-settings-item span {
   font-size: 14px;
   color: #111827;
 }
 
-.plugin-settings-info {
+.rag-chatbot-widget .plugin-settings-info {
   margin-top: 30px;
   font-size: 13px;
   color: #6b7280;
@@ -1621,10 +1611,9 @@ button {
   text-align: center;
 }
 
-
 /* Fix Icon Visibility for Settings and Expand buttons */
-.plugin-chat-icon-btn.chat-settings-btn,
-.plugin-chat-icon-btn.chat-expand-btn {
+.rag-chatbot-widget .plugin-chat-icon-btn.chat-settings-btn,
+.rag-chatbot-widget .plugin-chat-icon-btn.chat-expand-btn {
   background: white !important;
   border: 1px solid rgba(17, 24, 39, 0.12) !important;
   width: 40px !important;
@@ -1637,14 +1626,13 @@ button {
   transition: all 0.2s ease;
 }
 
-.plugin-chat-icon-btn.chat-settings-btn:hover,
-.plugin-chat-icon-btn.chat-expand-btn:hover {
+.rag-chatbot-widget .plugin-chat-icon-btn.chat-settings-btn:hover,
+.rag-chatbot-widget .plugin-chat-icon-btn.chat-expand-btn:hover {
   transform: translateY(-1px);
 }
 
-/* Ensure icons inside settings and expand buttons are visible with primary color */
-.plugin-chat-icon-btn.chat-settings-btn .icon,
-.plugin-chat-icon-btn.chat-expand-btn .icon {
+.rag-chatbot-widget .plugin-chat-icon-btn.chat-settings-btn .icon,
+.rag-chatbot-widget .plugin-chat-icon-btn.chat-expand-btn .icon {
   width: 18px !important;
   height: 18px !important;
   display: block !important;
@@ -1660,12 +1648,9 @@ button {
   mask-size: contain;
 }
 
-/* ========================================= */
-/* Responsive Expanded View Overrides        */
-/* ========================================= */
-
+/* Responsive Expanded View Overrides */
 @media (max-width: 768px) {
-  .plugin-chat-panel.is-expanded {
+  .rag-chatbot-widget .plugin-chat-panel.is-expanded {
     width: calc(100vw - 24px);
     height: calc(100vh - 32px);
     left: auto;
@@ -1679,7 +1664,7 @@ button {
 }
 
 @media (max-width: 480px) {
-  .plugin-chat-panel.is-expanded {
+  .rag-chatbot-widget .plugin-chat-panel.is-expanded {
     width: 100%;
     height: calc(100% - 60px);
     max-width: 100%;
@@ -1691,16 +1676,13 @@ button {
     border-radius: 16px 16px 0 0;
     transform: none !important;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
-    /* Override default transform scaling */
   }
 
-  .plugin-chat-panel.is-expanded .plugin-chat-header {
+  .rag-chatbot-widget .plugin-chat-panel.is-expanded .plugin-chat-header {
     border-radius: 16px 16px 0 0;
-    /* padding-top: 14px; Default padding is fine now */
   }
 
-  /* Mobile sidebar - full screen overlay when open */
-  .plugin-chat-panel.is-expanded .plugin-chat-sidebar {
+  .rag-chatbot-widget .plugin-chat-panel.is-expanded .plugin-chat-sidebar {
     position: absolute;
     left: 0;
     top: 0;
@@ -1715,60 +1697,56 @@ button {
     border-radius: 16px 16px 0 0;
   }
 
-  /* Hidden sidebar slides off screen on mobile */
-  .plugin-chat-panel.is-expanded .plugin-chat-sidebar.is-hidden {
+  .rag-chatbot-widget .plugin-chat-panel.is-expanded .plugin-chat-sidebar.is-hidden {
     transform: translateX(-100%);
     width: 100% !important;
   }
 
-  /* Make sidebar toggle always visible in header on mobile expanded */
-  .plugin-chat-panel.is-expanded .sidebar-toggle {
+  .rag-chatbot-widget .plugin-chat-panel.is-expanded .sidebar-toggle {
     display: flex;
   }
 
-  /* Fix input box on mobile */
-  .plugin-chat-panel.is-expanded .chat-input {
+  .rag-chatbot-widget .plugin-chat-panel.is-expanded .chat-input {
     flex-wrap: nowrap;
   }
 
-  .plugin-chat-panel.is-expanded .chat-input-field {
+  .rag-chatbot-widget .plugin-chat-panel.is-expanded .chat-input-field {
     min-width: 0;
     flex: 1;
   }
 
-  .plugin-chat-panel.is-expanded .chat-input input {
+  .rag-chatbot-widget .plugin-chat-panel.is-expanded .chat-input input {
     width: 100%;
     min-width: 0;
   }
 
-  .plugin-chat-panel.is-expanded .chat-input button {
+  .rag-chatbot-widget .plugin-chat-panel.is-expanded .chat-input button {
     flex-shrink: 0;
     width: 48px;
     height: 48px;
   }
 }
 
-/* Additional fix for input box in non-expanded mobile view */
 @media (max-width: 480px) {
-  .chat-input {
+  .rag-chatbot-widget .chat-input {
     flex-wrap: nowrap;
     padding: 10px;
     gap: 6px;
   }
 
-  .chat-input-field {
+  .rag-chatbot-widget .chat-input-field {
     min-width: 0;
     flex: 1;
   }
 
-  .chat-input input {
+  .rag-chatbot-widget .chat-input input {
     width: 100%;
     min-width: 0;
     padding: 12px !important;
     font-size: 14px !important;
   }
 
-  .chat-input button {
+  .rag-chatbot-widget .chat-input button {
     flex-shrink: 0;
     width: 44px !important;
     height: 44px !important;
@@ -1776,10 +1754,8 @@ button {
   }
 }
 
-/* Follow-up messages are displayed as normal bot messages - no special styling */
-
 /* Thinking Indicator Styles */
-.plugin-msg.thinking-indicator {
+.rag-chatbot-widget .plugin-msg.thinking-indicator {
   padding: 0;
   background: transparent !important;
   border: none !important;
@@ -1787,12 +1763,12 @@ button {
   margin-bottom: 8px;
 }
 
-.plugin-thinking-content {
+.rag-chatbot-widget .plugin-thinking-content {
   display: flex;
   align-items: flex-start;
 }
 
-.plugin-thinking-inner {
+.rag-chatbot-widget .plugin-thinking-inner {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1804,48 +1780,48 @@ button {
   border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
-.plugin-thinking-logo {
+.rag-chatbot-widget .plugin-thinking-logo {
   width: 20px;
   height: 20px;
   object-fit: contain;
   opacity: 0.9;
 }
 
-.plugin-thinking-status {
+.rag-chatbot-widget .plugin-thinking-status {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.plugin-thinking-text {
+.rag-chatbot-widget .plugin-thinking-text {
   font-size: 14px;
   color: #6b7280;
   font-weight: 500;
 }
 
-.plugin-thinking-status .typing-dots {
+.rag-chatbot-widget .plugin-thinking-status .typing-dots {
   display: flex;
   gap: 2px;
   align-items: center;
   margin-left: 2px;
 }
 
-.plugin-thinking-status .typing-dots .dot {
+.rag-chatbot-widget .plugin-thinking-status .typing-dots .dot {
   font-size: 1.5rem;
   line-height: 1;
   color: #6b7280;
   animation: pluginTypingPulse 1s infinite ease-in-out both;
 }
 
-.plugin-thinking-status .typing-dots .dot:nth-child(1) {
+.rag-chatbot-widget .plugin-thinking-status .typing-dots .dot:nth-child(1) {
   animation-delay: 0s;
 }
 
-.plugin-thinking-status .typing-dots .dot:nth-child(2) {
+.rag-chatbot-widget .plugin-thinking-status .typing-dots .dot:nth-child(2) {
   animation-delay: 0.2s;
 }
 
-.plugin-thinking-status .typing-dots .dot:nth-child(3) {
+.rag-chatbot-widget .plugin-thinking-status .typing-dots .dot:nth-child(3) {
   animation-delay: 0.4s;
 }
 

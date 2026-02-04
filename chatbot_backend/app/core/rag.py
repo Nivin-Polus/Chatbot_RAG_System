@@ -65,7 +65,7 @@ def _estimate_tokens(text: str) -> int:
 # ============================================
 
 # RAG Answer Selection: thresholds (leadership data often has lower per-chunk scores)
-LEADERSHIP_MIN_SCORE = 0.15
+LEADERSHIP_MIN_SCORE = 0.12  # Lowered from 0.15 to ensure all leadership members are included
 GENERAL_MIN_SCORE = 0.20
 
 ALLOWED_LEADERSHIP_TITLES = {
@@ -166,7 +166,14 @@ NON_PERSON_PATTERNS = [
     "and development", "and planning", "and services",
     "our solution", "our team", "let's talk", "get in touch",
     "copyright", "©", "meet our", "dynamic team",
+    "communitynews",
 ]
+
+# Known non-person entities that often get confused with people
+KNOWN_NON_PERSON_ENTITIES = {
+    "fibi", "polus", "polus solutions", "fibi communitynews",
+    "community news", "fibi grants", "fibi compliance"
+}
 
 
 def is_probable_person_name(name: str) -> bool:
@@ -633,6 +640,11 @@ def classify_query(normalized_query: str) -> Dict[str, str]:
         r"who are", r"contact", r"email", r"reach"
     ]
     if any(re.search(p, query_lower) for p in person_patterns):
+        # FIX: Check if the potential entity is a known non-person (e.g. "Tell me about Fibi")
+        for entity in KNOWN_NON_PERSON_ENTITIES:
+            if entity in query_lower:
+                return {"query_type": "factual", "complexity": "medium"}
+                
         return {"query_type": "person", "complexity": "medium"}
 
     # 2. Factual queries
@@ -838,7 +850,12 @@ def detect_person_query(normalized_query: str, prior_context: Optional[Dict] = N
     if potential_name:
         # cleanup validation
         stop_words = {"the", "a", "an", "is", "of", "in", "at", "for", "to"}
-        if potential_name not in stop_words:
+        
+        # FIX: Check blocklist for known non-person entities
+        p_lower = potential_name.lower()
+        is_blocked = any(blocked in p_lower for blocked in KNOWN_NON_PERSON_ENTITIES)
+        
+        if potential_name not in stop_words and not is_blocked:
             result["person_name"] = potential_name
             result["is_person_query"] = True
             result["query_type"] = "specific_person"
@@ -1885,7 +1902,7 @@ class RAG:
         # NOTE: Check leadership_list FIRST since it also sets is_person_query=True
         # Check factual BEFORE person to handle product questions correctly
         if query_classification["query_type"] == "leadership_list":
-            search_top_k = 40  # FIX: Increase for leadership to get all potential directors
+            search_top_k = 50  # FIX: Increase for leadership to get all potential directors (increased from 40 to ensure Krishna Prasad is included)
             min_score = getattr(settings, "RAG_LEADERSHIP_MIN_SCORE", LEADERSHIP_MIN_SCORE)  # 0.15 for leadership
         elif query_classification["query_type"] == "factual":
             # Factual/product queries - check BEFORE person detection to avoid misclassifying products as people
@@ -2381,18 +2398,20 @@ class RAG:
         chunk_texts = " ".join([c.get("payload", {}).get("text", "") for c in chunks[:3]])
         
         # Domain-specific patterns that often need clarification
+        # FIX: "role" keyword made more specific to avoid false positives
         domain_patterns = {
             "version": ["Which version are you using?", "Version-specific details might apply."],
             "plan": ["Which plan or tier are you on?", "Features vary by plan."],
-            "role": ["What's your role or permission level?", "Access might differ by role."]
+            "depends on your role": ["What's your role or permission level?", "Access might differ by role."]
         }
         
         for keyword, questions in domain_patterns.items():
             if keyword in chunk_texts.lower() and keyword not in query_lower:
                 # P0 FIX: Difference between missing context (FOLLOWUP) and domain mismatch (PARTIAL)
-                # If intent is exploratory/overview, prefer PARTIAL answer
-                if query_classification and query_classification.get("query_type") in ["exploratory", "overview", "history"]:
-                    logger.info(f"[FOLLOWUP] Domain mismatch detected ({keyword}) but intent is exploratory. Switching to PARTIAL_TRANSPARENT.")
+                # If intent is exploratory/overview OR FACTUAL, prefer PARTIAL answer
+                # Added "factual" to allow general questions like "Tell me about X" to proceed even if roles are mentioned
+                if query_classification and query_classification.get("query_type") in ["exploratory", "overview", "history", "factual"]:
+                    logger.info(f"[FOLLOWUP] Domain mismatch detected ({keyword}) but intent is {query_classification.get('query_type')}. Switching to PARTIAL_TRANSPARENT.")
                     return {
                         "needs_followup": False,
                         "reason": "domain_mismatch_partial",
@@ -2403,7 +2422,7 @@ class RAG:
                 # Otherwise, strict follow-up for procedural/specific queries
                 result.update({
                     "needs_followup": True,
-                    "reason": f"missing_{keyword}_context",
+                    "reason": f"missing_{keyword.split(' ')[-1]}_context", # Use last word for reason key
                     "confidence": 0.55,
                     "missing_context": questions
                 })
