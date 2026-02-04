@@ -1,6 +1,6 @@
 # app/api/routes_files.py
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from app.core.vector_singleton import get_vector_store
 from app.core.database import get_db
 from app.core.permissions import get_current_user
-from app.utils.file_parser import parse_file
+# from app.utils.file_parser import parse_file  # Removed in favor of FileIngestionService
 from app.utils.file_sanitizer import (
     sanitize_filename,
     validate_file_extension,
@@ -22,6 +22,7 @@ from app.models.user import User
 from app.config import settings
 from app.core.cache import get_cache
 from app.services.activity_tracker import activity_tracker
+from app.services.file_ingestion_service import FileIngestionService
 from pydantic import BaseModel
 import logging
 from uuid import uuid4
@@ -111,6 +112,7 @@ async def upload_file(
     collection_id: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
     """Upload one or multiple files"""
     logger.debug(f"[UPLOAD DEBUG] Upload request from user: {getattr(current_user, 'username', None)}, role: {getattr(current_user, 'role', None)}")
@@ -270,7 +272,7 @@ async def upload_file(
                     continue
 
                 # Parse text chunks for embedding
-                text_chunks = parse_file(safe_filename, content)
+                # text_chunks = parse_file(safe_filename, content) # REPLACED with background processing
 
                 # --- Validate all parameters before saving ---
                 logger.debug(f"[SAVE FILE DEBUG] Validating parameters before save:")
@@ -312,21 +314,34 @@ async def upload_file(
                 logger.debug(f"[SAVE FILE SUCCESS] File saved with ID: {file_metadata.file_id}")
 
                 file_id = str(file_metadata.file_id)
-                vector_store = get_vector_store()
+                
+                # --- Background Processing ---
+                # Trigger ingestion service in background
+                # We don't wait for embedding here
+                
+                # Initialize service (db session logic handled in background method)
+                ingestion_service = FileIngestionService(db)
+                background_tasks.add_task(
+                    ingestion_service.process_file_background,
+                    file_id=file_id,
+                    user_id=str(uploader_id)
+                )
 
-                for i, chunk in enumerate(text_chunks):
-                    metadata = {
-                        "file_id": file_id,
-                        "file_name": safe_filename,
-                        "chunk_index": i,
-                        "text": chunk,
-                        "website_id": str(website_id) if website_id else None,
-                        "collection_id": collection_id,
-                        "uploader_id": str(uploader_id) if uploader_id else None
-                    }
-                    vector_store.add_document(chunk, metadata)
+                # vector_store = get_vector_store()
+                # for i, chunk in enumerate(text_chunks):
+                #     metadata = {
+                #         "file_id": file_id,
+                #         "file_name": safe_filename,
+                #         "chunk_index": i,
+                #         "text": chunk,
+                #         "website_id": str(website_id) if website_id else None,
+                #         "collection_id": collection_id,
+                #         "uploader_id": str(uploader_id) if uploader_id else None
+                #     }
+                #     vector_store.add_document(chunk, metadata)
 
-                file_storage_service.update_processing_status(file_id, "completed", len(text_chunks), db)
+                # Status is "processing" initially (from save_file_with_website)
+                # file_storage_service.update_processing_status(file_id, "completed", len(text_chunks), db)
 
                 meta = FileMeta(
                     file_id=file_id,
@@ -335,7 +350,7 @@ async def upload_file(
                     uploader_id=str(uploader_id) if uploader_id else None,
                     upload_timestamp=file_metadata.upload_timestamp.isoformat() if file_metadata.upload_timestamp is not None else None,
                     file_size=int(str(file_metadata.file_size)) if file_metadata.file_size is not None else None,
-                    processing_status="completed",
+                    processing_status="processing", # Start as processing
                     collection_id=collection_id,
                 )
 
@@ -350,7 +365,8 @@ async def upload_file(
                         "file_id": file_id,
                         "file_size": int(str(file_metadata.file_size)) if file_metadata.file_size is not None else 0,
                         "file_type": ext,
-                        "chunk_count": len(text_chunks),
+                        "status": "processing",
+                        # "chunk_count": len(text_chunks),
                         "collection_id": collection_id,
                     },
                 )

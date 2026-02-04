@@ -1668,12 +1668,17 @@ class RAG:
     # Small talk helpers
     # ------------------------------------------------------------------
     def _is_small_talk(self, query: str) -> bool:
-        """Simple heuristic to skip the RAG pipeline for casual greetings."""
+        """Simple heuristic to skip the RAG pipeline for casual greetings and identity questions."""
         if not query:
             return False
 
         normalized = query.strip().lower()
-        small_talk_phrases = {
+        
+        # Remove common profanity/emphasis words to normalize
+        normalized = re.sub(r'\b(hell|damn|heck|please|just)\b', '', normalized).strip()
+        
+        # Simple greetings
+        simple_greetings = {
             "hi",
             "hello",
             "hey",
@@ -1684,15 +1689,77 @@ class RAG:
             "what's up",
             "hi there",
             "hello there",
+            "whats up",
+            "sup",
         }
-
-        return normalized in small_talk_phrases
+        
+        # Identity/capability questions about the chatbot
+        identity_patterns = [
+            r"^who\s+(are\s+)?you",  # "who are you", "who you"
+            r"^what\s+(are\s+)?you",  # "what are you"
+            r"^what\s+can\s+you\s+do",  # "what can you do"
+            r"^what\s+(is\s+)?this",  # "what is this", "what this"
+            r"^who\s+am\s+i\s+talking\s+to",  # "who am i talking to"
+            r"^what\s+(do\s+)?you\s+know",  # "what do you know"
+            r"^tell\s+me\s+about\s+yourself",  # "tell me about yourself"
+            r"^introduce\s+yourself",  # "introduce yourself"
+        ]
+        
+        # Check simple greetings
+        if normalized in simple_greetings:
+            return True
+        
+        # Check identity patterns
+        for pattern in identity_patterns:
+            if re.search(pattern, normalized):
+                return True
+        
+        return False
 
     def _handle_small_talk(self, query: str) -> Dict[str, any]:
         """Return a friendly response for small talk interactions."""
+        normalized = query.strip().lower()
+        
+        # Remove profanity for pattern matching
+        normalized_clean = re.sub(r'\b(hell|damn|heck)\b', '', normalized).strip()
+        
+        # Detect type of small talk
+        identity_patterns = [
+            "who are you", "who you", "what are you", "what you",
+            "who am i talking", "tell me about yourself", "introduce yourself"
+        ]
+        
+        capability_patterns = [
+            "what can you do", "what do you know", "what you do", "what this"
+        ]
+        
+        is_identity = any(pattern in normalized_clean for pattern in identity_patterns)
+        is_capability = any(pattern in normalized_clean for pattern in capability_patterns)
+        
+        if is_identity:
+            answer = (
+                "I'm an AI assistant designed to help you find information from your knowledge base. "
+                "I can answer questions about your documents, help you discover relevant content, "
+                "and provide insights based on the information available to me. What would you like to know?"
+            )
+        elif is_capability:
+            answer = (
+                "I can help you:\n"
+                "- Find specific information in your knowledge base\n"
+                "- Answer questions about your documents\n"
+                "- Discover related content and topics\n"
+                "- Provide summaries and explanations\n\n"
+                "What would you like to explore?"
+            )
+        else:
+            # Simple greeting
+            answer = (
+                "Hello! I'm here to help with questions about your knowledge base documents. "
+                "Let me know what you'd like to learn or explore."
+            )
+        
         return {
-            "answer": "Hello! I'm here to help with questions about your knowledge base documents. "
-                      "Let me know what you'd like to learn or explore.",
+            "answer": answer,
             "is_generic": True,
             "answer_mode": "FULL"
         }
@@ -2152,6 +2219,91 @@ class RAG:
         except Exception:
              normalized_query = query.lower().strip()
              query_lower = normalized_query
+        
+        # ─────────────────────────────────────────────────────────
+        # NEW RULE: DIRECT ANSWER INTENT DETECTION
+        # ─────────────────────────────────────────────────────────
+        
+        # Detect frustration signals - user wants direct answer NOW
+        frustration_signals = [
+            "just", "please", "simply", "only", "i said", "i asked",
+            "stop asking", "enough", "already told you"
+        ]
+        has_frustration = any(signal in query_lower for signal in frustration_signals)
+        
+        # Detect summary/overview requests - these should get direct answers
+        summary_requests = [
+            "summary", "summarize", "overview", "brief", "tell me about",
+            "what is", "what are", "describe", "explain", "introduction"
+        ]
+        has_summary_request = any(req in query_lower for req in summary_requests)
+        
+        # Detect direct informational intent
+        direct_info_patterns = [
+            r"^(tell me about|what is|what are|describe|explain)\s+\w+",
+            r"(brief|quick|short)\s+(summary|overview|description|intro)",
+            r"(give me|show me|provide)\s+(a|an|the)?\s*(summary|overview|info|information|details)"
+        ]
+        has_direct_intent = any(re.search(pattern, query_lower) for pattern in direct_info_patterns)
+        
+        # If user shows frustration OR explicitly requests summary/overview, skip follow-up
+        if has_frustration or has_summary_request or has_direct_intent:
+            # Additional check: do we have any chunks at all?
+            if chunks and len(chunks) > 0:
+                logger.info(f"[FOLLOWUP] Direct answer intent detected. Skipping follow-up. (frustration={has_frustration}, summary={has_summary_request}, direct={has_direct_intent})")
+                return {
+                    "needs_followup": False,
+                    "reason": "direct_answer_intent",
+                    "confidence": 1.0,
+                    "suggested_topics": [],
+                    "missing_context": []
+                }
+        
+        # ─────────────────────────────────────────────────────────
+        # NEW RULE: FACTUAL QUERY WITH GOOD CHUNKS
+        # ─────────────────────────────────────────────────────────
+        
+        # If it's a factual query and we have decent chunks, trust the RAG pipeline
+        if query_classification and query_classification.get("query_type") == "factual":
+            if chunks and len(chunks) > 0:
+                max_score = max(c.get("score", 0) for c in chunks)
+                # If we have at least one chunk with decent score, provide answer
+                if max_score >= 0.20:
+                    logger.info(f"[FOLLOWUP] Factual query with good chunks (max_score={max_score:.2f}). Skipping follow-up.")
+                    return {
+                        "needs_followup": False,
+                        "reason": "factual_with_context",
+                        "confidence": 0.9,
+                        "suggested_topics": [],
+                        "missing_context": []
+                    }
+        
+        # ─────────────────────────────────────────────────────────
+        # NEW RULE: FOLLOW-UP FATIGUE DETECTION
+        # ─────────────────────────────────────────────────────────
+        
+        # Count how many follow-up questions we've already asked in this conversation
+        if conversation_history:
+            followup_count = 0
+            for msg in conversation_history:
+                # Handle both dict and Pydantic models
+                role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", "user")
+                content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
+                
+                # Check if assistant message contains multiple questions (likely a follow-up)
+                if role == "assistant" and content.count("?") >= 2:
+                    followup_count += 1
+            
+            # If we've asked 2+ follow-ups already, stop and provide best-effort answer
+            if followup_count >= 2 and chunks and len(chunks) > 0:
+                logger.info(f"[FOLLOWUP] Follow-up fatigue detected ({followup_count} previous follow-ups). Providing direct answer.")
+                return {
+                    "needs_followup": False,
+                    "reason": "followup_fatigue",
+                    "confidence": 0.8,
+                    "suggested_topics": [],
+                    "missing_context": []
+                }
         
         # ─────────────────────────────────────────────────────────
         # RULE 1: Check conversation context for unresolved references
@@ -3031,10 +3183,50 @@ Only return the JSON array."""
             
             # Validate and limit to 3 suggestions
             if isinstance(suggestions, list):
-                suggestions = [s for s in suggestions if isinstance(s, str) and len(s) > 10 and s.strip().endswith('?')][:3]
+                suggestions = [s for s in suggestions if isinstance(s, str) and len(s) > 10 and s.strip().endswith('?')][:5]  # Get up to 5 candidates
+                
                 if suggestions:
-                    logger.info(f"[SUGGESTIONS] Generated {len(suggestions)} suggestions")
-                    return suggestions
+                    # NEW: Validate each suggestion to ensure it can be answered
+                    validated_suggestions = []
+                    
+                    # Get collection name from chunks (if available)
+                    collection_name = None
+                    if chunks and len(chunks) > 0:
+                        # Try to extract collection from first chunk
+                        first_chunk = chunks[0]
+                        if 'collection' in first_chunk:
+                            collection_name = first_chunk['collection']
+                        elif 'payload' in first_chunk and 'collection' in first_chunk['payload']:
+                            collection_name = first_chunk['payload']['collection']
+                    
+                    # If no collection found, use default from settings
+                    if not collection_name:
+                        collection_name = getattr(settings, 'DEFAULT_COLLECTION_NAME', 'default')
+                    
+                    logger.info(f"[SUGGESTIONS] Validating {len(suggestions)} candidate suggestions using collection '{collection_name}'")
+                    
+                    for suggestion in suggestions:
+                        is_answerable = self._validate_suggestion_answerable(
+                            suggestion=suggestion,
+                            collection_name=collection_name,
+                            min_score=0.20  # Same threshold as factual queries
+                        )
+                        
+                        if is_answerable:
+                            validated_suggestions.append(suggestion)
+                            logger.info(f"[SUGGESTIONS] ✓ Valid: '{suggestion[:60]}...'")
+                        else:
+                            logger.info(f"[SUGGESTIONS] ✗ Filtered out (no data): '{suggestion[:60]}...'")
+                        
+                        # Stop once we have 3 valid suggestions
+                        if len(validated_suggestions) >= 3:
+                            break
+                    
+                    if validated_suggestions:
+                        logger.info(f"[SUGGESTIONS] Returning {len(validated_suggestions)} validated suggestions")
+                        return validated_suggestions
+                    else:
+                        logger.warning("[SUGGESTIONS] All suggestions failed validation, using fallback")
             
             logger.warning("[SUGGESTIONS] Invalid suggestions format from LLM, using fallback")
             return self._get_fallback_suggestions(query, conversation_state)
@@ -3043,6 +3235,47 @@ Only return the JSON array."""
             logger.error(f"[SUGGESTIONS] Error generating suggestions: {str(e)}")
             # Return fallback suggestions
             return self._get_fallback_suggestions(query, conversation_state)
+
+    def _validate_suggestion_answerable(
+        self,
+        suggestion: str,
+        collection_name: str,
+        min_score: float = 0.20
+    ) -> bool:
+        """
+        Test if a suggestion can be answered by checking if we can retrieve relevant chunks.
+        
+        Args:
+            suggestion: The suggested question to validate
+            collection_name: Collection to search in
+            min_score: Minimum score threshold for considering a chunk relevant
+            
+        Returns:
+            True if we can find relevant chunks for this question, False otherwise
+        """
+        try:
+            # Perform a test retrieval with the suggestion
+            test_chunks = self.retrieve_chunks(
+                query=suggestion,
+                collection_name=collection_name,
+                limit=3  # Only need a few chunks to validate
+            )
+            
+            if not test_chunks or len(test_chunks) == 0:
+                return False
+            
+            # Check if any chunk meets the minimum score threshold
+            max_score = max(chunk.get('score', 0) for chunk in test_chunks)
+            
+            # Log for debugging
+            logger.debug(f"[SUGGESTION VALIDATION] '{suggestion[:50]}...' -> max_score={max_score:.3f}, threshold={min_score}")
+            
+            return max_score >= min_score
+            
+        except Exception as e:
+            logger.error(f"[SUGGESTION VALIDATION] Error validating suggestion: {str(e)}")
+            # On error, be conservative and assume it's not answerable
+            return False
 
     def _get_fallback_suggestions(
         self,
