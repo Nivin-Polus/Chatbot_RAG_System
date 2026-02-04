@@ -386,6 +386,11 @@ class CrawlerService:
                                     "error_message": stats.error_message if stats.status == "failed" else None,
                                 },
                             )
+                            
+                            # Trigger capability scan after successful crawl
+                            if stats.status == "completed" and job.collection_id:
+                                self._trigger_capability_scan_async(job.collection_id, session)
+                                
                         except Exception as log_error:
                             logger.error(f"Failed to log crawl completion activity: {log_error}")
         except Exception as e:
@@ -434,6 +439,35 @@ class CrawlerService:
             )
         except Exception as e:
             logger.error(f"Failed to store chunk: {e}")
+    
+    def _trigger_capability_scan_async(self, collection_id: str, db_session=None):
+        """
+        Trigger an async capability scan for a collection after crawl completion.
+        This updates the collection's knowledge of what topics it can help with.
+        """
+        try:
+            import threading
+            
+            def scan_in_background():
+                try:
+                    from app.core.database import SessionLocal
+                    from app.services.capabilities_scanner import scan_and_update_collection
+                    
+                    db = SessionLocal()
+                    try:
+                        scan_and_update_collection(collection_id, db, force=True)
+                        logger.info(f"[CRAWLER] Background capability scan completed for {collection_id}")
+                    finally:
+                        db.close()
+                except Exception as e:
+                    logger.warning(f"[CRAWLER] Background capability scan failed: {e}")
+            
+            thread = threading.Thread(target=scan_in_background, daemon=True)
+            thread.start()
+            logger.debug(f"[CRAWLER] Triggered capability scan for {collection_id}")
+            
+        except Exception as e:
+            logger.debug(f"[CRAWLER] Could not trigger capability scan: {e}")
     
     @classmethod
     def is_job_active(cls, job_id: str) -> bool:

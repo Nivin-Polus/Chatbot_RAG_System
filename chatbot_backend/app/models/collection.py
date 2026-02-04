@@ -3,7 +3,7 @@ Collection model for the collection-based RAG system.
 Each collection represents a logical division of the vector database.
 """
 
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .base import Base
@@ -31,6 +31,32 @@ class Collection(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Chatbot Capabilities & Greeting Configuration
+    # These fields store information about what the knowledge base contains
+    # and how the chatbot should introduce itself.
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    # Bot identity (optional - defaults to "assistant" if not set)
+    assistant_name = Column(String(100), nullable=True)
+    
+    # Custom greeting message (optional override - if set, used instead of auto-generated)
+    greeting_message = Column(Text, nullable=True)
+    
+    # Auto-scanned knowledge base capabilities (JSON structure)
+    # Structure: {
+    #   "topics": ["HR Policies", "Leave Management", ...],
+    #   "document_types": ["PDF", "Web Page", ...],
+    #   "summary": "This knowledge base contains information about...",
+    #   "sample_questions": ["What is the leave policy?", ...],
+    #   "total_documents": 42,
+    #   "total_chunks": 1250
+    # }
+    capabilities_summary = Column(JSON, nullable=True)
+    
+    # When capabilities were last scanned from the knowledge base
+    capabilities_last_scanned = Column(DateTime(timezone=True), nullable=True)
     
     # Relationships
     admin = relationship("User", foreign_keys=[admin_user_id], back_populates="administered_collections")

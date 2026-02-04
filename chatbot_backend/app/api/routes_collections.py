@@ -757,3 +757,153 @@ async def remove_user_from_collection(
         db.rollback()
         logger.error(f"Error removing user from collection: {e}")
         raise HTTPException(status_code=500, detail="Failed to remove user")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COLLECTION CAPABILITIES ENDPOINTS
+# These endpoints manage the knowledge base scanning and chatbot introduction
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CapabilitiesUpdate(BaseModel):
+    """Request model for updating collection capabilities settings"""
+    assistant_name: Optional[str] = None
+    greeting_message: Optional[str] = None
+
+
+class CapabilitiesResponse(BaseModel):
+    """Response model for collection capabilities"""
+    collection_id: str
+    assistant_name: Optional[str]
+    greeting_message: Optional[str]
+    capabilities_summary: Optional[dict]
+    capabilities_last_scanned: Optional[str]
+
+
+@router.get("/{collection_id}/capabilities", response_model=CapabilitiesResponse)
+async def get_collection_capabilities(
+    collection_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get the capabilities and greeting configuration for a collection.
+    
+    Returns the assistant name, custom greeting message, and auto-scanned
+    knowledge base capabilities.
+    """
+    collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    
+    # Check permissions (super admin or collection admin/user)
+    if current_user.role != "super_admin":
+        is_member = db.query(CollectionUser).filter(
+            CollectionUser.collection_id == collection_id,
+            CollectionUser.user_id == current_user.user_id
+        ).first()
+        if not is_member and collection.admin_user_id != current_user.user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+    
+    return CapabilitiesResponse(
+        collection_id=collection.collection_id,
+        assistant_name=collection.assistant_name,
+        greeting_message=collection.greeting_message,
+        capabilities_summary=collection.capabilities_summary,
+        capabilities_last_scanned=collection.capabilities_last_scanned.isoformat() if collection.capabilities_last_scanned else None
+    )
+
+
+@router.put("/{collection_id}/capabilities", response_model=CapabilitiesResponse)
+async def update_collection_capabilities(
+    collection_id: str,
+    capabilities_update: CapabilitiesUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update the assistant name and/or custom greeting message for a collection.
+    
+    Set greeting_message to customize what the bot says when asked "what can you do?"
+    Set assistant_name to customize the bot's name (e.g., "Leto", "Alex").
+    """
+    collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    
+    # Check permissions (super admin or collection admin only)
+    if current_user.role != "super_admin" and collection.admin_user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied - admin privileges required")
+    
+    try:
+        if capabilities_update.assistant_name is not None:
+            collection.assistant_name = capabilities_update.assistant_name or None
+        
+        if capabilities_update.greeting_message is not None:
+            collection.greeting_message = capabilities_update.greeting_message or None
+        
+        db.commit()
+        db.refresh(collection)
+        
+        logger.info(f"Updated capabilities for collection {collection_id} by user {current_user.username}")
+        
+        return CapabilitiesResponse(
+            collection_id=collection.collection_id,
+            assistant_name=collection.assistant_name,
+            greeting_message=collection.greeting_message,
+            capabilities_summary=collection.capabilities_summary,
+            capabilities_last_scanned=collection.capabilities_last_scanned.isoformat() if collection.capabilities_last_scanned else None
+        )
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating collection capabilities: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update capabilities")
+
+
+@router.post("/{collection_id}/scan-capabilities")
+async def scan_collection_capabilities(
+    collection_id: str,
+    force: bool = False,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Trigger a scan of the collection's knowledge base to detect topics and capabilities.
+    
+    This analyzes the documents/pages in the vector store and generates:
+    - A list of topics the knowledge base covers
+    - A summary of what information is available
+    - Sample questions users can ask
+    
+    The scan results are stored and used when users ask "what can you do?" or similar.
+    
+    Args:
+        force: If True, forces a new scan even if recently scanned (within 1 hour)
+    """
+    collection = db.query(Collection).filter(Collection.collection_id == collection_id).first()
+    
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    
+    # Check permissions (super admin or collection admin only)
+    if current_user.role != "super_admin" and collection.admin_user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied - admin privileges required")
+    
+    try:
+        from app.services.capabilities_scanner import scan_and_update_collection
+        
+        capabilities = scan_and_update_collection(collection_id, db, force=force)
+        
+        logger.info(f"Scanned capabilities for collection {collection_id} by user {current_user.username}")
+        
+        return {
+            "message": "Capabilities scan completed successfully",
+            "collection_id": collection_id,
+            "capabilities": capabilities
+        }
+        
+    except Exception as e:
+        logger.error(f"Error scanning collection capabilities: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to scan capabilities: {str(e)}")

@@ -173,6 +173,10 @@ def _perform_schema_migrations(engine) -> None:
 
     # Ensure plugin integrations table exists (created via ORM metadata). Nothing else yet.
 
+    # Migrate collections table to add capability columns
+    if inspector.has_table("collections"):
+        _migrate_collections_table(engine, inspector)
+
     # Add crawler_jobs table if missing
     if not inspector.has_table("crawler_jobs"):
         LOGGER.info("Creating 'crawler_jobs' table...")
@@ -323,6 +327,38 @@ def _migrate_chat_message_history_table(engine, inspector):
             
     except Exception as e:
         LOGGER.error(f"Failed to migrate chat_message_history table: {e}")
+        # Don't raise - allow script to continue
+
+
+def _migrate_collections_table(engine, inspector):
+    """Migrate existing collections table to add capability-related columns"""
+    try:
+        if not inspector.has_table("collections"):
+            return
+        
+        existing_columns = {col["name"] for col in inspector.get_columns("collections")}
+        alterations = []
+        
+        # Add capability-related columns for intelligent chatbot introductions
+        if "assistant_name" not in existing_columns:
+            alterations.append("ADD COLUMN assistant_name VARCHAR(100) NULL")
+        if "greeting_message" not in existing_columns:
+            alterations.append("ADD COLUMN greeting_message TEXT NULL")
+        if "capabilities_summary" not in existing_columns:
+            alterations.append("ADD COLUMN capabilities_summary JSON NULL")
+        if "capabilities_last_scanned" not in existing_columns:
+            alterations.append("ADD COLUMN capabilities_last_scanned DATETIME NULL")
+        
+        if alterations:
+            LOGGER.info("Migrating 'collections' table: adding capability columns...")
+            alter_statement = "ALTER TABLE collections " + ", ".join(alterations)
+            with engine.connect() as conn:
+                conn.execute(text(alter_statement))
+                conn.commit()
+            LOGGER.info(f"✅ Added {len(alterations)} capability columns to 'collections' table")
+            
+    except Exception as e:
+        LOGGER.error(f"Failed to migrate collections table: {e}")
         # Don't raise - allow script to continue
 
 

@@ -73,18 +73,24 @@ def _is_generic_query(question: str) -> bool:
         return False
     
     normalized = question.strip().lower()
-    # Remove punctuation for better matching
-    normalized = normalized.rstrip("!?.,")
     
+    # Remove filler words and punctuation (consistent with RAG._is_small_talk)
+    normalized_clean = re.sub(r'\b(please|just|actually|really)\b', '', normalized).strip()
+    normalized_clean = re.sub(r'\s+', ' ', normalized_clean).strip()
+    normalized_stripped = re.sub(r'[.!?,;:\s]+$', '', normalized_clean).strip()
+    
+    # Expanded greeting list to match RAG module
     small_talk_phrases = {
-        "hi", "hello", "hey", "hi there", "hello there",
-        "good morning", "good evening", "good afternoon",
-        "how are you", "how are you doing", "what's up", "whats up",
+        "hi", "hello", "hey", "good morning", "good evening", "good afternoon",
+        "how are you", "what's up", "hi there", "hello there", "whats up", "sup",
+        "hey there", "hiya", "howdy", "greetings", "hai", "hii", "hiii", "helloo",
+        "heya", "yo", "namaste", "hola", "bonjour", "good day", "morning", "evening",
         "thanks", "thank you", "bye", "goodbye", "see you",
         "ok", "okay", "cool", "nice", "great",
     }
     
-    return normalized in small_talk_phrases
+    # Check all normalized versions
+    return normalized in small_talk_phrases or normalized_clean in small_talk_phrases or normalized_stripped in small_talk_phrases
 
 
 def _is_generic_response(answer: str) -> bool:
@@ -432,6 +438,38 @@ def _process_chat_request(
     )
     logger.debug(f"[CHAT DEBUG] Retrieved {len(chunks)} chunks for query: {question}")
     logger.debug(f"[CHAT DEBUG] Vector store type: {'Qdrant' if vector_store.client else 'In-memory fallback'}")
+    
+    # Handle greetings/small talk - if chunks are empty and it's a greeting, send to LLM directly
+    if len(chunks) == 0 and _is_generic_query(question):
+        logger.info(f"[GREETING] Detected greeting with no chunks: '{question}' - sending to LLM")
+        greeting_response = rag_instance._handle_small_talk_via_llm(
+            question,
+            collection_id=effective_collection_id,
+            conversation_history=[m.dict() for m in conversation_history] if conversation_history else None
+        )
+        
+        # Track activity
+        try:
+            activity_tracker.log_activity(
+                activity_type="chat_greeting",
+                user=identity_username,
+                details={
+                    "question": question[:100],
+                    "session_id": effective_session_id
+                }
+            )
+        except Exception as e:
+            logger.error(f"Failed to log greeting activity: {str(e)}")
+        
+        return ChatResponse(
+            answer=greeting_response.get("answer", "Hello! How can I help you today?"),
+            session_id=effective_session_id,
+            is_generic=True,
+            is_followup=False,
+            sources=[],
+            chunk_count=0,
+            answer_mode="FULL"
+        )
 
     if vector_store.client is None:
         logger.debug(f"[CHAT DEBUG] Fallback storage has {len(vector_store.documents)} documents")

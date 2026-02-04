@@ -1552,6 +1552,20 @@ Context Usage:
 Now, answer the user's question based strictly on the context below."""
 
 
+# Small-talk specific system prompt for greeting-style messages.
+# This does NOT enforce sourcing rules and is intended for natural, brief introductions.
+SMALL_TALK_SYSTEM_PROMPT = """You are a friendly AI assistant{assistant_clause}.
+
+Your task is to respond to simple greeting or small-talk messages from the user.
+
+Guidelines:
+- Keep the reply short and conversational (1–3 sentences).
+- Start with a warm greeting.
+- Briefly explain what you can help the user with in this chat experience.
+- End by inviting the user to ask a question or tell you what they need.
+- Do not mention internal tags, classification instructions, or implementation details."""
+
+
 
 
 # ============================================
@@ -1668,101 +1682,203 @@ class RAG:
     # Small talk helpers
     # ------------------------------------------------------------------
     def _is_small_talk(self, query: str) -> bool:
-        """Simple heuristic to skip the RAG pipeline for casual greetings and identity questions."""
+        """
+        Detect ONLY simple greetings (hi, hello, etc.)
+        
+        Capability questions like "what can you do?" are NOT handled here.
+        They go through the normal RAG pipeline where the LLM answers using the system prompt.
+        """
         if not query:
             return False
 
         normalized = query.strip().lower()
         
-        # Remove common profanity/emphasis words to normalize
-        normalized = re.sub(r'\b(hell|damn|heck|please|just)\b', '', normalized).strip()
+        # Remove filler words and punctuation
+        normalized_clean = re.sub(r'\b(please|just|actually|really)\b', '', normalized).strip()
+        normalized_clean = re.sub(r'\s+', ' ', normalized_clean).strip()
+        normalized_stripped = re.sub(r'[.!?,;:\s]+$', '', normalized_clean).strip()
         
-        # Simple greetings
+        # Simple greetings ONLY - no capability questions
         simple_greetings = {
-            "hi",
-            "hello",
-            "hey",
-            "good morning",
-            "good evening",
-            "good afternoon",
-            "how are you",
-            "what's up",
-            "hi there",
-            "hello there",
-            "whats up",
-            "sup",
+            "hi", "hello", "hey", "good morning", "good evening", "good afternoon",
+            "how are you", "what's up", "hi there", "hello there", "whats up", "sup",
+            "hey there", "hiya", "howdy", "greetings", "hai", "hii", "hiii", "helloo",
+            "heya", "yo", "namaste", "hola", "bonjour", "good day", "morning", "evening",
         }
         
-        # Identity/capability questions about the chatbot
-        identity_patterns = [
-            r"^who\s+(are\s+)?you",  # "who are you", "who you"
-            r"^what\s+(are\s+)?you",  # "what are you"
-            r"^what\s+can\s+you\s+do",  # "what can you do"
-            r"^what\s+(is\s+)?this",  # "what is this", "what this"
-            r"^who\s+am\s+i\s+talking\s+to",  # "who am i talking to"
-            r"^what\s+(do\s+)?you\s+know",  # "what do you know"
-            r"^tell\s+me\s+about\s+yourself",  # "tell me about yourself"
-            r"^introduce\s+yourself",  # "introduce yourself"
-        ]
-        
         # Check simple greetings
-        if normalized in simple_greetings:
+        if normalized in simple_greetings or normalized_clean in simple_greetings or normalized_stripped in simple_greetings:
             return True
         
-        # Check identity patterns
-        for pattern in identity_patterns:
+        return False
+
+    def _is_capability_question(self, query: str) -> bool:
+        """
+        Detect capability/identity questions like "what can you do?", "what do you know?"
+        These should be answered by the LLM using the system prompt, NOT from KB search.
+        """
+        if not query:
+            return False
+        
+        normalized = query.strip().lower()
+        # Remove filler words
+        normalized = re.sub(r'\b(please|just|all|actually|really|exactly|basically)\b', '', normalized).strip()
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+        
+        capability_patterns = [
+            r"^what\s+(?:\w+\s+)?can\s+you\s+(?:do|help)",  # what can you do
+            r"^what\s+(?:\w+\s+)?(?:do\s+)?you\s+know\s*[?!.]?$",  # what do you know
+            r"^who\s+(?:\w+\s+)?(?:are\s+)?you\s*[?!.]?$",  # who are you
+            r"^what\s+(?:\w+\s+)?(?:are\s+)?you\s*[?!.]?$",  # what are you
+            r"^what(?:'s|\s+is)?\s*this\s*[?!.]?$",  # what is this
+            r"^tell\s+me\s+about\s+yourself",  # tell me about yourself
+            r"^introduce\s+yourself",  # introduce yourself
+            r"(?:what\s+are\s+)?your\s+capabilities",  # your capabilities
+            r"^how\s+can\s+you\s+help",  # how can you help
+            r"^what\s+(?:\w+\s+)?(?:topics?|areas?)\s+(?:do|can)\s+you",  # what topics do you cover
+            r"^what\s+(?:\w+\s+)?information\s+(?:do\s+)?you\s+have\s*[?!.]?$",  # what information do you have
+        ]
+        
+        for pattern in capability_patterns:
             if re.search(pattern, normalized):
+                logger.debug(f"[CAPABILITY] Detected capability question: {query}")
                 return True
         
         return False
 
-    def _handle_small_talk(self, query: str) -> Dict[str, any]:
-        """Return a friendly response for small talk interactions."""
-        normalized = query.strip().lower()
+    def _handle_small_talk(self, query: str, collection_id: Optional[str] = None) -> Dict[str, any]:
+        """
+        Handle ONLY simple greetings (hi, hello, etc.)
         
-        # Remove profanity for pattern matching
-        normalized_clean = re.sub(r'\b(hell|damn|heck)\b', '', normalized).strip()
+        Returns a brief friendly greeting. Capability questions like "what can you do?"
+        are NOT handled here - they go through the normal RAG pipeline where the
+        LLM will answer using the system prompt.
+        """
+        # Extract assistant name from system prompt or collection settings
+        assistant_name = "assistant"
         
-        # Detect type of small talk
-        identity_patterns = [
-            "who are you", "who you", "what are you", "what you",
-            "who am i talking", "tell me about yourself", "introduce yourself"
-        ]
+        if collection_id and self.db_session:
+            try:
+                # Check collection for custom name
+                collection = self.db_session.query(Collection).filter(
+                    Collection.collection_id == collection_id
+                ).first()
+                
+                if collection and collection.assistant_name:
+                    assistant_name = collection.assistant_name
+                else:
+                    # Try to extract from system prompt
+                    prompt = self.get_prompt_for_collection(collection_id)
+                    if prompt and prompt.system_prompt:
+                        name_match = re.search(
+                            r"(?:you are|your name is|i am|i'm|my name is)\s+([A-Z][a-z]+)",
+                            prompt.system_prompt, re.IGNORECASE
+                        )
+                        if name_match:
+                            extracted = name_match.group(1).strip()
+                            if extracted.lower() not in ('an', 'a', 'the', 'here', 'designed'):
+                                assistant_name = extracted
+            except Exception as e:
+                logger.debug(f"[GREETING] Could not extract name: {e}")
         
-        capability_patterns = [
-            "what can you do", "what do you know", "what you do", "what this"
-        ]
-        
-        is_identity = any(pattern in normalized_clean for pattern in identity_patterns)
-        is_capability = any(pattern in normalized_clean for pattern in capability_patterns)
-        
-        if is_identity:
-            answer = (
-                "I'm an AI assistant designed to help you find information from your knowledge base. "
-                "I can answer questions about your documents, help you discover relevant content, "
-                "and provide insights based on the information available to me. What would you like to know?"
-            )
-        elif is_capability:
-            answer = (
-                "I can help you:\n"
-                "- Find specific information in your knowledge base\n"
-                "- Answer questions about your documents\n"
-                "- Discover related content and topics\n"
-                "- Provide summaries and explanations\n\n"
-                "What would you like to explore?"
-            )
-        else:
-            # Simple greeting
-            answer = (
-                "Hello! I'm here to help with questions about your knowledge base documents. "
-                "Let me know what you'd like to learn or explore."
-            )
+        # Simple greeting response (static fallback)
+        answer = f"Hello! I'm {assistant_name}. How can I help you today?"
         
         return {
             "answer": answer,
             "is_generic": True,
             "answer_mode": "FULL"
         }
+
+    def _handle_small_talk_via_llm(
+        self,
+        query: str,
+        collection_id: Optional[str] = None,
+        conversation_history: Optional[List[Dict]] = None,
+    ) -> Dict[str, any]:
+        """
+        Handle simple greetings/small talk by delegating to the LLM for a natural response.
+        
+        Falls back to the static `_handle_small_talk` implementation on any error.
+        """
+        try:
+            # Reuse the assistant name extraction logic from `_handle_small_talk`
+            assistant_name = "assistant"
+
+            if collection_id and self.db_session:
+                try:
+                    collection = self.db_session.query(Collection).filter(
+                        Collection.collection_id == collection_id
+                    ).first()
+
+                    if collection and collection.assistant_name:
+                        assistant_name = collection.assistant_name
+                    else:
+                        prompt = self.get_prompt_for_collection(collection_id)
+                        if prompt and prompt.system_prompt:
+                            name_match = re.search(
+                                r"(?:you are|your name is|i am|i'm|my name is)\s+([A-Z][a-z]+)",
+                                prompt.system_prompt,
+                                re.IGNORECASE,
+                            )
+                            if name_match:
+                                extracted = name_match.group(1).strip()
+                                if extracted.lower() not in ("an", "a", "the", "here", "designed"):
+                                    assistant_name = extracted
+                except Exception as e:
+                    logger.debug(f"[GREETING-LLM] Could not extract name for small talk: {e}")
+
+            # Build a small-talk specific system-style prompt for the LLM
+            assistant_clause = f" named {assistant_name}" if assistant_name else ""
+            system_instructions = SMALL_TALK_SYSTEM_PROMPT.format(assistant_clause=assistant_clause)
+
+            # Optionally include a tiny bit of recent history if available (for future extensibility)
+            history_snippet = ""
+            if conversation_history:
+                try:
+                    recent = conversation_history[-3:]
+                    lines = []
+                    for msg in recent:
+                        role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", "user")
+                        content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
+                        if content:
+                            lines.append(f"{role.capitalize()}: {content[:120]}")
+                    if lines:
+                        history_snippet = "\n\nRecent conversation:\n" + "\n".join(lines)
+                except Exception as e:
+                    logger.debug(f"[GREETING-LLM] Failed to include history snippet: {e}")
+
+            prompt = (
+                f"{system_instructions}\n\n"
+                f"User message: {query}\n"
+                f"Assistant:{history_snippet}\n"
+            )
+
+            logger.info("[GREETING-LLM] Calling LLM for small-talk response...")
+
+            raw_answer, _ = self.call_ai(
+                prompt,
+                model=self.default_model,
+                max_tokens=min(self.default_max_tokens, 256),
+                temperature=self.default_temperature,
+            )
+
+            answer = (raw_answer or "").strip()
+
+            # Very defensive fallback if LLM returns nothing usable
+            if not answer:
+                logger.warning("[GREETING-LLM] Empty LLM response for small talk; falling back to static handler.")
+                return self._handle_small_talk(query, collection_id=collection_id)
+
+            return {
+                "answer": answer,
+                "is_generic": True,  # greetings are generic by design
+                "answer_mode": "FULL",
+            }
+
+        except Exception as e:
+            logger.error(f"[GREETING-LLM] Small-talk LLM handler failed: {e}")
+            return self._handle_small_talk(query, collection_id=collection_id)
 
     def _parse_ai_response(self, raw_response: str) -> Dict[str, any]:
         """Parse AI response to extract the classification tag and clean answer.
@@ -1896,6 +2012,11 @@ class RAG:
         - Advanced Reranking & Diversity
         - FIX 20: Request-Level Caching
         """
+        # Check for greetings/small talk - return empty chunks so caller can handle it
+        if self._is_small_talk(query):
+            logger.info(f"[RAG] Greeting detected: '{query}' - returning empty chunks for greeting handler")
+            return []
+        
         # FIX 20: Check Cache
         if request_cache is not None:
              cache_key = f"retrieve:{query}:{collection_id}:{top_k}"
@@ -2325,7 +2446,7 @@ class RAG:
                     "needs_followup": True,
                     "reason": "vague_pronoun_no_context",
                     "confidence": 0.9,
-                    "missing_context": ["What specific topic are you asking about?"]
+                    "missing_context": ["Hai!/n/What specific topic are you asking about?"]
                 })
                 # Placeholder for metric logging
                 logger.info("[FOLLOWUP_METRIC] Triggered: vague_pronoun_no_context", extra={"query": query})
@@ -3592,7 +3713,11 @@ ANSWER QUALITY GUIDELINES (CRITICAL - Always Apply):
             dict with 'answer' (str) and 'is_generic' (bool) for AI classification
         """
         if self._is_small_talk(query):
-            return self._handle_small_talk(query)
+            return self._handle_small_talk_via_llm(
+                query,
+                collection_id=collection_id,
+                conversation_history=None,
+            )
 
         # --- CACHE CHECK (Answer) ---
         cache = get_rag_cache()
@@ -3843,7 +3968,11 @@ Answer:"""
             dict with 'answer' (str) and 'is_generic' (bool) for AI classification
         """
         if self._is_small_talk(query):
-            return self._handle_small_talk(query)
+            return self._handle_small_talk_via_llm(
+                query,
+                collection_id=collection_id,
+                conversation_history=conversation_history,
+            )
 
         # --- CACHE CHECK (Answer) ---
         cache = get_rag_cache()
@@ -4096,8 +4225,13 @@ Answer:"""
         
         # If we had a potential follow-up but confidence was low, we fall through to FULL/PARTIAL answer logic
         
+        # Check if this is a capability/identity question (e.g., "what can you do?")
+        # These should be answered by the LLM using the system prompt, NOT from KB search
+        is_capability = self._is_capability_question(query)
+        
         # Fallback to standard generic response if chunks are missing but no follow-up triggered
-        if not chunks_with_sources or answer_mode == AnswerMode.NO_DATA_CONFIRMED:
+        # EXCEPTION: Capability questions should go through to LLM even with no chunks
+        if (not chunks_with_sources or answer_mode == AnswerMode.NO_DATA_CONFIRMED) and not is_capability:
             if query_classification.get("query_type") == "leadership_list":
                 # Never use raw scope: can be None → "None leadership". Always fallback.
                 org_display = ((conversation_state or {}).get("scope") or "the organization")
@@ -4111,6 +4245,11 @@ Answer:"""
                 "is_generic": True,
                 "answer_mode": AnswerMode.NO_DATA_CONFIRMED
             }
+        
+        # For capability questions with no KB data, set mode to FULL so LLM can answer from system prompt
+        if is_capability and not chunks_with_sources:
+            answer_mode = AnswerMode.FULL
+            logger.info(f"[CAPABILITY] Allowing LLM to answer capability question from system prompt")
 
         system_prompt, model, max_tokens, temperature = self._resolve_prompt_settings(
             collection_id=collection_id,
@@ -4193,6 +4332,15 @@ Response Guidelines for Person Queries:
 """
         else:
             context = format_general_context(chunks_with_sources)
+        
+        # For capability questions with no KB data, include system prompt as context
+        # so the LLM can answer "what can you do?" based on its instructions
+        if is_capability and not chunks_with_sources:
+            context = f"""ASSISTANT INSTRUCTIONS (use this to answer capability questions):
+{system_prompt}
+
+Note: The user is asking about your capabilities. Answer based on the instructions above.
+Introduce yourself and explain what you can help with, based on your role described above."""
             
         # FIX 17 & 22: Add classification instruction
         full_system_prompt = f"{prompt_header}\n\n{CLASSIFICATION_INSTRUCTION}"

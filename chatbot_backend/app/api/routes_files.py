@@ -91,6 +91,25 @@ def _release_upload_slot(file_id: str):
         _active_uploads.discard(file_id)
 
 
+def _trigger_capability_scan_async(collection_id: str):
+    """
+    Trigger an async capability scan for a collection after file upload.
+    This updates the collection's knowledge of what topics it can help with.
+    """
+    try:
+        from app.core.database import SessionLocal
+        from app.services.capabilities_scanner import scan_and_update_collection
+        
+        db = SessionLocal()
+        try:
+            scan_and_update_collection(collection_id, db, force=False)  # force=False to respect cooldown
+            logger.info(f"[UPLOAD] Capability scan completed for {collection_id}")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"[UPLOAD] Capability scan failed: {e}")
+
+
 # ------------------------
 # Upload status endpoint
 # ------------------------
@@ -390,6 +409,10 @@ async def upload_file(
             logger.warning(f"[UPLOAD PARTIAL SUCCESS] Uploaded {success_count}/{total_count} files. Failed files: {', '.join(failed_files)}")
         else:
             logger.debug(f"[UPLOAD SUCCESS] Uploaded {success_count}/{total_count} files by {getattr(current_user, 'username', 'unknown')}")
+        
+        # Trigger capability scan after successful uploads (background task)
+        if success_count > 0 and collection_id:
+            background_tasks.add_task(_trigger_capability_scan_async, collection_id)
         
         return results
     finally:
