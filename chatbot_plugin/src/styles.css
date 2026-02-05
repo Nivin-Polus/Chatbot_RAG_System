@@ -1103,7 +1103,12 @@ button {
   cursor: pointer;
   transition: box-shadow 0.2s ease, transform 0.1s ease;
   font-size: 16px;
+  font-size: 16px;
   width: 52px;
+  min-width: 52px;
+  /* Strictly enforce width */
+  max-width: 52px;
+  /* Strictly enforce width */
   min-height: 52px;
   /* Replaced fixed height with min-height */
   height: auto;
