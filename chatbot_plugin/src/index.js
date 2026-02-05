@@ -641,6 +641,9 @@ import "./styles.css";
     }
     showSendButton();
 
+    // Save partial state to history
+    saveChatHistory();
+
     // Scroll to bottom to show the finalized response
     if (chatBox) {
       scrollChatToBottom(true); // Force scroll
