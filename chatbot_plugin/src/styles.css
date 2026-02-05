@@ -1017,6 +1017,8 @@ button {
 .chat-input-field {
   position: relative;
   flex: 1;
+  display: flex;
+  align-items: center;
 }
 
 .chat-input-field input,
@@ -1055,7 +1057,7 @@ button {
 .chat-input input,
 .chat-input textarea {
   flex: 1;
-  border: 1px solid #d1d5db;
+  border: 2px solid #d1d5db;
   border-radius: 12px;
   padding: 10px 14px;
   /* Reduced padding from 16px */
@@ -1063,7 +1065,8 @@ button {
   outline: none;
   background: #fff;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
-  min-height: 20px;
+  min-height: 52px;
+  height: 52px;
   resize: none;
   overflow-y: hidden;
   font-family: inherit;
@@ -1072,7 +1075,7 @@ button {
 
 /* Override for textarea to allow scrolling after 2 lines */
 .chat-input textarea {
-  padding: 15px 14px;
+  padding: 14px 14px;
   line-height: 20px;
   min-height: 52px;
   /* Matches send button height */

@@ -214,7 +214,10 @@ export class ChatbotUI {
 
       const autoResize = () => {
         inputElement.style.height = 'auto';
-        inputElement.style.height = inputElement.scrollHeight + 'px';
+        const style = window.getComputedStyle(inputElement);
+        const borderHeight = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+        const newHeight = inputElement.scrollHeight + borderHeight;
+        inputElement.style.height = newHeight + 'px';
       };
 
       inputElement.addEventListener("input", () => {
