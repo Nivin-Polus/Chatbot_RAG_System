@@ -1060,7 +1060,14 @@ button {
   min-height: 20px;
   resize: none;
   overflow-y: hidden;
-  font-family: inherit; /* Ensure font matches */
+  font-family: inherit;
+  /* Ensure font matches */
+}
+
+/* Override for textarea to allow scrolling up to 2-3 lines */
+.chat-input textarea {
+  max-height: 88px;
+  overflow-y: auto;
 }
 
 .chat-input input:focus,
