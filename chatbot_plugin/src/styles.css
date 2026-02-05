@@ -1014,7 +1014,8 @@ button {
   flex: 1;
 }
 
-.chat-input-field input {
+.chat-input-field input,
+.chat-input-field textarea {
   width: 100%;
 }
 
@@ -1046,7 +1047,8 @@ button {
   visibility: hidden;
 }
 
-.chat-input input {
+.chat-input input,
+.chat-input textarea {
   flex: 1;
   border: 1px solid #d1d5db;
   border-radius: 8px;
@@ -1056,14 +1058,19 @@ button {
   background: #fff;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
   min-height: 20px;
+  resize: none;
+  overflow-y: hidden;
+  font-family: inherit; /* Ensure font matches */
 }
 
-.chat-input input:focus {
+.chat-input input:focus,
+.chat-input textarea:focus {
   border-color: #2563eb;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
-.chat-input input:disabled {
+.chat-input input:disabled,
+.chat-input textarea:disabled {
   background-color: #f3f4f6;
   color: #6b7280;
 }
@@ -1143,7 +1150,8 @@ button {
     height: min(80vh, 600px);
   }
 
-  .chat-input input {
+  .chat-input input,
+  .chat-input textarea {
     padding: 14px;
     font-size: 14px;
   }
@@ -1223,7 +1231,8 @@ button {
     border-radius: 10px;
   }
 
-  .chat-input input {
+  .chat-input input,
+  .chat-input textarea {
     padding: 12px;
     font-size: 14px;
   }

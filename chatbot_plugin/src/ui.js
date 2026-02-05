@@ -134,11 +134,12 @@ export class ChatbotUI {
 
             <div class="plugin-chat-input chat-input">
                 <div class="plugin-chat-input-field chat-input-field">
-                <input type="text" 
+                <textarea 
                         id="chat-message" 
                         placeholder=" " 
                         aria-label="${this.escapeHtml(welcomeMessage)}" 
-                        maxlength="500"/>
+                        maxlength="500"
+                        rows="1"></textarea>
                 <span class="plugin-custom-placeholder custom-placeholder">${welcomeMessage}</span>
                 </div>
                 <button type="button" id="chat-stop" title="Stop" style="display:none" aria-label="Stop">
@@ -211,7 +212,15 @@ export class ChatbotUI {
         inputField.classList.toggle("has-value", hasValue);
       };
 
-      inputElement.addEventListener("input", togglePlaceholderState);
+      const autoResize = () => {
+        inputElement.style.height = 'auto';
+        inputElement.style.height = inputElement.scrollHeight + 'px';
+      };
+
+      inputElement.addEventListener("input", () => {
+        togglePlaceholderState();
+        autoResize();
+      });
       inputElement.addEventListener("focus", () => {
         inputField.classList.add("plugin-is-focused");
         inputField.classList.add("is-focused");
@@ -223,6 +232,8 @@ export class ChatbotUI {
       });
 
       togglePlaceholderState();
+      // Initial resize
+      autoResize();
     }
 
     /** Close button */
