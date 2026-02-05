@@ -434,8 +434,9 @@ import "./styles.css";
   }, true);
 
   // Extra guard: older pages may listen to keypress instead of keydown
+  // Extra guard: older pages may listen to keypress instead of keydown
   document.addEventListener("keypress", (e) => {
-    if (e.target && e.key === "Enter") {
+    if (e.target && e.key === "Enter" && !e.shiftKey) {
       const panel = document.querySelector(".plugin-chat-panel");
       if (panel && panel.contains(e.target)) {
         e.preventDefault();
