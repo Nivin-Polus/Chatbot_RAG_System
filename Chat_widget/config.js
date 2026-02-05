@@ -6,7 +6,7 @@ const WIDGET_CONFIG = {
     // 'local'  = Local backend (localhost:8000)
     // 'dev'    = Dev server
     // 'prod'   = Production
-    environment: 'dev',
+    environment: 'design',
 
     // ===== Mock Mode (auto-enabled in 'design' environment) =====
     // When true, bypasses API calls and uses mock data for UI development
@@ -63,6 +63,11 @@ const WIDGET_CONFIG = {
 
         // Input placeholder text
         inputPlaceholder: 'Type your message...',
+    },
+    // ===== Button Labels =====
+    buttons: {
+        newChatBackground: 'linear-gradient(135deg,hsl(var(--primary)), #5695f5)',
+        sendBackground: 'hsl(var(--primary))',
     },
 
     // ===== Error Messages =====

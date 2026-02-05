@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chat Help Page</title>
     <meta name="description" content="AI-powered knowledge base chat assistant">
-    <!-- Use Leto logo as favicon for the widget help page -->
-    <link rel="icon" type="image/svg+xml" href="leto.svg">
+    <!-- Favicon is set dynamically from config.js -->
+    <link id="favicon" rel="icon" href="">
 
     <!-- Open Graph metadata for rich link previews (use Leto logo) -->
     <meta property="og:title" content="Chat Widget - AI-powered knowledge base assistant">
@@ -52,7 +52,7 @@
             <aside id="sidebar" class="sidebar">
                 <div class="sidebar-header">
                     <div class="logo-container">
-                        <img src="leto.svg" alt="Leto Logo" class="logo-icon" />
+                        <img id="sidebar-logo" src="" alt="Chat Assistant Logo" class="logo-icon" />
                     </div>
                     <button id="toggle-sidebar" class="toggle-sidebar-btn" title="Toggle Sidebar">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -133,13 +133,14 @@
                     </div>
 
                     <div class="input-wrapper">
-                        <input type="text" id="message-input" class="message-input" placeholder="Type your message..."
-                            autocomplete="off" />
+                        <textarea id="message-input" class="message-input" placeholder="Type your message..."
+                            autocomplete="off" rows="1"></textarea>
                         <button type="submit" id="send-btn" class="send-btn" disabled>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <line x1="22" y1="2" x2="11" y2="13" />
                                 <polygon points="22 2 15 22 11 13 2 9 22 2" />
                             </svg>
+                            <span class="send-btn-label"></span>
                         </button>
                         <button type="button" id="stop-btn" class="stop-btn" style="display: none;">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

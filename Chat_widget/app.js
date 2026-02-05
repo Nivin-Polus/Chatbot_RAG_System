@@ -9,6 +9,38 @@
 // ===== Get Widget Config (from config.js) =====
 const WCFG = window.WIDGET_CONFIG || {};
 
+function readLabelFromElement(el, selector, attrs = []) {
+    if (!el) return '';
+    let text = '';
+    if (selector) {
+        const target = el.querySelector(selector);
+        if (target) {
+            text = target.textContent || '';
+        }
+    } else {
+        text = el.textContent || '';
+    }
+    const trimmed = text.toString().trim();
+    if (trimmed.length > 0) return trimmed;
+    for (const attr of attrs) {
+        const val = el.getAttribute?.(attr);
+        if (val !== null && val !== undefined) {
+            const attrText = val.toString().trim();
+            if (attrText.length > 0) return attrText;
+        }
+    }
+    return '';
+}
+
+function getNewChatLabel() {
+    const domLabel = readLabelFromElement(
+        elements?.newChatBtn,
+        'span',
+        ['data-tooltip', 'title', 'aria-label']
+    );
+    return domLabel;
+}
+
 // ===== Runtime Configuration (populated from widget lookup) =====
 const CONFIG = {
     // API settings from config.js
@@ -41,6 +73,7 @@ const state = {
     abortController: null, // Added for stopping requests
     userScrolledDuringStream: false, // Track if user manually scrolled during streaming
     isAutoScrolling: false, // Flag to distinguish programmed scroll from user scroll
+    inputExpanded: false,
 };
 
 // ===== DOM Elements =====
@@ -51,6 +84,8 @@ document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
     cacheElements();
+    applyBranding();
+    applyButtonStyles();
     if (elements.emptyChatMessage) {
         const emptyTextEl = elements.emptyChatMessage?.querySelector('.empty-chat-text');
 
@@ -123,6 +158,8 @@ function cacheElements() {
         chatInterface: document.getElementById('chat-interface'),
         sidebar: document.getElementById('sidebar'),
         chatMain: document.getElementById('chat-main'),//kebin
+        sidebarLogo: document.getElementById('sidebar-logo'),
+        favicon: document.getElementById('favicon'),
         toggleSidebarBtn: document.getElementById('toggle-sidebar'),
         mobileMenuBtn: document.getElementById('mobile-menu-btn'),
         newChatBtn: document.getElementById('new-chat-btn'),
@@ -140,6 +177,62 @@ function cacheElements() {
         emptyChatMessage: document.getElementById('empty-chat-message'),
     };
     console.log('⏹️ Stop button element:', elements.stopBtn);
+}
+
+function applyButtonStyles() {
+    const root = document.documentElement;
+    const newChatBg = (WCFG.buttons?.newChatBackground || '').toString().trim();
+    const sendBg = (WCFG.buttons?.sendBackground || '').toString().trim();
+    if (newChatBg) {
+        root.style.setProperty('--btn-new-chat-bg', newChatBg);
+    }
+    if (sendBg) {
+        root.style.setProperty('--btn-send-bg', sendBg);
+    }
+}
+
+function resolveAssetUrl(rawPath) {
+    if (!rawPath) return '';
+    const trimmed = rawPath.toString().trim();
+    if (!trimmed) return '';
+    if (/^(data:|https?:|blob:)/i.test(trimmed)) {
+        return trimmed;
+    }
+    try {
+        return new URL(trimmed, window.location.href).href;
+    } catch {
+        return trimmed;
+    }
+}
+
+function getAssetMimeType(path) {
+    const lower = (path || '').toString().toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.ico')) return 'image/x-icon';
+    if (lower.endsWith('.svg')) return 'image/svg+xml';
+    return '';
+}
+
+function applyBranding() {
+    const logoPath = WCFG.branding?.logoPath || '';
+    const resolvedLogoUrl = resolveAssetUrl(logoPath);
+
+    if (elements.sidebarLogo) {
+        if (resolvedLogoUrl) {
+            elements.sidebarLogo.src = resolvedLogoUrl;
+        }
+        elements.sidebarLogo.alt = `${WCFG.branding?.appName || 'Chat Assistant'} Logo`;
+    }
+
+    if (elements.favicon) {
+        if (resolvedLogoUrl) {
+            elements.favicon.href = resolvedLogoUrl;
+        }
+        const mimeType = getAssetMimeType(logoPath);
+        if (mimeType) {
+            elements.favicon.type = mimeType;
+        }
+    }
 }
 
 function setupEventListeners() {
@@ -187,6 +280,23 @@ function setupEventListeners() {
     }
     if (elements.messageInput) {
         elements.messageInput.addEventListener('input', handleInputChange);
+        elements.messageInput.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter') return;
+            if (e.shiftKey) {
+                if (!state.inputExpanded) {
+                    elements.messageInput.style.height = '4.5rem';
+                    elements.messageInput.style.overflowY = 'auto';
+                    state.inputExpanded = true;
+                }
+                return;
+            }
+            e.preventDefault();
+            if (elements.chatForm?.requestSubmit) {
+                elements.chatForm.requestSubmit();
+            } else {
+                handleSubmit(e);
+            }
+        });
     }
 
     // Stop button
@@ -384,21 +494,30 @@ async function refreshToken() {
 }
 
 // ===== Update Meta Tags with Dynamic URLs =====
+function getOgImageUrl() {
+    const configured = WCFG.metadata?.ogImageUrl || '';
+    if (configured) return configured;
+    const logoPath = WCFG.branding?.logoPath || '';
+    return resolveAssetUrl(logoPath);
+}
+
 function updateMetaTags() {
-    // Get the base URL from config (based on current environment)
-    const baseUrl = WCFG.api?.baseUrl || window.location.origin;
-    const ogImageUrl = `${baseUrl}/chatbot/leto.png`;
+    const ogImageUrl = getOgImageUrl();
 
     // Update Open Graph image meta tag
     const ogImageMeta = document.querySelector('meta[property="og:image"]');
     if (ogImageMeta) {
-        ogImageMeta.setAttribute('content', ogImageUrl);
+        if (ogImageUrl) {
+            ogImageMeta.setAttribute('content', ogImageUrl);
+        }
     }
 
     // Update Twitter Card image meta tag
     const twitterImageMeta = document.querySelector('meta[name="twitter:image"]');
     if (twitterImageMeta) {
-        twitterImageMeta.setAttribute('content', ogImageUrl);
+        if (ogImageUrl) {
+            twitterImageMeta.setAttribute('content', ogImageUrl);
+        }
     }
 }
 
@@ -449,7 +568,16 @@ function startNewSession() {
     // The session will be created and saved only when the first message is sent
     renderMessages();
     updateEmptyChatState();
-    elements.messageInput.focus();
+    if (elements.messageInput) {
+        elements.messageInput.value = '';
+        elements.messageInput.style.height = '';
+        elements.messageInput.style.overflowY = 'hidden';
+    }
+    if (elements.sendBtn) {
+        elements.sendBtn.disabled = true;
+    }
+    state.inputExpanded = false;
+    elements.messageInput?.focus();
 
     // Remove active class from history items
     document.querySelectorAll('.history-item').forEach(item => {
@@ -516,7 +644,7 @@ function deleteSession(sessionId) {
 function updateSessionTitle(sessionId, firstMessage) {
     const session = state.sessions.find(s => s.id === sessionId);
     // Only auto-update if it's still "New Chat" or we track manual renames (simplified here)
-    if (session && session.title === 'New Chat') {
+    if (session && session.title === getNewChatLabel()) {
         session.title = firstMessage.slice(0, 40) + (firstMessage.length > 40 ? '...' : '');
         saveSessions();
         renderHistory();
@@ -908,6 +1036,11 @@ function scrollToBottom(force = false) {
 function handleInputChange() {
     const hasText = elements.messageInput.value.trim().length > 0;
     elements.sendBtn.disabled = !hasText || state.isLoading;
+    if (!hasText && state.inputExpanded) {
+        elements.messageInput.style.height = '';
+        elements.messageInput.style.overflowY = 'hidden';
+        state.inputExpanded = false;
+    }
 }
 
 // ===== Button State Helpers =====
@@ -989,6 +1122,9 @@ async function handleSubmit(e) {
     // Clear input
     elements.messageInput.value = '';
     elements.sendBtn.disabled = true;
+    elements.messageInput.style.height = '';
+    elements.messageInput.style.overflowY = 'hidden';
+    state.inputExpanded = false;
 
     // Add user message
     const userMessage = {
@@ -1003,7 +1139,7 @@ async function handleSubmit(e) {
     if (!session) {
         session = {
             id: state.sessionId,
-            title: 'New Chat',
+            title: getNewChatLabel(),
             timestamp: Date.now(),
             messages: [],
         };
