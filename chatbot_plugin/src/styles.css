@@ -1160,7 +1160,7 @@ button {
   width: 18px;
   height: 18px;
   display: block;
-  background-color: #000;
+  background-color: var(--chat-primary);
   /* filter: brightness(0) saturate(100%) invert(22%) sepia(61%) saturate(1031%) hue-rotate(195deg) brightness(98%) contrast(98%); */
 }
 
