@@ -706,6 +706,8 @@ import "./styles.css";
     // Re-enable UI elements
     if (input) {
       input.disabled = false;
+      input.value = "";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
     }
     showSendButton();
 
@@ -1331,6 +1333,9 @@ import "./styles.css";
     // Re-enable UI elements
     if (input) {
       input.disabled = false;
+      // Reset input value and height when switching sessions
+      input.value = "";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
     }
     showSendButton();
 
