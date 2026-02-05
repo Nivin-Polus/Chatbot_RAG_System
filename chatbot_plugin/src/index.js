@@ -1781,6 +1781,22 @@ import "./styles.css";
     });
 
     let safe = escapeHtml(processed);
+
+    // NEW: Auto-linkify URLs and Emails
+    // Note: We do this AFTER escaping HTML to prevent XSS, but BEFORE restoring tokens
+    // to avoid matching inside the HTML attributes of injected tokens (like source links).
+
+    // 1. URLs (http/https)
+    // Avoid matching inside existing tags (though at this stage there shouldn't be many except escaped ones)
+    safe = safe.replace(/(https?:\/\/[^\s<"']+)/g, (match) => {
+      return `<a href="${match}" target="_blank" rel="noopener noreferrer" class="chat-link">${match}</a>`;
+    });
+
+    // 2. Emails
+    safe = safe.replace(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/g, (match) => {
+      return `<a href="mailto:${match}" class="chat-link">${match}</a>`;
+    });
+
     safe = safe.replace(/\r\n/g, "\n");
 
     // Inject Sources Section
@@ -1831,25 +1847,6 @@ import "./styles.css";
     // safe = safe.replace(/\n\d+\./g, "<br/>$&");
     // safe = safe.replace(/\n-\s*/g, "<br/>• ");
     // safe = safe.replace(/\n/g, "<br/>");
-
-    // NEW: Auto-linkify URLs and Emails
-    // Note: We do this AFTER escaping HTML to prevent XSS, but we need to be careful
-    // not to mess up existing tags we just created (like <strong> or <hN>).
-    // However, since we are targeting specific patterns, it should be relatively safe
-    // as long as we don't match inside attributes.
-
-    // 1. URLs (http/https)
-    // Avoid matching inside existing attributes (e.g. href="...") by using a negative lookbehind or careful regex
-    // Simple approach: Match http(s)://... until space or <
-    safe = safe.replace(/(https?:\/\/[^\s<"']+)/g, (match) => {
-      // Return as anchor tag
-      return `<a href="${match}" target="_blank" rel="noopener noreferrer" class="chat-link">${match}</a>`;
-    });
-
-    // 2. Emails
-    safe = safe.replace(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/g, (match) => {
-      return `<a href="mailto:${match}" class="chat-link">${match}</a>`;
-    });
 
     tableTokens.forEach((html, index) => {
       const token = `__TABLE_BLOCK_${index}__`;
