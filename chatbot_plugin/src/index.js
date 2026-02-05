@@ -605,9 +605,8 @@ import "./styles.css";
       typingInterval = null;
     }
 
-    // Finalize any messages that are still in typing state with full text
-    if (currentTypingMessage && currentTypingFullText) {
-      currentTypingMessage.text = currentTypingFullText;
+    // Stop typing immediately and keep partial text
+    if (currentTypingMessage) {
       currentTypingMessage.isTyping = false;
       currentTypingMessage = null;
       currentTypingFullText = null;

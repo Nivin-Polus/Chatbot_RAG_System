@@ -1006,7 +1006,8 @@ button {
 
 .chat-input {
   display: flex;
-  align-items: center;
+  align-items: stretch;
+  /*Changed from center so button stretches with input */
   border-top: 1px solid #ddd;
   padding: 12px;
   background: #f8fafc;
@@ -1103,7 +1104,10 @@ button {
   transition: box-shadow 0.2s ease, transform 0.1s ease;
   font-size: 16px;
   width: 52px;
-  height: 52px;
+  min-height: 52px;
+  /* Replaced fixed height with min-height */
+  height: auto;
+  /* Allow stretching */
   flex-shrink: 0;
   display: flex;
   align-items: center;
