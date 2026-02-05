@@ -425,7 +425,7 @@ import "./styles.css";
   }, true);
 
   document.addEventListener("keydown", async (e) => {
-    if (e.target.id === "chat-message" && e.key === "Enter") {
+    if (e.target.id === "chat-message" && e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
@@ -435,9 +435,10 @@ import "./styles.css";
   }, true);
 
   // Extra guard: older pages may listen to keypress instead of keydown
+  // Extra guard: older pages may listen to keypress instead of keydown
   document.addEventListener("keypress", (e) => {
-    if (e.target && e.key === "Enter") {
-      const panel = document.querySelector(`.${PLUGIN_ROOT_CLASS}`);
+    if (e.target && e.key === "Enter" && !e.shiftKey) {
+      const panel = document.querySelector(".plugin-chat-panel");
       if (panel && panel.contains(e.target)) {
         e.preventDefault();
         e.stopPropagation();
@@ -605,9 +606,8 @@ import "./styles.css";
       typingInterval = null;
     }
 
-    // Finalize any messages that are still in typing state with full text
-    if (currentTypingMessage && currentTypingFullText) {
-      currentTypingMessage.text = currentTypingFullText;
+    // Stop typing immediately and keep partial text
+    if (currentTypingMessage) {
       currentTypingMessage.isTyping = false;
       currentTypingMessage = null;
       currentTypingFullText = null;
@@ -637,8 +637,12 @@ import "./styles.css";
     // Re-enable UI elements
     if (input) {
       input.disabled = false;
+      input.dispatchEvent(new Event("input", { bubbles: true })); // Trigger resize reset
     }
     showSendButton();
+
+    // Save partial state to history
+    saveChatHistory();
 
     // Scroll to bottom to show the finalized response
     if (chatBox) {
@@ -706,6 +710,8 @@ import "./styles.css";
     // Re-enable UI elements
     if (input) {
       input.disabled = false;
+      input.value = "";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
     }
     showSendButton();
 
@@ -1331,6 +1337,9 @@ import "./styles.css";
     // Re-enable UI elements
     if (input) {
       input.disabled = false;
+      // Reset input value and height when switching sessions
+      input.value = "";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
     }
     showSendButton();
 
@@ -1782,6 +1791,22 @@ import "./styles.css";
     });
 
     let safe = escapeHtml(processed);
+
+    // NEW: Auto-linkify URLs and Emails
+    // Note: We do this AFTER escaping HTML to prevent XSS, but BEFORE restoring tokens
+    // to avoid matching inside the HTML attributes of injected tokens (like source links).
+
+    // 1. URLs (http/https)
+    // Avoid matching inside existing tags (though at this stage there shouldn't be many except escaped ones)
+    safe = safe.replace(/(https?:\/\/[^\s<"']+)/g, (match) => {
+      return `<a href="${match}" target="_blank" rel="noopener noreferrer" class="chat-link">${match}</a>`;
+    });
+
+    // 2. Emails
+    safe = safe.replace(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/g, (match) => {
+      return `<a href="mailto:${match}" class="chat-link">${match}</a>`;
+    });
+
     safe = safe.replace(/\r\n/g, "\n");
 
     // Inject Sources Section

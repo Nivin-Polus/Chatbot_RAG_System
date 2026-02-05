@@ -490,6 +490,11 @@ export default function PluginUserChat() {
         setIsLoading(true);
         enableAutoScroll();
 
+        // Immediately save user message to storage so it's available if user switches tabs
+        if (sessionId && user?.user_id && selectedCollection) {
+            saveSession(sessionId, updatedMessages, selectedCollection, user.user_id, user.role || 'plugin_user', true);
+        }
+
         try {
             const conversationHistory = updatedMessages.slice(-20).map((msg) => ({
                 role: msg.role,
@@ -1046,6 +1051,42 @@ export default function PluginUserChat() {
                             {createInlineElements(headingContent, false)}
                         </HeadingTag>
                     );
+                    continue;
+                }
+
+                // Check for Markdown lists (- or * for ul, 1. for ol)
+                const listMatch = trimmed.match(/^([-*]|\d+\.)\s+(.+)$/);
+                if (listMatch && !inSourcesSection) {
+                    const isOrdered = /^\d+/.test(listMatch[1]);
+                    const listLines: string[] = [];
+                    let j = i;
+
+                    while (j < lines.length) {
+                        const currentTrimmed = lines[j].trim();
+                        const currentMatch = currentTrimmed.match(/^([-*]|\d+\.)\s+(.+)$/);
+                        if (!currentMatch) break;
+                        listLines.push(currentTrimmed);
+                        j++;
+                    }
+
+                    const ListTag = isOrdered ? 'ol' : 'ul';
+                    nodes.push(
+                        <ListTag
+                            key={`${messageId}-list-${i}`}
+                            className={`my-3 ml-6 ${isOrdered ? 'list-decimal' : 'list-disc'} space-y-1`}
+                        >
+                            {listLines.map((line, idx) => {
+                                const itemContent = line.replace(/^([-*]|\d+\.)\s+/, '');
+                                return (
+                                    <li key={`${messageId}-list-${i}-item-${idx}`} className="pl-1">
+                                        {createInlineElements(itemContent, false)}
+                                    </li>
+                                );
+                            })}
+                        </ListTag>
+                    );
+
+                    i = j - 1;
                     continue;
                 }
 

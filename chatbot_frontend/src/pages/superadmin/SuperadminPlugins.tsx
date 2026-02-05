@@ -108,6 +108,14 @@ export function PluginsContent() {
 
   // Fetch embed code configuration
   const fetchEmbedConfig = useCallback(async () => {
+    // 1) Prefer a build-time value from environment variables
+    const envEmbedBaseUrl = import.meta.env.VITE_PLUGIN_EMBED_BASE_URL as string | undefined;
+    if (envEmbedBaseUrl) {
+      setEmbedBaseUrl(envEmbedBaseUrl);
+      return;
+    }
+
+    // 2) Fallback to backend-configured value (for backwards compatibility)
     if (!user?.access_token) return;
 
     try {
