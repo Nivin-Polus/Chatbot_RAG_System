@@ -1006,8 +1006,8 @@ button {
 
 .chat-input {
   display: flex;
-  align-items: flex-end;
-  /* Changed from stretch to avoid button growing */
+  align-items: center;
+  /* Changed from flex-end to ensure vertical centering */
   border-top: 1px solid #ddd;
   padding: 12px;
   background: #f8fafc;
@@ -1078,6 +1078,7 @@ button {
   /* Matches send button height */
   max-height: 72px;
   /* Allows exactly 2 lines (52 + 20) */
+  box-sizing: border-box;
   overflow-y: auto;
 }
 
