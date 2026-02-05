@@ -480,6 +480,7 @@ button {
   margin-left: auto;
   max-width: 80%;
   flex-direction: row-reverse;
+  white-space: pre-wrap;
 }
 
 .msg.bot {
@@ -1052,7 +1053,8 @@ button {
   flex: 1;
   border: 1px solid #d1d5db;
   border-radius: 8px;
-  padding: 16px;
+  padding: 10px 14px;
+  /* Reduced padding from 16px */
   padding-right: 16px;
   outline: none;
   background: #fff;
@@ -1064,9 +1066,13 @@ button {
   /* Ensure font matches */
 }
 
-/* Override for textarea to allow scrolling up to 2-3 lines */
+/* Override for textarea to allow scrolling after 2 lines */
+/* Override for textarea to allow scrolling after 2 lines */
 .chat-input textarea {
-  max-height: 88px;
+  padding: 10px 14px;
+  line-height: 20px;
+  min-height: 42px;
+  max-height: 64px;
   overflow-y: auto;
 }
 

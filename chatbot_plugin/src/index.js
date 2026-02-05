@@ -637,6 +637,7 @@ import "./styles.css";
     // Re-enable UI elements
     if (input) {
       input.disabled = false;
+      input.dispatchEvent(new Event("input", { bubbles: true })); // Trigger resize reset
     }
     showSendButton();
 
