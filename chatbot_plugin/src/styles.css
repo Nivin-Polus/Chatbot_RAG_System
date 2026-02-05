@@ -1006,8 +1006,8 @@ button {
 
 .chat-input {
   display: flex;
-  align-items: stretch;
-  /*Changed from center so button stretches with input */
+  align-items: flex-end;
+  /* Changed from stretch to avoid button growing */
   border-top: 1px solid #ddd;
   padding: 12px;
   background: #f8fafc;
@@ -1056,7 +1056,7 @@ button {
 .chat-input textarea {
   flex: 1;
   border: 1px solid #d1d5db;
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 10px 14px;
   /* Reduced padding from 16px */
   padding-right: 16px;
@@ -1097,22 +1097,21 @@ button {
   background: #fff;
   color: #111827;
   border: 2px solid transparent;
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 0;
   margin-left: 0;
   cursor: pointer;
   transition: box-shadow 0.2s ease, transform 0.1s ease;
   font-size: 16px;
   font-size: 16px;
-  width: 52px;
-  min-width: 52px;
+  width: 60px;
+  min-width: 60px;
   /* Strictly enforce width */
-  max-width: 52px;
+  max-width: 60px;
   /* Strictly enforce width */
-  min-height: 52px;
-  /* Replaced fixed height with min-height */
-  height: auto;
-  /* Allow stretching */
+  /* Strictly enforce width */
+  height: 52px;
+  /* Fixed height */
   flex-shrink: 0;
   display: flex;
   align-items: center;
