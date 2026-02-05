@@ -1,6 +1,6 @@
 # app/api/routes_chat.py
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -58,6 +58,9 @@ class ChatResponse(BaseModel):
     followup_reason: Optional[str] = None  # NEW: Reason for follow-up
     sources: Optional[List[Dict]] = None
     chunk_count: int = 0  # NEW: Number of chunks retrieved
+    answer_mode: Optional[str] = "FULL"  # NEW: Answer mode (FULL, PARTIAL_TRANSPARENT, FOLLOWUP)
+    person_presence: Optional[Dict] = None
+    suggestions: Optional[List[str]] = None  # NEW: AI-generated follow-up suggestions
 
 
 class PublicChatRequest(ChatRequest):
@@ -70,18 +73,24 @@ def _is_generic_query(question: str) -> bool:
         return False
     
     normalized = question.strip().lower()
-    # Remove punctuation for better matching
-    normalized = normalized.rstrip("!?.,")
     
+    # Remove filler words and punctuation (consistent with RAG._is_small_talk)
+    normalized_clean = re.sub(r'\b(please|just|actually|really)\b', '', normalized).strip()
+    normalized_clean = re.sub(r'\s+', ' ', normalized_clean).strip()
+    normalized_stripped = re.sub(r'[.!?,;:\s]+$', '', normalized_clean).strip()
+    
+    # Expanded greeting list to match RAG module
     small_talk_phrases = {
-        "hi", "hello", "hey", "hi there", "hello there",
-        "good morning", "good evening", "good afternoon",
-        "how are you", "how are you doing", "what's up", "whats up",
+        "hi", "hello", "hey", "good morning", "good evening", "good afternoon",
+        "how are you", "what's up", "hi there", "hello there", "whats up", "sup",
+        "hey there", "hiya", "howdy", "greetings", "hai", "hii", "hiii", "helloo",
+        "heya", "yo", "namaste", "hola", "bonjour", "good day", "morning", "evening",
         "thanks", "thank you", "bye", "goodbye", "see you",
         "ok", "okay", "cool", "nice", "great",
     }
     
-    return normalized in small_talk_phrases
+    # Check all normalized versions
+    return normalized in small_talk_phrases or normalized_clean in small_talk_phrases or normalized_stripped in small_talk_phrases
 
 
 def _is_generic_response(answer: str) -> bool:
@@ -137,6 +146,184 @@ def _is_generic_response(answer: str) -> bool:
             return True
     
     return False
+
+
+def _infer_conversation_state(history: List[ConversationMessage]) -> Dict[str, Any]:
+    """
+    Infer the full conversation state (Scope, Entity, Intent) from history.
+    Implements the 4-State Machine:
+    0: No entity/scope
+    1: Scope resolved (Org known)
+    2: Entity resolved (Person/Leadership)
+    3: Follow-up on resolved entity
+    """
+    state = {
+        "scope": None,
+        "active_entity": None,
+        "last_intent": None
+    }
+    
+    if not history:
+        return state
+        
+    # Scan backwards to build state
+    # We look at the last 3 turns
+    recent_history = history[-6:] 
+    
+    for msg in reversed(recent_history):
+        content = msg.content
+        
+        # 1. SCOPE DETECTION (Organization)
+        # Check for explicit scope mentions in assistant or user text
+        # Generic: Extract org from page title patterns like "Company Name | Page" or "Page - Company Name"
+        if not state["scope"]:
+            # Look for org in page title patterns from assistant response
+            org_patterns = [
+                r'\|\s*([A-Z][A-Za-z\s]+?)\s*$',  # "Page Title | Company Name"
+                r'-\s*([A-Z][A-Za-z\s]+?)\s*$',   # "Page Title - Company Name"
+            ]
+            for pattern in org_patterns:
+                match = re.search(pattern, content)
+                if match:
+                    potential_org = match.group(1).strip()
+                    if len(potential_org) > 2 and potential_org.lower() not in ['home', 'about', 'contact']:
+                        state["scope"] = potential_org
+                        break
+        
+        # 2. ENTITY & INTENT DETECTION (From User and Assistant)
+        if msg.role == "user" and not state["active_entity"]:
+            # Look for product/entity mentions in user query
+            # Pattern: "What is [Entity]" or capitalized proper nouns
+            what_is_match = re.search(r'what\s+is\s+([A-Z][A-Za-z0-9\s]+)', content, re.I)
+            if what_is_match:
+                entity_name = what_is_match.group(1).strip()
+                if len(entity_name) > 2:
+                    state["active_entity"] = {"person_name": entity_name}
+                    state["last_intent"] = "person_profile"
+        elif msg.role == "assistant":
+            # Header Pattern: ## [Name] -> Person Entity
+            match_person = re.search(r'^##\s+([A-Z][a-zA-Z\s\-\.]+?)$', content, re.MULTILINE)
+            if match_person and not state["active_entity"]:
+                name = match_person.group(1).strip()
+                if len(name) < 40 and (" " in name or len(name) > 3):
+                    state["active_entity"] = {"person_name": name}
+                    if not state["last_intent"]:
+                        state["last_intent"] = "person_profile"
+
+            # Leadership Pattern: Any leadership mention (generic)
+            if not state["last_intent"]:
+                if "Leadership" in content and ("Chairman" in content or "Director" in content or "CEO" in content):
+                     state["last_intent"] = "leadership_list"
+                     state["active_entity"] = {"type": "team", "name": "Leadership Team"}
+
+    # No hardcoded scope fallback - let org be inferred from chunks dynamically
+
+    return state
+
+
+def _expand_followup_query(
+    question: str, 
+    conversation_history: List[ConversationMessage],
+    conversation_state: Optional[Dict] = None
+) -> str:
+    """
+    Expand short/vague follow-up queries using prior user questions and conversation state.
+    E.g. "yes about its features" after "What is FIBI" -> "FIBI features"
+    Now uses conversation_state for better entity resolution.
+    """
+    if not question:
+        return question
+    
+    q_lower = question.strip().lower()
+    words = q_lower.split()
+
+    # Follow-up indicators: short replies or phrases that reference prior context
+    followup_phrases = [
+        "yes", "yeah", "yep", "sure", "ok", "about", "about its", "about it",
+        "its", "features", "featutes", "feature", "more", "details", "explain",
+        "tell me more", "that one", "the first", "the second", "pricing", 
+        "benefits", "capabilities", "integration"
+    ]
+    is_followup = (
+        len(words) <= 6 or
+        any(phrase in q_lower for phrase in followup_phrases)
+    )
+    if not is_followup:
+        return question
+
+    # PRIORITY 1: Use conversation_state if available (most reliable)
+    entity = None
+    if conversation_state and conversation_state.get('active_entity'):
+        entity_data = conversation_state['active_entity']
+        if isinstance(entity_data, dict):
+            entity = entity_data.get('person_name') or entity_data.get('name')
+        else:
+            entity = str(entity_data)
+        logger.info(f"[QUERY EXPANSION] Using entity from state: {entity}")
+    
+    # PRIORITY 2: Search ALL user messages in history for entities
+    if not entity and conversation_history and len(conversation_history) >= 1:
+        potential_entities = []
+        for msg in conversation_history:
+            if msg.role == "user":
+                content = msg.content
+                # Pattern 1: "What is X"
+                match = re.search(r"what\s+is\s+(\w+(?:\s+\w+)?)", content, re.IGNORECASE)
+                if match:
+                    potential_entities.append(match.group(1).strip())
+                
+                # Pattern 2: Capitalized words (likely entities)
+                capitalized = re.findall(r"\b[A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+)*\b", content)
+                skip = {"What", "How", "When", "Which", "Where", "Who", "Why", "Tell", "Show", "Can", "Does", "Is", "Are"}
+                for cap in capitalized:
+                    if cap not in skip and len(cap) > 2:
+                        potential_entities.append(cap)
+        
+        if potential_entities:
+            # Use the most recent non-skipped entity
+            entity = potential_entities[-1] if potential_entities else None
+            if entity:
+                logger.info(f"[QUERY EXPANSION] Extracted entity from history: {entity}")
+
+    # Extract aspect from current query (features, details, etc.)
+    aspect_mapping = {
+        "feature": "features",
+        "featute": "features",
+        "detail": "details",
+        "more": "details",
+        "explain": "explanation",
+        "capability": "capabilities",
+        "can it": "capabilities",
+        "pricing": "pricing",
+        "cost": "pricing",
+        "benefit": "benefits",
+        "advantage": "benefits",
+        "integration": "integration",
+        "support": "support"
+    }
+    
+    aspects = []
+    for keyword, aspect in aspect_mapping.items():
+        if keyword in q_lower and aspect not in aspects:
+            aspects.append(aspect)
+
+    # Build expanded query
+    if entity and aspects:
+        expanded = f"{entity} {' '.join(aspects)}"
+        logger.info(f"[QUERY EXPANSION] '{question}' -> '{expanded}'")
+        return expanded
+    elif entity and len(q_lower) < 20:
+        # Short query with entity - combine them
+        expanded = f"{entity} {question}"
+        logger.info(f"[QUERY EXPANSION] '{question}' -> '{expanded}'")
+        return expanded
+    elif entity:
+        # Longer query but we have entity - prepend it
+        expanded = f"Tell me about {entity}"
+        logger.info(f"[QUERY EXPANSION] '{question}' -> '{expanded}'")
+        return expanded
+
+    return question
 
 
 def _process_chat_request(
@@ -225,9 +412,64 @@ def _process_chat_request(
     
     vector_store = get_vector_store()
     rag_instance = RAG(db_session=db)
-    chunks = rag_instance.retrieve_chunks(question, top_k=top_k, collection_id=effective_collection_id)
+    
+    
+    # --- CONTEXT EXTRACTION (Stateful Logic) ---
+    state = _infer_conversation_state(conversation_history)
+    logger.info(f"[STATE] Inferred State: {state}")
+    
+    # Pass prior_context (active_entity) to retrieve_chunks for legacy compatibility/logic
+    # But fundamentally we want to pass the WHOLE state to answer methods
+    prior_context = state.get("active_entity") # Backbone for Fix 1
+    
+    # FIX 20: Request-Level Cache for Single-Pass Retrieval
+    request_cache = {}
+
+    # Expand follow-up queries using conversation history and state (e.g. "yes about its features" -> "FIBI features")
+    retrieval_question = _expand_followup_query(question, conversation_history, state) if conversation_history else question
+
+    # Pass prior_context to retrieve_chunks
+    chunks = rag_instance.retrieve_chunks(
+        retrieval_question,
+        top_k=top_k,
+        collection_id=effective_collection_id,
+        prior_context=prior_context,
+        request_cache=request_cache # FIX 20
+    )
     logger.debug(f"[CHAT DEBUG] Retrieved {len(chunks)} chunks for query: {question}")
     logger.debug(f"[CHAT DEBUG] Vector store type: {'Qdrant' if vector_store.client else 'In-memory fallback'}")
+    
+    # Handle greetings/small talk - if chunks are empty and it's a greeting, send to LLM directly
+    if len(chunks) == 0 and _is_generic_query(question):
+        logger.info(f"[GREETING] Detected greeting with no chunks: '{question}' - sending to LLM")
+        greeting_response = rag_instance._handle_small_talk_via_llm(
+            question,
+            collection_id=effective_collection_id,
+            conversation_history=[m.dict() for m in conversation_history] if conversation_history else None
+        )
+        
+        # Track activity
+        try:
+            activity_tracker.log_activity(
+                activity_type="chat_greeting",
+                user=identity_username,
+                details={
+                    "question": question[:100],
+                    "session_id": effective_session_id
+                }
+            )
+        except Exception as e:
+            logger.error(f"Failed to log greeting activity: {str(e)}")
+        
+        return ChatResponse(
+            answer=greeting_response.get("answer", "Hello! How can I help you today?"),
+            session_id=effective_session_id,
+            is_generic=True,
+            is_followup=False,
+            sources=[],
+            chunk_count=0,
+            answer_mode="FULL"
+        )
 
     if vector_store.client is None:
         logger.debug(f"[CHAT DEBUG] Fallback storage has {len(vector_store.documents)} documents")
@@ -245,6 +487,11 @@ def _process_chat_request(
         record_key = file_id or file_name
         if not record_key:
             continue
+            
+        # REQUIREMENT: if it can't be downloaded (no file_id) and isn't a link (no url), don't show
+        if not file_id and not url:
+            logger.info(f"[SOURCE FILTER] Skipping source with no file_id or url: {file_name}")
+            continue
 
         record = source_records.get(record_key)
         if not record:
@@ -256,19 +503,26 @@ def _process_chat_request(
                 "url": url,
                 "max_score": chunk_score,  # Track max confidence score for this source
                 "scores": [chunk_score],  # Track all scores for averaging if needed
+                "payload": chunk.get("payload", {}) # Store full payload for later extraction
             }
             source_records[record_key] = record
         else:
             # Update max score if this chunk has higher confidence
             record["max_score"] = max(record.get("max_score", 0.0), chunk_score)
             record["scores"].append(chunk_score)
+            # Update payload if this chunk is a person profile (prioritize profile chunk)
+            if chunk.get("payload", {}).get("chunk_type") == "person_profile":
+                record["payload"] = chunk.get("payload", {})
 
         if chunk_index is not None:
             record["chunk_indices"].append(chunk_index)
 
-    # Import settings for SOURCE_MIN_SCORE threshold
+    # Lower threshold slightly for the frontend display
+    # Note: RAG uses its own internal RAG_MIN_SCORE for LLM context, but we need to pass weaker matches 
+    # to the frontend if they were deemed relevant by the RAG service (e.g. person matches)
     from app.config import settings
-    source_min_score = getattr(settings, "SOURCE_MIN_SCORE", 0.35)
+    # Force permissive threshold (0.15) to ensure RAG results are shown, ignoring stricter env vars
+    source_min_score = 0.15
     
     sources_payload = []
     filtered_sources_count = 0
@@ -276,14 +530,14 @@ def _process_chat_request(
     for record in source_records.values():
         max_score = record.get("max_score", 0.0)
         
-        # Filter out sources below confidence threshold
+        # Filter out extremely low confidence sources
         if max_score < source_min_score:
             filtered_sources_count += 1
             logger.info(f"[SOURCE FILTER] Excluding '{record.get('file_name')}' (score: {max_score:.4f} < threshold: {source_min_score})")
             continue
         
         payload = {
-            "file_name": record.get("file_name", "Unknown File"),
+            "file_name": record.get("file_name") or "Source",
             "confidence": round(max_score, 4),  # Add confidence score to payload
         }
         if record.get("file_id"):
@@ -295,25 +549,50 @@ def _process_chat_request(
             payload["source_type"] = record["source_type"]
         if record.get("url"):
             payload["url"] = record["url"]
+            
+        # Add person metadata if available (Conservative addition)
+        rec_payload = record.get("payload", {})
+        if rec_payload.get("chunk_type") == "person_profile":
+            payload["person"] = {
+                "name": rec_payload.get("person_name"),
+                "title": rec_payload.get("person_title"),
+                "image": rec_payload.get("person_image_url"),
+                "social_links": rec_payload.get("person_social_links", {})
+            }
+            
         sources_payload.append(payload)
     
     if filtered_sources_count > 0:
         logger.info(f"[SOURCE FILTER] Filtered out {filtered_sources_count} low-confidence sources (threshold: {source_min_score})")
 
     # Step 2: Check if follow-up is needed (BEFORE answer generation)
-    needs_followup, followup_reason = rag_instance.needs_followup(
-        question=question,
-        chunks=chunks
+    # Use retrieval_question when expanded - avoids pronoun follow-up on "yes about its features"
+    # Pass conversation_state so gating can skip follow-ups when context is resolved (e.g. "the latest" after Fibi discussion)
+    followup_query = retrieval_question if retrieval_question != question else question
+    followup_result = rag_instance.needs_followup(
+        query=followup_query,
+        chunks=chunks,
+        conversation_history=[m.dict() for m in conversation_history] if conversation_history else None,
+        conversation_state=state
     )
+    
+    needs_followup = followup_result.get("needs_followup", False)
+    followup_reason = followup_result.get("reason")
+    suggested_topics = followup_result.get("suggested_topics", [])
     
     # Step 3: If follow-up needed, generate and return early
     if needs_followup:
         followup_text = rag_instance.generate_followup_questions(
-            question=question,
+            query=question,
             chunks=chunks,
-            reason=followup_reason
+            followup_result=followup_result,
+            conversation_history=[m.dict() for m in conversation_history] if conversation_history else None
         )
         
+        # If generation returns a list of strings, join them
+        if isinstance(followup_text, list):
+            followup_text = "\n\n".join(followup_text)
+            
         # Log the follow-up event
         try:
             activity_tracker.log_activity(
@@ -339,34 +618,45 @@ def _process_chat_request(
             followup_questions=followup_text,
             followup_reason=followup_reason,
             sources=[],
-            chunk_count=len(chunks)
+            chunk_count=len(chunks),
+            answer_mode="FOLLOWUP"
         )
 
     try:
         if maintain_context and conversation_history:
             logger.debug(f"[CONTEXT] Using context with {len(conversation_history)} messages")
+            # Convert Pydantic models to dicts for RAG
+            history_dicts = [m.dict() for m in conversation_history]
             rag_result = rag_instance.answer_with_context(
-                question,
-                conversation_history,
+                retrieval_question,  # Use expanded query for retrieval (e.g. "FIBI features")
+                history_dicts,
                 top_k=top_k,
                 collection_id=effective_collection_id,
+                prior_context=prior_context,
+                conversation_state=state, # NEW: Pass full state
+                request_cache=request_cache # FIX 20
             )
         else:
             logger.debug("[CONTEXT] Using basic RAG without context")
             rag_result = rag_instance.answer(
-                question,
+                retrieval_question,
                 top_k=top_k,
                 collection_id=effective_collection_id,
+                prior_context=prior_context,
+                conversation_state=state, # NEW: Pass full state
+                request_cache=request_cache # FIX 20
             )
         
         # Handle new dict return format from RAG (contains 'answer' and 'is_generic')
         tokens_used = None
         model_name = None
+        answer_mode = "FULL"
         if isinstance(rag_result, dict):
             answer_text = rag_result.get("answer", "")
             is_generic_from_ai = rag_result.get("is_generic", False)
             tokens_used = rag_result.get("tokens_used")
             model_name = rag_result.get("model_name")
+            answer_mode = rag_result.get("answer_mode", "FULL")
         else:
             # Fallback for string return (shouldn't happen with updated RAG)
             answer_text = rag_result
@@ -392,6 +682,7 @@ def _process_chat_request(
             session_id=effective_session_id,
             is_generic=True,
             sources=sources_payload,
+            answer_mode="GENERIC_ERROR"
         )
 
     processing_time = int((time.time() - start_time) * 1000)
@@ -403,6 +694,7 @@ def _process_chat_request(
         "maintain_context": maintain_context,
         "conversation_history_length": len(conversation_history),
         "top_k": top_k,
+        "answer_mode": answer_mode # Log answer_mode
     }
 
     if effective_session_id:
@@ -537,13 +829,48 @@ def _process_chat_request(
     # Don't send sources for generic responses
     if is_generic:
         sources_payload = []
+    else:
+        # Filter sources_payload based on the sources actually used/filtered by the RAG service
+        if isinstance(rag_result, dict) and "source_files" in rag_result:
+            rag_sources = rag_result["source_files"]
+            filtered_payload = []
+            for s in sources_payload:
+                if s.get("file_name") in rag_sources:
+                    filtered_payload.append(s)
+            
+            if filtered_payload:
+                logger.info(f"[API] Filtered sources_payload from {len(sources_payload)} to {len(filtered_payload)} based on RAG service result")
+                sources_payload = filtered_payload
     
     # Debug: Log final response being sent to frontend
     logger.info(f"[API RESPONSE] Final answer length: {len(answer_text)} chars")
     logger.info(f"[API RESPONSE] Final answer content:\n{answer_text}")
     logger.info(f"[API RESPONSE] is_generic: {is_generic}, sources count: {len(sources_payload)}")
     
-    return ChatResponse(answer=answer_text, session_id=effective_session_id, is_generic=is_generic, sources=sources_payload, chunk_count=len(chunks))
+    # Generate intelligent suggestions for follow-up questions (skip for generic responses)
+    suggestions = []
+    if not is_generic and answer_text:
+        try:
+            suggestions = rag_instance.generate_post_answer_suggestions(
+                query=retrieval_question,
+                answer=answer_text,
+                chunks=chunks,
+                conversation_state=state
+            )
+            logger.info(f"[API RESPONSE] Generated {len(suggestions)} suggestions")
+        except Exception as e:
+            logger.error(f"[API RESPONSE] Failed to generate suggestions: {str(e)}")
+    
+    return ChatResponse(
+        answer=answer_text, 
+        session_id=effective_session_id, 
+        is_generic=is_generic, 
+        sources=sources_payload, 
+        chunk_count=len(chunks), 
+        answer_mode=answer_mode,
+        person_presence=rag_result.get("person_presence"),
+        suggestions=suggestions if suggestions else None
+    )
 
 
 # Chat endpoint

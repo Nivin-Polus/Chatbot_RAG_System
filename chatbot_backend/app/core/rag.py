@@ -1,4 +1,5 @@
-from typing import List, Dict, Optional, Tuple, Union, Set
+from typing import List, Dict, Optional, Tuple, Union, Set, Any
+import difflib
 import requests
 import json
 import re
@@ -19,6 +20,8 @@ from app.config import settings
 from app.models.system_prompt import SystemPrompt
 from app.models.collection import Collection
 from app.core.database import get_db
+from app.utils.text import normalize_text
+from app.core.cache import get_rag_cache, generate_cache_key
 
 # Initialize logger
 logger = logging.getLogger("rag")
@@ -38,12 +41,1484 @@ SUMMARY_TRIGGER_THRESHOLD = 20  # Start summarizing when history exceeds this co
 
 
 # ============================================
+# CONSTANTS & ENUMS
+# ============================================
+
+class AnswerMode:
+    FULL = "FULL"
+    PARTIAL_TRANSPARENT = "PARTIAL_TRANSPARENT"
+    FOLLOWUP = "FOLLOWUP"
+    NO_DATA_CONFIRMED = "NO_DATA_CONFIRMED"
+
+# ============================================
 # RAG SEARCH HELPERS
 # ============================================
+
 
 def _estimate_tokens(text: str) -> int:
     """Estimate token count (~4 chars per token for English)."""
     return len(text) // 4 if text else 0
+
+
+# ============================================
+# ORG & LEADERSHIP HELPERS (FIX 1, 3, 6)
+# ============================================
+
+# RAG Answer Selection: thresholds (leadership data often has lower per-chunk scores)
+LEADERSHIP_MIN_SCORE = 0.12  # Lowered from 0.15 to ensure all leadership members are included
+GENERAL_MIN_SCORE = 0.20
+
+ALLOWED_LEADERSHIP_TITLES = {
+    "director",
+    "managing director",
+    "associate director",
+    "board member",
+    "founder",
+    "co-founder",
+    "ceo",
+    "cto",
+    "cfo",
+    "coo",
+    "president",
+    "vice president",
+    "vp",
+    "chairman",
+    "head",
+    "head of",
+    "chief",
+    "exec",
+}
+
+# Canonical list for fuzzy title matching (subset + variants)
+LEADERSHIP_TITLE_KEYWORDS = [
+    "director", "chairman", "ceo", "cfo", "cto", "coo",
+    "associate director", "vice president", "vp", "president",
+    "chief", "head of", "founder", "managing director",
+]
+
+
+def normalize_title(title: Optional[str]) -> str:
+    """Normalize title for leadership check: en/em-dash to hyphen, & to 'and', lowercased."""
+    if not title:
+        return ""
+    return (
+        title.lower()
+        .replace("\u2013", "-")   # en-dash
+        .replace("\u2014", "-")   # em-dash
+        .replace("&", " and ")
+    )
+
+
+def is_leadership_role(title: Optional[str]) -> bool:
+    """Check if title indicates leadership role using fuzzy/semantic matching."""
+    if not title or not isinstance(title, str):
+        return False
+    title = normalize_title(title)
+    return any(role in title for role in LEADERSHIP_TITLE_KEYWORDS)
+
+
+# Career/job page blocker (first line of defense)
+CAREER_KEYWORDS = (
+    "job", "career", "we are looking", "about the role",
+    "responsibilities", "requirements", "preferred skills",
+    "key skills", "apply", "opening", "vacancy", "position",
+    "role description",
+)
+
+
+def is_career_chunk(chunk: Dict) -> bool:
+    """True if chunk looks like a job/career page (job descriptions, role headers, etc.)."""
+    payload = chunk.get("payload", {})
+    text = (chunk.get("text") or payload.get("text") or "").lower()
+    file_name = (chunk.get("file_name") or payload.get("file_name") or payload.get("page_title") or "").lower()
+    return any(k in text or k in file_name for k in CAREER_KEYWORDS)
+
+
+JOB_POSTING_PHRASES = [
+    "we are hiring",
+    "job description",
+    "responsibilities",
+    "requirements",
+    "apply now",
+    "experience required",
+]
+
+
+def looks_like_job_posting(text: Optional[str]) -> bool:
+    """True if the text content looks like a specific job advertisement."""
+    if not text:
+        return False
+    t = text.lower()
+    return any(p in t for p in JOB_POSTING_PHRASES)
+
+
+# Person-name validation (reject section headers, page titles, role-only labels)
+NON_PERSON_PREFIXES = (
+    "about", "brief", "getting", "meet", "our", "the",
+    "skip", "log in", "accessibility", "understanding",
+    "key skills", "preferred skills", "role description",
+    "expectations", "growth", "work details", "treasury",
+)
+
+# Additional patterns that indicate non-person strings
+NON_PERSON_PATTERNS = [
+    "for suppliers", "for employees", "for customers", "for partners",
+    "and development", "and planning", "and services",
+    "our solution", "our team", "let's talk", "get in touch",
+    "copyright", "©", "meet our", "dynamic team",
+    "communitynews",
+]
+
+# Known non-person entities that often get confused with people
+KNOWN_NON_PERSON_ENTITIES = {
+    "fibi", "polus", "polus solutions", "fibi communitynews",
+    "community news", "fibi grants", "fibi compliance"
+}
+
+
+def is_probable_person_name(name: str) -> bool:
+    """Reject obvious non-person labels (section headers, page titles)."""
+    if not name:
+        return False
+    name = name.strip()
+    lname = name.lower()
+    
+    # Check prefix patterns
+    if lname.startswith(NON_PERSON_PREFIXES):
+        return False
+    
+    # Check pattern matches
+    if any(pattern in lname for pattern in NON_PERSON_PATTERNS):
+        return False
+    
+    # Length check
+    if len(name.split()) > 5:
+        return False
+    
+    # Must have at least one alphabetic character
+    if not any(c.isalpha() for c in name):
+        return False
+    
+    # Check capitalization - at least 2 capitalized words (first name + last name)
+    tokens = name.split()
+    capitalized = sum(1 for t in tokens if t[:1].isupper())
+    if capitalized < 2:
+        return False
+    
+    return True
+
+
+def is_role_only_name(name: str) -> bool:
+    """Reject names that are just a role title with no person (e.g. 'Associate Director')."""
+    if not name:
+        return False
+    lname = name.lower()
+    return any(
+        lname == k or lname.startswith(k + " ")
+        for k in (
+            "director", "associate director", "manager",
+            "vp", "vice president", "head", "lead",
+        )
+    )
+
+
+def extract_leadership_entities(
+    chunks: List[Dict],
+    target_org: Optional[str] = None,
+    query_type: Optional[str] = None,
+) -> Tuple[List[Dict], List[Dict]]:
+    """Extract verified leadership entities (name, title) from retrieved chunks.
+    Now includes org-aware filtering to exclude external organization leaders.
+    
+    Returns:
+        Tuple of (entities, contributing_chunks) where contributing_chunks are only
+        the chunks that actually produced entities in the response.
+    """
+    seen_names: Set[str] = set()
+    entities: List[Dict] = []
+    contributing_chunks: List[Dict] = []  # Track which chunks contributed
+    
+    # Normalize target org for matching - use provided org or infer from first chunk
+    if not target_org and chunks:
+        target_org = infer_org_from_chunks(chunks)
+    target_org_lower = (target_org or "the organization").lower().strip()
+    
+    # External org keywords to reject
+    EXTERNAL_ORG_KEYWORDS = [
+        "mit", "massachusetts institute", "harvard", "stanford", "yale",
+        "ado travel", "edu-suite", "microsoft", "google", "amazon",
+    ]
+    
+    logger.info(f"[LEADERSHIP EXTRACT] Processing {len(chunks)} chunks for org='{target_org_lower}'")
+    
+    for i, c in enumerate(chunks):
+        payload = c.get("payload", {})
+        name = (payload.get("person_name") or "").strip()
+        title = (payload.get("person_title") or "").strip()
+        text = (c.get("text") or payload.get("text") or "").strip()
+        url = (payload.get("url") or c.get("url") or "").lower()
+        file_name = (payload.get("file_name") or c.get("file_name") or "").lower()
+        
+        # Clean up names starting with special chars (e.g., "- Charley Beerman" -> "Charley Beerman")
+        if name.startswith(("-", "•", "*", ">")):
+            name = name.lstrip("-•*> ").strip()
+        
+        # Clean up names with "Mr.", "Mrs.", "Dr." prefixes for consistency
+        for prefix in ["Mr. ", "Mrs. ", "Ms. ", "Dr. "]:
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+        
+        logger.debug(f"[LEADERSHIP EXTRACT] Chunk {i}: name='{name}', title='{title}', url='{url[:50]}...'")
+        
+        # FIX: Organization filtering based on URL/source
+        # If URL is from target org's domain, it's internal
+        is_from_target_org = target_org_lower in url or target_org_lower in file_name
+        
+        # Check if title mentions external organization
+        title_lower = title.lower()
+        mentions_external_org = any(ext in title_lower for ext in EXTERNAL_ORG_KEYWORDS)
+        
+        # Check if title mentions target org
+        mentions_target_org = target_org_lower in title_lower
+        
+        # FIX: Detect titles that explicitly reference a different organization
+        # Patterns like "CEO at GrowthScale", "CEO, ConnAct.Online", "Director of XYZ Corp"
+        # If the title contains "at [OrgName]" or ", [OrgName]" and it's NOT the target org, reject
+        title_has_external_org = False
+        
+        # Common department/function words that should NOT be treated as company names
+        DEPARTMENT_KEYWORDS = {
+            "product", "engineering", "strategy", "operations", "finance", "sales",
+            "marketing", "hr", "human", "resources", "technology", "it", "services",
+            "customer", "business", "development", "delivery", "research", "analytics",
+            "administration", "management", "partnerships", "communications", "legal",
+        }
+        
+        # Pattern 1: "at [OrgName]" (e.g., "CEO at GrowthScale")
+        at_match = re.search(r'\bat\s+([A-Z][A-Za-z0-9\.\-]+)', title)
+        if at_match:
+            attached_org = at_match.group(1).lower()
+            # Only treat as external org if it's NOT the target org AND NOT a department keyword
+            if (target_org_lower not in attached_org and 
+                attached_org not in target_org_lower and
+                not any(dept in attached_org for dept in DEPARTMENT_KEYWORDS)):
+                title_has_external_org = True
+        
+        # Pattern 2: "[Role], [OrgName]" or "[Role] - [OrgName]" (e.g., "CEO, ConnAct.Online")
+        # Check for comma or dash followed by what looks like an org name
+        # BUT only if it doesn't look like a department/function
+        comma_match = re.search(r'[,\-]\s*([A-Z][A-Za-z0-9\.\-]+(?:\s+[A-Z][A-Za-z0-9\.\-]+)*)$', title)
+        if comma_match:
+            attached_text = comma_match.group(1).lower()
+            # Check if this looks like a department rather than a company
+            is_department = any(dept in attached_text for dept in DEPARTMENT_KEYWORDS)
+            if (not is_department and 
+                target_org_lower not in attached_text and 
+                attached_text not in target_org_lower):
+                title_has_external_org = True
+        
+        # Combine with existing check
+        mentions_external_org = mentions_external_org or title_has_external_org
+        
+        # FIX 2: Correct logic for career pages vs leadership profiles
+        if is_career_chunk(c):
+            if looks_like_job_posting(text) and not is_leadership_role(title):
+                 logger.debug("[LEADERSHIP DROP] job posting: %s", name)
+                 continue
+            if not is_leadership_role(title):
+                 logger.debug("[LEADERSHIP DROP] career chunk without leadership: %s", name)
+                 continue
+
+        if not name or name == "Unknown":
+            logger.debug(f"[LEADERSHIP DROP] empty/unknown name: '{name}'")
+            continue
+        if not is_leadership_role(title):
+            logger.debug(f"[LEADERSHIP DROP] not leadership role: name='{name}' | title='{title}'")
+            continue
+        if not is_probable_person_name(name):
+            logger.info(f"[LEADERSHIP DROP] not person name: '{name}' (tokens={name.split()}, caps={sum(1 for t in name.split() if t[:1].isupper())})")
+            continue
+        if is_role_only_name(name):
+            logger.info(f"[LEADERSHIP DROP] role-only name: '{name}'")
+            continue
+        
+        # KEY FIX: Organization filtering
+        # Rule 1: If title mentions external org, REJECT (unless also mentions target)
+        if mentions_external_org and not mentions_target_org:
+            logger.info(f"[LEADERSHIP DROP] external org in title: '{name}' | title='{title}'")
+            continue
+        
+        # Rule 2: If not from target org's pages AND doesn't mention target org, REJECT
+        if not is_from_target_org and not mentions_target_org:
+            # Exception: If org metadata explicitly matches
+            chunk_org = payload.get("organization", "")
+            if chunk_org and target_org_lower not in chunk_org.lower():
+                logger.info(f"[LEADERSHIP DROP] not from target org: '{name}' | org='{chunk_org}'")
+                continue
+            # For unknown org, check URL more carefully
+            if not chunk_org:
+                # Check common external domain patterns
+                external_domains = ["mit.edu", "harvard.edu", "stanford.edu", "yale.edu"]
+                if any(ext in url for ext in external_domains):
+                    logger.info(f"[LEADERSHIP DROP] external domain: '{name}' | url='{url[:60]}'")
+                    continue
+        
+        # Deduplicate
+        key = normalize_text(name)
+        if key in seen_names:
+            logger.debug(f"[LEADERSHIP DROP] duplicate: '{name}'")
+            continue
+        seen_names.add(key)
+        entities.append({"name": name, "title": title})
+        contributing_chunks.append(c)  # Track this chunk as a source
+        logger.info(f"[LEADERSHIP ACCEPT] name='{name}', title='{title}'")
+    
+    logger.info(f"[LEADERSHIP EXTRACT] Total entities extracted: {len(entities)}, contributing chunks: {len(contributing_chunks)}")
+    return entities, contributing_chunks
+
+
+def format_entities(entities: List[Dict]) -> str:
+    """Format list of entities grouped by role type with structured output."""
+    if not entities:
+        return ""
+    
+    # Group entities by role type
+    directors = []
+    associate_directors = []
+    executives = []  # CEO, Chairman, etc.
+    others = []
+    
+    for e in entities:
+        title_lower = (e.get("title") or "").lower()
+        name = e.get("name", "")
+        title = e.get("title", "")
+        
+        if "associate director" in title_lower:
+            associate_directors.append(f"- {name} – {title}")
+        elif "director" in title_lower:
+            directors.append(f"- {name} – {title}")
+        elif any(t in title_lower for t in ["ceo", "chairman", "president", "founder", "chief"]):
+            executives.append(f"- {name} – {title}")
+        else:
+            others.append(f"- {name} – {title}")
+    
+    # Build response
+    sections = []
+    
+    if executives:
+        sections.append("**Leadership**\n" + "\n".join(executives))
+    if directors:
+        sections.append("**Directors**\n" + "\n".join(directors))
+    if associate_directors:
+        sections.append("**Associate Directors**\n" + "\n".join(associate_directors))
+    if others:
+        sections.append("**Other Roles**\n" + "\n".join(others))
+    
+    return "\n\n".join(sections)
+
+
+def infer_org_from_chunks(chunks: List[Dict]) -> Optional[str]:
+    """Infer organization name from chunk metadata (domain, URL, or text content).
+    
+    Priority:
+    1. Explicit 'organization' field in payload
+    2. Domain name from URL
+    3. Page title patterns
+    """
+    for c in chunks:
+        payload = c.get("payload", {})
+        
+        # Priority 1: Explicit organization field
+        org = payload.get("organization")
+        if org and isinstance(org, str) and org.strip():
+            return org.strip()
+        
+        # Priority 2: Extract from domain in URL
+        url = payload.get("url") or c.get("url") or ""
+        if url:
+            domain = extract_domain_name(url)
+            if domain:
+                return domain
+        
+        # Priority 3: Extract from page title (company name pattern)
+        page_title = payload.get("page_title") or payload.get("file_name") or ""
+        if " - " in page_title:
+            # Often format is "Page Title - Company Name"
+            parts = page_title.split(" - ")
+            if len(parts) >= 2:
+                potential_org = parts[-1].strip()
+                # Filter out generic suffixes
+                if potential_org.lower() not in ["home", "about", "contact", "blog", "news"]:
+                    return potential_org
+        if " | " in page_title:
+            parts = page_title.split(" | ")
+            if len(parts) >= 2:
+                potential_org = parts[-1].strip()
+                if potential_org.lower() not in ["home", "about", "contact", "blog", "news"]:
+                    return potential_org
+    
+    return None
+
+
+def extract_domain_name(url: str) -> Optional[str]:
+    """Extract a human-readable organization name from a URL domain.
+    
+    Examples:
+        https://www.example.com/page -> 'Example'
+        https://polussolutions.com/about -> 'Polussolutions' (or could be cleaned further)
+    """
+    import re
+    try:
+        # Extract domain from URL
+        match = re.search(r'https?://(?:www\.)?([^/]+)', url.lower())
+        if match:
+            domain = match.group(1)
+            # Remove TLD (.com, .org, etc.)
+            domain_name = domain.split('.')[0]
+            # Capitalize for display
+            return domain_name.capitalize()
+    except Exception:
+        pass
+    return None
+
+
+def generate_leadership_response(
+    entities: List[Dict],
+    top_score: float,
+    org_name: str = "the organization",
+) -> str:
+    """Generate response with appropriate confidence language."""
+    if not entities:
+        return f"I don't have sufficient information about {org_name} leadership in the knowledge base."
+    
+    formatted = format_entities(entities)
+    
+    # High confidence response
+    if top_score >= 0.25:
+        return f"{org_name} lists the following directors and associate directors in leadership roles:\n\n{formatted}\n\nIf you'd like, I can help you find the right contact based on your need (sales, delivery, finance, etc.)."
+    
+    # Medium confidence response
+    if top_score >= LEADERSHIP_MIN_SCORE:
+        return (
+            f"Based on available information, {org_name} leadership includes:\n\n{formatted}\n\n"
+            "_Note: This may not be a complete list._"
+        )
+    
+    return f"I don't have sufficient information about {org_name} leadership in the knowledge base."
+
+
+def mentions_org(chunk: Dict, target_org: str) -> bool:
+    """
+    FIX 1 & 3: Strong mentions_org() detector.
+    Returns True if the chunk is explicitly about the target_org.
+    """
+    payload = chunk.get("payload", {})
+    
+    # 1. Check Explicit Organization Field (Best Source)
+    chunk_org = payload.get("organization")
+    if chunk_org:
+        # Normalize and compare
+        if normalize_text(chunk_org) == normalize_text(target_org):
+            return True
+        # If explicitly set to something else, then False
+        return False
+        
+    # 2. Fallback: Context/Text (Only if organization field is missing)
+    # This shouldn't happen often if Fix 1/2 works, but good for safety.
+    text = (payload.get("text") or "").lower()
+    t_org = target_org.lower()
+    
+    # Check domain/url/source
+    domain = payload.get("domain", "")
+    url = payload.get("url", "")
+    source = payload.get("source", "")
+    
+    if t_org in domain: return True
+    if f"/{t_org}" in url: return True
+    if source in {f"{t_org}_site", f"{t_org}_pdf"}: return True
+    
+    return False
+
+
+
+# ============================================
+# PROMPT INSTRUCTIONS (FIX 17 & 22)
+# ============================================
+
+CLASSIFICATION_INSTRUCTION = """
+[SYSTEM: CLASSIFICATION]
+After your answer, you MUST classify it by appending a JSON object on a new line. 
+Format: {"answer_mode": "FULL" | "PARTIAL_TRANSPARENT" | "NoData", "is_generic": boolean}
+- FULL: You found specific information in the context to answer the user's question.
+- PARTIAL_TRANSPARENT: You found some related info but not the exact answer (e.g. wrong domain/person).
+- NoData: The context does not contain relevant information.
+- is_generic: true if you are giving a general refusal or small talk, false if using context.
+Example:
+{"answer_mode": "FULL", "is_generic": false}
+"""
+
+def format_general_context(chunks: List[Dict]) -> str:
+    """Format chunks for general Q&A."""
+    context = ""
+    for i, chunk in enumerate(chunks, 1):
+        payload = chunk.get("payload", {})
+        text = payload.get("text", "").strip()
+        source = chunk.get("file_name", "Unknown Source")
+        
+        context += f"Source {i} ({source}):\n{text}\n\n"
+    return context
+
+def format_person_context(chunks: List[Dict], person_detection: Dict) -> str:
+    """Format chunks specifically for person queries."""
+    context = f"Intent: Find details about {person_detection.get('person_name', 'a person')}\n\n"
+    
+    # Group by chunk type
+    profiles = []
+    others = []
+    
+    for chunk in chunks:
+        payload = chunk.get("payload", {})
+        if payload.get("chunk_type") == "person_profile":
+            profiles.append(chunk)
+        else:
+            others.append(chunk)
+            
+    if profiles:
+        context += "=== PRIMARY PROFILES ===\n"
+        for p in profiles:
+            payload = p.get("payload", {})
+            name = payload.get("person_name", "Unknown")
+            title = payload.get("person_title", "Unknown Role")
+            org = payload.get("organization", "the organization")
+            text = payload.get("text", "")
+            context += f"Name: {name}\nTitle: {title}\nOrg: {org}\nDetails: {text}\n\n"
+            
+    if others:
+        context += "=== RELATED MENTIONS ===\n"
+        for o in others:
+            text = o.get("payload", {}).get("text", "")
+            context += f"{text}\n\n"
+            
+    return context
+
+
+# ============================================
+# QUERY ANALYSIS & RAG HELPERS
+# ============================================
+
+def classify_query(normalized_query: str) -> Dict[str, str]:
+    """
+    Classify the query type to optimize retrieval strategy.
+    Lightweight, fast detection (<10ms).
+    """
+    if not normalized_query:
+        return {"query_type": "exploratory", "complexity": "medium"}
+        
+    query_lower = normalized_query
+    
+    # 0. Leadership List (New Priority)
+    # Detection rule: plural language + leadership role + org presence (implied by context usually)
+    list_patterns = [r"who all", r"list ", r"members", r"who are the", r"staff", r"team", r"everyone"]
+    role_patterns = [r"director", r"vp", r"head", r"leadership", r"management", r"executives", r"board"]
+    
+    # Check for plural/list intent + leadership role
+    has_list_intent = any(re.search(p, query_lower) for p in list_patterns)
+    has_leadership_role = any(re.search(p, query_lower) for p in role_patterns)
+    
+    if has_list_intent and has_leadership_role:
+        # Negative guard: Avoid misclassifying singular person queries like "Who is the director of Polus Solutions?"
+        # Simple heuristic: "who is the [role]" or "who is [name]" (without "all" or "list")
+        is_singular_role_query = re.search(r"who is the (?:director|vp|head|ceo|cto)", query_lower)
+        is_singular_name_query = re.search(r"who is (?!the )", query_lower) and len(query_lower.split()) <= 5
+        
+        if not (is_singular_role_query or is_singular_name_query):
+            return {"query_type": "leadership_list", "complexity": "medium"}
+
+    # 1. Person queries (Highest Priority)
+    person_patterns = [
+        r"who is", r"who's", r"tell me about", r"what does .* do", 
+        r"who are", r"contact", r"email", r"reach"
+    ]
+    if any(re.search(p, query_lower) for p in person_patterns):
+        # FIX: Check if the potential entity is a known non-person (e.g. "Tell me about Fibi")
+        for entity in KNOWN_NON_PERSON_ENTITIES:
+            if entity in query_lower:
+                return {"query_type": "factual", "complexity": "medium"}
+                
+        return {"query_type": "person", "complexity": "medium"}
+
+    # 2. Factual queries
+    factual_patterns = [
+        r"what is", r"define", r"when was", r"where is", 
+        r"what does .* mean"
+    ]
+    if any(re.search(p, query_lower) for p in factual_patterns):
+        return {"query_type": "factual", "complexity": "simple"}
+
+    # 3. Procedural/How-to
+    procedural_starts = ("how to", "how do i", "steps to", "guide to", "tutorial")
+    if query_lower.startswith(procedural_starts) or "how do i" in query_lower:
+        return {"query_type": "procedural", "complexity": "medium"}
+
+    # 4. Troubleshooting
+    trouble_words = {"why", "error", "not working", "problem", "issue", "failed", "crash", "bug"}
+    if any(w in query_lower for w in trouble_words):
+        return {"query_type": "troubleshooting", "complexity": "medium"}
+
+    # 5. Comparison
+    compare_patterns = [r" vs ", r" versus ", r"difference between", r"compare", r"better than"]
+    if any(re.search(p, query_lower) for p in compare_patterns):
+        return {"query_type": "comparison", "complexity": "complex"}
+
+    # 5. History / Background (For P1 Domain Mismatch Logic)
+    history_patterns = [r"history", r"founding", r"legacy", r"timeline", r"when did .* start", r"background", r"story of"]
+    if any(re.search(p, query_lower) for p in history_patterns):
+        return {"query_type": "history", "complexity": "medium"}
+
+    return {"query_type": "exploratory", "complexity": "medium"}
+
+
+def detect_person_query(normalized_query: str, prior_context: Optional[Dict] = None, known_people: Optional[List[str]] = None) -> Dict[str, Any]:
+    """
+    Detect if query is asking about a person and extract details.
+    Operates on NORMALIZED TEXT ONLY.
+    
+    Args:
+        normalized_query: lowercased, stripped query string
+        prior_context: Optional Dict containing 'person_name' and 'role_title' from history
+        known_people: Optional List of known person names for fuzzy correction
+    """
+    result = {
+        "is_person_query": False,
+        "query_type": None,
+        "person_name": None,
+        "role_title": None,
+        "intent": "general"
+    }
+    
+    # 0. Check for continuation/pronoun usage if context exists
+    if prior_context and prior_context.get("person_name"):
+        # Check for vague referral keywords
+        pronouns = ["he", "she", "him", "her", "his", "hers", "they", "them", "this person", "the person"]
+        continuations = ["tell me more", "what else", "details", "background", "experience", "education", "contact", "email", "phone", "yes", "yeah", "correct"]
+        
+        query_words = normalized_query.split()
+        
+        # If query is very short (< 5 words) OR contains pronouns/continuation words
+        is_short = len(query_words) < 5
+        has_pronoun = any(p in query_words for p in pronouns)
+        is_continuation = any(c in normalized_query for c in continuations)
+        
+        # FIX: Prevent false positives for factual queries (e.g. "What is Fibi")
+        # If query starts with factual indicators AND has no pronouns, it's likely a new topic
+        factual_starts = ("what is", "what are", "define", "explain", "describe")
+        is_factual = normalized_query.startswith(factual_starts)
+        
+        # If it matches the entity name exactly (e.g. "what is fibi" when context is "fibi")
+        # We should treat it as a fresh lookup to get full context, not just person-continuation
+        mentions_entity_name = False
+        if prior_context.get("person_name"):
+             p_name = prior_context["person_name"].lower()
+             if p_name in normalized_query:
+                 mentions_entity_name = True
+
+        # Logic: 
+        # 1. If it's factual AND has no pronouns -> New Query (False)
+        # 2. If it explicitly names the person -> New Query (False)
+        should_skip = (is_factual and not has_pronoun) or mentions_entity_name
+        
+        if not should_skip and (is_short or has_pronoun or is_continuation):
+            # Inherit context!
+            result["is_person_query"] = True
+            result["person_name"] = prior_context["person_name"]
+            result["role_title"] = prior_context.get("role_title")
+            result["intent"] = "continuation"
+            result["query_type"] = "attribute_lookup" if has_pronoun else "general_continuation"
+            
+            # If the user asks specifically about an attribute, we should note that, 
+            # but for now, just anchoring the person is the critical fix.
+            return result
+
+    query_lower = normalized_query
+    
+    # 0. FIX 2: Disable person-name logic for leadership_list
+    # If the query was already classified as leadership_list, we skip name extraction
+    # This prevents "Brief Description" and footer junk from being detected as names
+    if prior_context and prior_context.get("query_type") == "leadership_list":
+        result.update({
+             "is_person_query": True,
+             "query_type": "leadership_list",
+             "person_name": None,
+             "role_title": "director", # Default expected role for retrieval
+             "intent": "team"
+        })
+        return result
+
+    # 1. Detect Intent
+    if any(w in query_lower for w in ["contact", "email", "reach", "phone"]):
+        result["intent"] = "contact"
+    elif any(w in query_lower for w in ["do", "role", "responsibilities", "function"]):
+        result["intent"] = "role"
+    elif any(w in query_lower for w in ["team", "people", "members", "staff", "leadership", "management", "founders", "executives", "directors"]):
+        result["intent"] = "team"
+    elif any(w in query_lower for w in ["about", "bio", "background", "history"]):
+        result["intent"] = "bio"
+        
+    # --- FIX 3: ROLE LOOKUP DETECTION ---
+    # Explicitly check for role terms BEFORE person extraction to prevent "HR" being treated as a name
+    role_terms = {"hr", "human resources", "finance", "admin", "it", "support", "legal", "marketing", "operations", "sales"}
+    
+    # Check if query contains role terms (whole word match)
+    has_role_term = False
+    found_role = None
+    for term in role_terms:
+         if re.search(r'\b' + re.escape(term) + r'\b', query_lower):
+             has_role_term = True
+             found_role = term
+             break
+             
+    if has_role_term:
+        # If it's a "who is the [role]" query
+        if "who" in query_lower or "contact" in query_lower:
+            result["is_person_query"] = True
+            result["query_type"] = "role_lookup"
+            result["intent"] = "role_lookup"
+            result["role_title"] = found_role
+            # We explicitly do NOT set person_name to avoid name-based search confusion
+            return result
+
+    # 2. Check for Team List
+    if result["intent"] == "team" or any(phrase in query_lower for phrase in ["show me the team", "who is the leadership", "who runs the company"]):
+        result["is_person_query"] = True
+        result["query_type"] = "team_list"
+        return result
+
+    # 3. Extract Role Title
+    titles = [
+        "ceo", "cto", "cfo", "director", "manager", "vp", "president", "chairman",
+        "chief executive officer", "vice president", "head of", "lead", "founder", "co-founder", "managing director"
+    ]
+    for title in titles:
+        if f"the {title}" in query_lower or f"{title} of" in query_lower:
+            result["role_title"] = title
+            result["is_person_query"] = True
+            result["query_type"] = "role_based"
+            break
+            
+    # 4. Extract Person Name (Pattern Based for Normalized Text)
+    # Using explicit patterns since we cannot rely on capitalization
+    
+    # Patterns to capture name: "who is [name]", "email [name]", "contact [name]"
+    # We look for the part matching the name
+    name_patterns = [
+        r"who is ([\w\s]+)(?:\?|$)",
+        r"who's ([\w\s]+)(?:\?|$)",
+        r"tell me about ([\w\s]+)(?:\?|$)",
+        r"contact ([\w\s]+)(?:\?|$)",
+        r"email ([\w\s]+)(?:\?|$)",
+        r"reach ([\w\s]+)(?:\?|$)",
+        r"role of ([\w\s]+)(?:\?|$)",
+        r"what does ([\w\s]+) do(?:\?|$)"
+    ]
+    
+    potential_name = None
+    
+    for pattern in name_patterns:
+        match = re.search(pattern, query_lower)
+        if match:
+            extracted = match.group(1).strip()
+            
+            # --- FIX: Strip context phrases (e.g. "at Polus Solutions") ---
+            # This ensures "Ramya A at Polus Solutions" -> "Ramya A"
+            context_stops = [r"\s+at\s+.*", r"\s+from\s+.*", r"\s+in\s+.*", r"\s+who\s+.*"]
+            for stop in context_stops:
+                extracted = re.sub(stop, "", extracted).strip()
+                
+            # Heuristic: Valid names are usually 1-3 words
+            if 1 <= len(extracted.split()) <= 3:
+                potential_name = extracted
+                break
+    
+    # If no pattern matched, but we have a title match context like "is [name] the ceo?"
+    if not potential_name and result["role_title"]:
+         # Try to extract name before "the [title]"
+         # e.g. "is john doe the ceo"
+         match = re.search(f"is ([\w\s]+) the {result['role_title']}", query_lower)
+         if match:
+             potential_name = match.group(1).strip()
+
+    if potential_name:
+        # cleanup validation
+        stop_words = {"the", "a", "an", "is", "of", "in", "at", "for", "to"}
+        
+        # FIX: Check blocklist for known non-person entities
+        p_lower = potential_name.lower()
+        is_blocked = any(blocked in p_lower for blocked in KNOWN_NON_PERSON_ENTITIES)
+        
+        if potential_name not in stop_words and not is_blocked:
+            result["person_name"] = potential_name
+            result["is_person_query"] = True
+            result["query_type"] = "specific_person"
+
+            # Fuzzy name correction
+            if known_people:
+                best_match = None
+                best_score = 0.0
+                potential_lower = potential_name.lower()
+                
+                # 1. Substring Match (e.g. "Anjana" -> "Anjana Palat")
+                for person in known_people:
+                    if not person: continue
+                    p_lower = person.lower()
+                    
+                    # If specific name is in full name (and reasonable length)
+                    if len(potential_lower) > 3 and potential_lower in p_lower:
+                        # Prefer full word match if possible
+                        if re.search(r'\b' + re.escape(potential_lower) + r'\b', p_lower):
+                            best_match = person
+                            best_score = 1.0 # Perfect part-match
+                            break
+                
+                # 2. Fuzzy Match (if no perfect substring)
+                if best_score < 0.9: 
+                    for person in known_people:
+                        if not person: continue
+                        score = fuzzy_match(potential_name, person)
+                        if score > best_score:
+                            best_score = score
+                            best_match = person
+                
+                # Threshold for correction (0.75 covers Remya->Ramya at 0.8)
+                if best_score > 0.75: 
+                     result["person_name"] = best_match
+                     result["original_name"] = potential_name
+                     result["fuzzy_confidence"] = best_score
+
+    return result
+
+
+def normalize_person_name(name: str) -> str:
+    """
+    Strict normalization for person names:
+    - Lowercase
+    - Remove punctuation
+    - Remove consecutive duplicate letters
+    - Remove single-letter initials
+    """
+    if not name:
+        return ""
+    n = name.lower().strip()
+    # Remove punctuation except spaces
+    n = re.sub(r'[^\w\s]', '', n)
+    # Remove repeated characters
+    n = re.sub(r'(.)\1+', r'\1', n)
+    # Remove single-letter initials
+    n = re.sub(r'\b[a-z]\b', '', n)
+    # Collapse multiple spaces
+    n = re.sub(r'\s+', ' ', n).strip()
+    return n
+
+def fuzzy_match(s1: str, s2: str) -> float:
+    """
+    Return a similarity score [0-1] between two strings using difflib.
+    Handles typos in names/titles.
+    Uses normalized inputs.
+    """
+    if not s1 or not s2:
+        return 0.0
+    # Use person-specific normalization for better name/title matching
+    s1_norm = normalize_person_name(s1)
+    s2_norm = normalize_person_name(s2)
+    
+    # Rapidfuzz is much better/faster if available
+    if RAPIDFUZZ_AVAILABLE:
+        return fuzz.token_sort_ratio(s1_norm, s2_norm) / 100.0
+        
+    return difflib.SequenceMatcher(None, s1_norm, s2_norm).ratio()
+
+
+def get_keyword_score(text: str, query: str) -> float:
+    """
+    Simple keyword overlap score (Jaccard-lite).
+    Returns score based on number of query terms found in text.
+    """
+    if not text or not query:
+        return 0.0
+        
+    text_lower = text.lower()
+    query_lower = query.lower()
+    
+    # Tokenize and remove short/common words
+    stop_words = {"this", "that", "with", "from", "your", "mine", "about", "what", "where", "who", "whom"}
+    query_terms = [
+        w.strip("?.,!") 
+        for w in query_lower.split() 
+        if len(w) > 2 and w not in stop_words
+    ]
+    
+    if not query_terms:
+        return 0.0
+        
+    matches = sum(1 for term in query_terms if term in text_lower)
+    return matches / len(query_terms)
+
+
+def build_retrieval_filters(
+    collection_id: Optional[str],
+    query_classification: Dict,
+    person_detection: Dict,
+    soft: bool = True
+) -> Dict:
+    """
+    Build Qdrant filter conditions. 
+    If soft=True, we avoid hard exclusions for person queries to allow fallback.
+    """
+    
+    filters = {"must": []}
+    
+    if collection_id:
+        filters["must"].append({"key": "collection_id", "match": {"value": collection_id}})
+    
+    # Filter 1: Quality Baseline (Moved to sorting/boosting only)
+    # Removing hard filter to ensure backward compatibility with older chunks
+    # filters["must"].append({
+    #    "key": "content_quality_score",
+    #    "range": {"gte": 0.3}
+    # })
+    
+    should_conditions = []
+    
+    # Filter 2: Person Query Handling (Moved to Python reranker for search stability)
+    # Filter 3: Procedural Boost (Moved to Python reranker)
+    # Filter 4: Canonical Preference (Moved to Python reranker)
+    
+    if should_conditions:
+        filters["should"] = should_conditions
+        
+    return filters
+
+
+# FIX 18: Source Priority Rules
+SOURCE_PRIORITY = {
+    "about_us": 1.0,
+    "team_page": 1.0,
+    "leadership_page": 0.9,
+    "press_release": 0.7,
+    "job_posting": 0.3,
+    # Fallbacks
+    "general": 0.5,
+    "blog": 0.5
+}
+
+def rerank_results(
+    results: List,
+    query: str,
+    query_classification: Dict,
+    person_detection: Dict,
+    embeddings_model=None, # FIX 16: Passed for embedding similarity
+    **kwargs
+) -> List:
+    """
+    Rerank search results with diversity, quality, and relevance boosting.
+    Enhanced with Fix 2, 4, 5, 6, 7, 8 (Org-Aware Logic) + Fix 16, 18.
+    """
+    query_lower = query.lower()
+    reranked = []
+    
+    # Diversity tracking
+    seen_urls = {}       # url -> count
+    seen_people = {}     # person_name -> count
+    primary_person_found = False
+    
+    # Check if query mentions an external organization
+    # (Simple heuristic: look for "at [Org]", "of [Org]", or "from [Org]")
+    org_mentions = re.findall(r'(?:at|of|from|with) ([\w\s]+)', query_lower)
+    has_external_org = len(org_mentions) > 0
+    
+    # Metadata for fuzzy matching suggestions
+    fuzzy_matches = [] # List of (name, title, score)
+    
+    # FIX 3: Enforce org-scope hard filter in leadership scoring
+    query_org = kwargs.get("query_org")
+    is_leadership_list = query_classification.get("query_type") == "leadership_list"
+    is_role_lookup = query_classification.get("query_type") == "role_lookup" # FIX 16
+    
+    if is_leadership_list and query_org:
+        filtered_results = []
+        for res in results:
+            meta = res.get("payload", {})
+            # FIX: REMOVED org filter for leadership. Org is for display only.
+            
+            # REF: Removed strict domain filter to comply with Anti-Gravity rules (preserve recall).
+            # allowed_domains = {"people", "about", "leadership"}
+            # chunk_domain = meta.get("domain")
+            # if chunk_domain and chunk_domain not in allowed_domains:
+            #     logger.info(f"[RAG FILTER] Dropped chunk due to domain restriction: {chunk_domain}")
+            #     continue
+                
+            filtered_results.append(res)
+        results = filtered_results
+
+    # FIX 1 & 8: Extract locked state
+    rag_state = kwargs.get("rag_state", {})
+    target_org = rag_state.get("target_org", "polus")
+    
+    # Pre-calculate person counts for gating logic
+    person_counts = {}
+    for result in results:
+        meta = result.get("payload", {})
+        p_name = meta.get("person_name")
+        if p_name:
+             person_counts[p_name] = person_counts.get(p_name, 0) + 1
+
+    # Check existence
+    query_name = person_detection.get("person_name")
+    person_detected = False
+    if query_name:
+        query_name_norm = normalize_text(query_name)
+        for result in results:
+            meta = result.get("payload", {})
+            p_name = meta.get("person_name")
+            if p_name and query_name_norm in normalize_text(p_name):
+                person_detected = True
+                break
+    
+    
+    leadership_detected = False
+    
+    person_presence = {
+        "found": person_detected,
+        "has_title": False,
+        "has_leadership_keyword": False,
+        "source_domains": []
+    }
+    
+    # FIX 16: Pre-compute Role Embedding if needed
+    query_role_embedding = None
+    if is_role_lookup and embeddings_model:
+        role_title = person_detection.get("role_title")
+        if role_title:
+             try:
+                 query_role_embedding = embeddings_model.encode(role_title)
+             except Exception as e:
+                 logger.error(f"Failed to embed role title: {e}")
+
+    for result in results:
+        base_score = result.get("score", 0)
+        boost = 1.0
+        metadata = result.get("payload", {})
+        
+        name = metadata.get("person_name", "Unknown")
+        title = metadata.get("person_title", "")
+        
+        # Populate person_presence
+        if person_detection.get("is_person_query"):
+            domain = metadata.get("domain", "general")
+            if domain not in person_presence["source_domains"]:
+                person_presence["source_domains"].append(domain)
+            if title:
+                person_presence["has_title"] = True
+            if leadership_detected: 
+                pass
+        
+        # --- FIX 18: Source Priority Rules ---
+        source_type = metadata.get("page_type") or metadata.get("source_type", "general") # page_type from crawler is best
+        # normalized logic
+        priority_boost = 0.5 # Default low
+        if "about" in source_type or "about_us" in source_type: priority_boost = SOURCE_PRIORITY["about_us"]
+        elif "team" in source_type: priority_boost = SOURCE_PRIORITY["team_page"]
+        elif "leadership" in source_type: priority_boost = SOURCE_PRIORITY["leadership_page"]
+        elif "press" in source_type or "news" in source_type: priority_boost = SOURCE_PRIORITY["press_release"]
+        elif "job" in source_type or "career" in source_type: priority_boost = SOURCE_PRIORITY["job_posting"]
+        else: priority_boost = 0.8 # Standard content
+        
+        boost *= priority_boost
+        
+        # --- FIX 4: Redefine External Org Logic ---
+        detected_org = metadata.get("organization")
+        chunk_url = (metadata.get("url") or "").lower()
+        
+        # External domain detection (MIT, Harvard, etc.)
+        EXTERNAL_DOMAINS = ["mit.edu", "harvard.edu", "stanford.edu", "yale.edu"]
+        is_external_domain = any(ext in chunk_url for ext in EXTERNAL_DOMAINS)
+        
+        # Check if URL is from target org
+        target_org_lower = (target_org or "").lower() if target_org else ""
+        is_target_domain = target_org_lower in chunk_url
+        
+        is_internal = False
+        is_external = False
+        
+        if detected_org and normalize_text(detected_org) == normalize_text(target_org):
+            is_internal = True
+            is_external = False
+        elif is_target_domain:
+            # URL contains target org name -> likely internal
+            is_internal = True
+            is_external = False
+        elif is_external_domain:
+            # URL from known external domain -> definitely external
+            is_internal = False
+            is_external = True
+        elif detected_org is None:
+            # FIX 4: Unknown org but not external domain -> neutral
+            is_internal = False
+            is_external = False
+        else:
+            # Different organization -> External
+            is_internal = False
+            is_external = True
+            
+        # FIX 10: Debug Logging (Temporary)
+        if rag_state.get("intent") == "leadership_list":
+            logger.info(
+                "[ORG DEBUG] name=%s | title=%s | organization=%s | external=%s",
+                name, title, 
+                detected_org, 
+                is_external
+            )
+
+
+        # --- FIX 5, 6, 7: Org-Aware Boosting & Demotion ---
+        section = "secondary" # Default to secondary
+        
+        if person_detection.get("query_type") == "leadership_list" or person_detection.get("query_type") == "team_list":
+            
+            # Check title validity first (applies to all org states)
+            title_valid = is_leadership_role(title) if title else False
+            
+            # 2. Org-aware scoring with leadership title override
+            if is_internal:
+                if title_valid:
+                    # FIX 7: Org match + title -> leadership
+                    boost *= 2.0
+                    if "director" in title.lower() or "founder" in title.lower():
+                        boost *= 1.2
+                    section = "primary"
+                    leadership_detected = True
+                else:
+                    # Internal but invalid/low title
+                    boost *= 0.8 # Slight demotion
+            
+            elif is_external:
+                # Fix 6: Demote external, don't skip
+                boost *= 0.1
+                section = "secondary"
+                logger.info(f"Demoted external leader: {name}")
+                
+            else:
+                # Unknown Org - KEY FIX: If leadership title is valid, BOOST not demote
+                # Rationale: Within a collection, people with "Director", "CEO" titles are likely from the target org
+                if title_valid:
+                    # Strong leadership signal overrides missing org metadata
+                    boost *= 1.5  # Boost (was 0.5 demotion)
+                    if "director" in title.lower() or "ceo" in title.lower() or "chairman" in title.lower():
+                        boost *= 1.3
+                    section = "primary"
+                    leadership_detected = True
+                    logger.info(f"[LEADERSHIP BOOST] Unknown org but valid title: {name} ({title})")
+                else:
+                    # No leadership title - neutral/slight demotion
+                    boost *= 0.6
+                    section = "secondary"
+                
+        # --- Standard Relevance Logic (Preserved) ---
+        
+        # 1. Content Quality
+        quality = metadata.get("content_quality_score", 0.7)
+        boost *= (0.8 + 0.2 * quality)
+        
+        # 2. Person Name Exact Match (Always boost if looking for person)
+        if person_detection.get("is_person_query") and query_name:
+             if name and normalize_text(query_name) in normalize_text(name):
+                 boost *= 3.0
+                 if metadata.get("chunk_type") == "person_profile":
+                     boost *= 1.5
+                     if person_detection.get("query_type") == "specific_person":
+                         section = "primary"
+        
+        # 3. Procedural Relevance
+        if query_classification.get("query_type") == "procedural":
+            if metadata.get("chunk_type") == "procedural":
+                boost *= 1.3
+                
+        # 4. Recency (if available)
+        age = metadata.get("content_age_days")
+        if age is not None:
+            if age < 30:
+                boost *= 1.15
+            elif age > 365:
+                boost *= 0.95
+                
+        # 5. Keyword Overlap
+        kw_score = get_keyword_score(metadata.get("text", ""), query)
+        if kw_score > 0:
+            boost *= (1.0 + 0.4 * kw_score) # Up to 40% boost for high overlap
+            
+        # 6. Fuzzy Name Match
+        if person_detection.get("is_person_query") and person_detection.get("person_name"):
+            # Check meta name
+            meta_name = metadata.get("person_name")
+            meta_title = metadata.get("person_title")
+            
+            if meta_name:
+                f_score = fuzzy_match(person_detection.get("person_name"), meta_name)
+                if f_score > 0.85: # High confidence typo match
+                    boost *= 1.2
+            
+            # Check role title fuzzily
+            if person_detection.get("role_title"):
+                meta_title = metadata.get("person_title")
+                if meta_title:
+                    f_score = fuzzy_match(person_detection.get("role_title"), meta_title)
+                    if f_score > 0.85:
+                        boost *= 1.15
+            
+            # FIX 3: Collect fuzzy matches for "Did you mean...?"
+            if query_name and meta_name:
+                f_score = fuzzy_match(query_name, meta_name)
+                if 0.7 <= f_score < 0.95: # Close match but not exact
+                    fuzzy_matches.append({
+                        "name": meta_name,
+                        "title": meta_title or "Staff",
+                        "score": f_score
+                    })
+
+        # 7. AI Classifier Integration (Fallthrough for non-explicit cases)
+        # Only run if we haven't already decided it's external/internal via heuristic
+        # If leadership_detected is True, we already boosted it.
+        
+        if not leadership_detected and not is_external:
+             is_leadership_query = person_detection.get("query_type") == "team_list" or person_detection.get("query_type") == "leadership_list"
+             if (is_leadership_query or person_detection.get("role_title")) and name != "Unknown":
+                 from app.services.leadership_classifier import leadership_classifier
+                 
+                 # Prepare input
+                 page_type_meta = metadata.get("page_type", {})
+                 p_type_str = page_type_meta.get("type") if isinstance(page_type_meta, dict) else str(page_type_meta)
+                 
+                 ai_input = {
+                    "person_name": name,
+                    "person_title": title or "",
+                    "page_type": p_type_str,
+                    "source_url": metadata.get("url", ""),
+                    "text_snippet": metadata.get("text", "")[:300],
+                    "chunk_count": person_counts.get(name, 1)
+                 }
+                 
+                 # Strict Gating
+                 # Strict Gating
+                 # Fix 5 (Org-aware) & Fix 9 (Duplicate runs)
+                 # Only run detailed AI check for internal candidates with relevant titles
+                 run_ai_check = False
+                 if is_internal and title:
+                     t_lower = title.lower()
+                     if any(t in t_lower for t in ALLOWED_LEADERSHIP_TITLES):
+                         run_ai_check = True
+                 
+                 if run_ai_check:
+                     # Helper cache
+                     ai_cache = kwargs.setdefault("_ai_cache", {})
+                     cache_key = f"{name}:{title}"
+                     
+                     if cache_key in ai_cache:
+                         ai_result = ai_cache[cache_key]
+                     else:
+                         ai_result = leadership_classifier.classify_leadership_role(ai_input)
+                         ai_cache[cache_key] = ai_result
+                         
+                     ai_conf = ai_result.get("confidence", 0.0)
+                     
+                     if ai_conf > 0.8:
+                         boost *= 1.5
+                         logger.info(f"AI Boosted Legacy: {name} ({ai_conf})")
+
+        # --- DIVERSITY & PENALTY LOGIC ---
+        
+        # 1. Duplicate URL Penalty
+        url = metadata.get("url")
+        if url:
+            count = seen_urls.get(url, 0)
+            seen_urls[url] = count + 1
+            if count >= 3:
+                boost *= 0.6  # Heavy penalty for 4th+ chunk from same doc
+            elif count >= 2:
+                boost *= 0.8  # Penalty for 3rd chunk
+                
+        # 2. Non-canonical penalty
+        if not metadata.get("is_canonical", True):
+            boost *= 0.8
+            
+        # 3. Person Diversity
+        if person_detection.get("is_person_query") and metadata.get("chunk_type") == "person_profile":
+             p_name = metadata.get("person_name", "unknown")
+             p_count = seen_people.get(p_name, 0)
+             seen_people[p_name] = p_count + 1
+             
+             # If we've already seen 3 distinct people, penalize others
+             if len(seen_people) > 3 and p_count == 1:
+                 boost *= 0.5
+                 
+             # Limit chunks per person
+             if p_count >= 2:
+                 boost *= 0.7 
+                 
+        # FIX 16: Role -> Person Matching (Embedding Similarity)
+        if query_role_embedding is not None and title and embeddings_model:
+            try:
+                # Cache checking could be added here if needed
+                title_embedding = embeddings_model.encode(title)
+                
+                # Cosine similarity
+                if hasattr(embeddings_model, 'similarity'):
+                     # fastembed might not have it exposed directly on model, usually just dot product for normalized
+                     import numpy as np
+                     sim = np.dot(query_role_embedding, title_embedding) / (np.linalg.norm(query_role_embedding) * np.linalg.norm(title_embedding))
+                else:
+                     # Manual cosine sim
+                     import numpy as np
+                     sim = np.dot(query_role_embedding, title_embedding) / (np.linalg.norm(query_role_embedding) * np.linalg.norm(title_embedding))
+                
+                if sim > 0.85:
+                    logger.info(f"[ROLE MATCH] Strong match: '{person_detection.get('role_title')}' vs '{title}' ({sim:.3f})")
+                    boost *= 2.5
+                    section = "primary"
+                    leadership_detected = True # If we found the role, we found leadership
+                elif sim > 0.75:
+                    logger.info(f"[ROLE MATCH] Weak match: '{person_detection.get('role_title')}' vs '{title}' ({sim:.3f})")
+                    boost *= 1.3
+                    
+            except Exception as e:
+                # logger.warning(f"Embedding sim failed: {e}")
+                pass
+
+        final_score = base_score * boost
+        
+        result["score"] = final_score
+        result["boost_factor"] = round(boost, 3)
+        result["section"] = section # FIX 7
+        result["is_internal"] = is_internal
+        result["is_external"] = is_external
+        
+        reranked.append(result)
+
+    # Sort
+    reranked.sort(key=lambda x: x["score"], reverse=True)
+    
+    if reranked:
+        reranked[0]["person_detected"] = person_detected
+        reranked[0]["leadership_detected"] = leadership_detected
+        
+        # Finalize person_presence
+        person_presence["has_leadership_keyword"] = leadership_detected
+        reranked[0]["person_presence"] = person_presence
+
+    # FIX 3 (Production UX): If no good matches, inject the best fuzzy match into context
+    if person_detection["is_person_query"] and person_detection["person_name"]:
+        top_score = reranked[0].get("original_score", 0) * reranked[0].get("boost_factor", 1.0) if reranked else 0
+        # If no exact match (exact match gives > 3.0 boost)
+        if top_score < 2.0 and fuzzy_matches:
+            # Sort fuzzy matches by score
+            fuzzy_matches.sort(key=lambda x: x["score"], reverse=True)
+            # Take the best one
+            best = fuzzy_matches[0]
+            # Add a "Recommendation" chunk to the reranked list so LLM knows about it
+            reranked.insert(0, {
+                "score": 0.999, # Force it to be top
+                "payload": {
+                    "is_suggestion": True,
+                    "person_name": best["name"],
+                    "person_title": best["title"],
+                    "chunk_type": "person_profile",
+                    "text": f"SYSTEM NOTE: The user searched for '{person_detection['person_name']}'. I couldn't find an exact match, but I found '{best['name']}' ({best['title']}). Please inform the user and ask if they meant this person."
+                }
+            })
+            
+    return reranked
+
+
+def format_person_context(chunks: List[Dict], person_detection: Dict) -> str:
+    """Format person chunks into structured context."""
+    # Group by type
+    profile_chunks = [c for c in chunks if c.get("payload", {}).get("chunk_type") == "person_profile"]
+    other_chunks = [c for c in chunks if c.get("payload", {}).get("chunk_type") != "person_profile"]
+    
+    output = []
+    
+    if profile_chunks:
+        output.append("# Specific Profile Matches")
+        
+        # Deduplication mapping
+        unique_profiles = {}
+        for chunk in profile_chunks:
+            meta = chunk.get("payload", {})
+            name = meta.get("person_name", "Unknown")
+            # Keep the highest scoring chunk for each person
+            if name not in unique_profiles or chunk.get("score", 0) > unique_profiles[name].get("score", 0):
+                unique_profiles[name] = chunk
+
+        for name, chunk in unique_profiles.items():
+            meta = chunk.get("payload", {})
+            url = meta.get("url", "#")
+            title_text = meta.get("page_title", name)
+            
+            info = [f"## {name}"]
+            info.append(f"Source: [{title_text}]({url})")
+            
+            if meta.get("person_title"): info.append(f"**Title:** {meta['person_title']}")
+            if meta.get("person_department"): info.append(f"**Department:** {meta['person_department']}")
+            text = chunk.get("text", "").strip()
+            if text: info.append(f"\n{text}")
+            
+            # Contacts
+            links = meta.get("person_social_links", {})
+            contacts = []
+            if meta.get("email"): contacts.append(f"Email: {meta['email']}")
+            if links.get("linkedin"): contacts.append(f"LinkedIn: {links['linkedin']}")
+            if contacts: info.append("\n**Contact:** " + ", ".join(contacts))
+            
+            output.append("\n".join(info) + "\n---")
+
+    if other_chunks:
+        output.append("\n# Related Information & Articles")
+        for i, chunk in enumerate(other_chunks):
+            meta = chunk.get("payload", {})
+            title = meta.get("file_name") or meta.get("page_title") or f"Source {i+1}"
+            url = meta.get("url", "#")
+            text = chunk.get("text", "")
+            
+            output.append(f"### {title}\nSource: [{title}]({url})\n{text}\n---")
+            
+    return "\n\n".join(output) if output else "No specific person profile found."
+
+
+def format_general_context(chunks: List[Dict]) -> str:
+    """Standard context formatting with strict source lines."""
+    parts = []
+    for i, chunk in enumerate(chunks):
+        meta = chunk.get("payload", {})
+        
+        # Improved title fallback logic
+        title = meta.get("title") or meta.get("file_name") or meta.get("page_title")
+        url = meta.get("url") or meta.get("canonical_url", "")
+        
+        if not title:
+            if url and url != "#":
+                # Use last part of URL as title if possible
+                path = url.split('/')[-1]
+                title = path if path else url
+            else:
+                title = f"Source {i+1}"
+        
+        # Ensure title is cleaned if it's still defaulting to "Unknown File" elsewhere
+        if title == "Unknown File" and url:
+             title = url.split('/')[-1] or url
+
+        text = chunk.get("text", "")
+        
+        parts.append(f"### {title}\nSource: [{title}]({url if url else '#ID:' + meta.get('file_id', '')})\n{text}")
+        
+    return "\n\n---\n\n".join(parts)
 
 
 
@@ -60,20 +1535,98 @@ This tag is required for internal processing. Place it at the very end of your r
 """
 
 # Default system prompt - can be overridden via environment variable or config
-DEFAULT_SYSTEM_PROMPT = """You are a helpful AI assistant for a knowledge base system. Your role is to respond naturally and conversationally based on the provided context from uploaded documents.
+DEFAULT_SYSTEM_PROMPT = """You are a helpful AI assistant for a knowledge base system. Your role is to respond naturally and conversationally based ONLY on the provided context.
 
 Answering Rules:
-- **Tone:** Professional, clear, and approachable. Begin with a polite acknowledgment before answering the query.
-- **Clarity:** Keep responses short, precise, and easy to skim. Use bullet points or numbered lists where helpful. Avoid long paragraphs.
-- **Relevance:** Focus strictly on the question asked. Do not add unrelated or extra details.
-- **Source Attribution:** ALWAYS include a "Sources:" section at the end listing the specific files you referenced.
-- **Out-of-Scope Queries:** If the question is not covered in the knowledge base, respond with:
-  "I don't have that information in the current knowledge base. Please contact the system administrator for further details."
-- **Information Boundaries:** Never guess or provide assumptions. Only use information explicitly available in the knowledge base.
-- **Missing/Unclear Questions:** If a query is unclear, say:
-  "I'm not sure what you mean. Could you clarify or provide more details?"
-- **Context Usage:** Use the provided context from uploaded documents to answer questions accurately.
-- **Goal:** Provide accurate, professional, and helpful responses with clear source attribution so users can verify information."""
+- **Tone:** Professional, clear, and approachable.
+- **Strict Sourcing:** You must cite your sources. Every piece of information should be traceable to a source provided in the context.
+- **Citation Format:** At the end of your response, you MUST include a "Sources" section listing the files you used. Use the format: `[Title](URL)`.
+- **No Hallucinations:** If the answer is not in the context, say "I don't have that information in the current knowledge base." Do NOT make up information.
+- **Clarity:** Use bullet points for lists. Keep answers concise.
+
+Context Usage:
+- The context provided below contains snippets from documents.
+- Each snippet starts with "Source: [Title](URL)" or similar metadata.
+- Use this metadata to construct your citations.
+
+Now, answer the user's question based strictly on the context below."""
+
+
+# Small-talk specific system prompt for greeting-style messages.
+# This does NOT enforce sourcing rules and is intended for natural, brief introductions.
+SMALL_TALK_SYSTEM_PROMPT = """You are a friendly AI assistant{assistant_clause}.
+
+Your task is to respond to simple greeting or small-talk messages from the user.
+
+Guidelines:
+- Keep the reply short and conversational (1–3 sentences).
+- Start with a warm greeting.
+- Briefly explain what you can help the user with in this chat experience.
+- End by inviting the user to ask a question or tell you what they need.
+- Do not mention internal tags, classification instructions, or implementation details."""
+
+
+
+
+# ============================================
+# FOLLOW-UP HELPERS
+# ============================================
+
+def extract_topics_from_history(history: List[Dict]) -> List[str]:
+    """Extract main topics from conversation history."""
+    topics = []
+    
+    for msg in history:
+        # Handle both dict and Pydantic models
+        role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", None)
+        content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
+        
+        if role == "user":
+            # Extract capitalized phrases (likely topics/entities)
+            # Simple extraction: 2+ word capitalized phrases
+            capitalized = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', content)
+            topics.extend(capitalized)
+    
+    # Return unique topics
+    return list(set(topics))[:5]
+
+
+def extract_available_topics(chunks: List[Dict]) -> List[str]:
+    """Extract main topics from retrieved chunks for suggestions."""
+    topics = []
+    
+    for chunk in chunks:
+        metadata = chunk.get("payload", {})
+        
+        # Get section hierarchy as topic
+        section = metadata.get("section_hierarchy", "")
+        if section:
+            # Get last part of hierarchy (most specific)
+            parts = section.split(">")
+            if parts:
+                topics.append(parts[-1].strip())
+        
+        # Get primary topic if available
+        primary_topic = metadata.get("primary_topic", "")
+        if primary_topic:
+            topics.append(primary_topic)
+        
+        # Get key entities, ensuring it's a list
+        entities = metadata.get("key_entities", [])
+        if isinstance(entities, list):
+            topics.extend(entities[:2])  # Top 2 entities per chunk
+    
+    # Deduplicate and return
+    unique_topics = []
+    seen = set()
+    for topic in topics:
+        if topic and topic.lower() not in seen:
+            unique_topics.append(topic)
+            seen.add(topic.lower())
+    
+    return unique_topics[:10]  # Max 10 topics
+
+
 
 
 
@@ -90,6 +1643,10 @@ class RAG:
         self.default_max_tokens = getattr(settings, "CLAUDE_MAX_TOKENS", 4000)
         self.default_temperature = getattr(settings, "CLAUDE_TEMPERATURE", 0.7)
         self.default_system_prompt = getattr(settings, "SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
+
+        # Person cache for fuzzy matching
+        self.known_person_cache = []
+        self.last_person_fetch_time = 0
 
         # AWS Bedrock setup (lazy init)
         self.aws_region = getattr(settings, "AWS_REGION", "us-east-1")
@@ -125,33 +1682,203 @@ class RAG:
     # Small talk helpers
     # ------------------------------------------------------------------
     def _is_small_talk(self, query: str) -> bool:
-        """Simple heuristic to skip the RAG pipeline for casual greetings."""
+        """
+        Detect ONLY simple greetings (hi, hello, etc.)
+        
+        Capability questions like "what can you do?" are NOT handled here.
+        They go through the normal RAG pipeline where the LLM answers using the system prompt.
+        """
         if not query:
             return False
 
         normalized = query.strip().lower()
-        small_talk_phrases = {
-            "hi",
-            "hello",
-            "hey",
-            "good morning",
-            "good evening",
-            "good afternoon",
-            "how are you",
-            "what's up",
-            "hi there",
-            "hello there",
+        
+        # Remove filler words and punctuation
+        normalized_clean = re.sub(r'\b(please|just|actually|really)\b', '', normalized).strip()
+        normalized_clean = re.sub(r'\s+', ' ', normalized_clean).strip()
+        normalized_stripped = re.sub(r'[.!?,;:\s]+$', '', normalized_clean).strip()
+        
+        # Simple greetings ONLY - no capability questions
+        simple_greetings = {
+            "hi", "hello", "hey", "good morning", "good evening", "good afternoon",
+            "how are you", "what's up", "hi there", "hello there", "whats up", "sup",
+            "hey there", "hiya", "howdy", "greetings", "hai", "hii", "hiii", "helloo",
+            "heya", "yo", "namaste", "hola", "bonjour", "good day", "morning", "evening",
         }
+        
+        # Check simple greetings
+        if normalized in simple_greetings or normalized_clean in simple_greetings or normalized_stripped in simple_greetings:
+            return True
+        
+        return False
 
-        return normalized in small_talk_phrases
+    def _is_capability_question(self, query: str) -> bool:
+        """
+        Detect capability/identity questions like "what can you do?", "what do you know?"
+        These should be answered by the LLM using the system prompt, NOT from KB search.
+        """
+        if not query:
+            return False
+        
+        normalized = query.strip().lower()
+        # Remove filler words
+        normalized = re.sub(r'\b(please|just|all|actually|really|exactly|basically)\b', '', normalized).strip()
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+        
+        capability_patterns = [
+            r"^what\s+(?:\w+\s+)?can\s+you\s+(?:do|help)",  # what can you do
+            r"^what\s+(?:\w+\s+)?(?:do\s+)?you\s+know\s*[?!.]?$",  # what do you know
+            r"^who\s+(?:\w+\s+)?(?:are\s+)?you\s*[?!.]?$",  # who are you
+            r"^what\s+(?:\w+\s+)?(?:are\s+)?you\s*[?!.]?$",  # what are you
+            r"^what(?:'s|\s+is)?\s*this\s*[?!.]?$",  # what is this
+            r"^tell\s+me\s+about\s+yourself",  # tell me about yourself
+            r"^introduce\s+yourself",  # introduce yourself
+            r"(?:what\s+are\s+)?your\s+capabilities",  # your capabilities
+            r"^how\s+can\s+you\s+help",  # how can you help
+            r"^what\s+(?:\w+\s+)?(?:topics?|areas?)\s+(?:do|can)\s+you",  # what topics do you cover
+            r"^what\s+(?:\w+\s+)?information\s+(?:do\s+)?you\s+have\s*[?!.]?$",  # what information do you have
+        ]
+        
+        for pattern in capability_patterns:
+            if re.search(pattern, normalized):
+                logger.debug(f"[CAPABILITY] Detected capability question: {query}")
+                return True
+        
+        return False
 
-    def _handle_small_talk(self, query: str) -> Dict[str, any]:
-        """Return a friendly response for small talk interactions."""
+    def _handle_small_talk(self, query: str, collection_id: Optional[str] = None) -> Dict[str, any]:
+        """
+        Handle ONLY simple greetings (hi, hello, etc.)
+        
+        Returns a brief friendly greeting. Capability questions like "what can you do?"
+        are NOT handled here - they go through the normal RAG pipeline where the
+        LLM will answer using the system prompt.
+        """
+        # Extract assistant name from system prompt or collection settings
+        assistant_name = "assistant"
+        
+        if collection_id and self.db_session:
+            try:
+                # Check collection for custom name
+                collection = self.db_session.query(Collection).filter(
+                    Collection.collection_id == collection_id
+                ).first()
+                
+                if collection and collection.assistant_name:
+                    assistant_name = collection.assistant_name
+                else:
+                    # Try to extract from system prompt
+                    prompt = self.get_prompt_for_collection(collection_id)
+                    if prompt and prompt.system_prompt:
+                        name_match = re.search(
+                            r"(?:you are|your name is|i am|i'm|my name is)\s+([A-Z][a-z]+)",
+                            prompt.system_prompt, re.IGNORECASE
+                        )
+                        if name_match:
+                            extracted = name_match.group(1).strip()
+                            if extracted.lower() not in ('an', 'a', 'the', 'here', 'designed'):
+                                assistant_name = extracted
+            except Exception as e:
+                logger.debug(f"[GREETING] Could not extract name: {e}")
+        
+        # Simple greeting response (static fallback)
+        answer = f"Hello! I'm {assistant_name}. How can I help you today?"
+        
         return {
-            "answer": "Hello! I'm here to help with questions about your knowledge base documents. "
-                      "Let me know what you'd like to learn or explore.",
-            "is_generic": True
+            "answer": answer,
+            "is_generic": True,
+            "answer_mode": "FULL"
         }
+
+    def _handle_small_talk_via_llm(
+        self,
+        query: str,
+        collection_id: Optional[str] = None,
+        conversation_history: Optional[List[Dict]] = None,
+    ) -> Dict[str, any]:
+        """
+        Handle simple greetings/small talk by delegating to the LLM for a natural response.
+        
+        Falls back to the static `_handle_small_talk` implementation on any error.
+        """
+        try:
+            # Reuse the assistant name extraction logic from `_handle_small_talk`
+            assistant_name = "assistant"
+
+            if collection_id and self.db_session:
+                try:
+                    collection = self.db_session.query(Collection).filter(
+                        Collection.collection_id == collection_id
+                    ).first()
+
+                    if collection and collection.assistant_name:
+                        assistant_name = collection.assistant_name
+                    else:
+                        prompt = self.get_prompt_for_collection(collection_id)
+                        if prompt and prompt.system_prompt:
+                            name_match = re.search(
+                                r"(?:you are|your name is|i am|i'm|my name is)\s+([A-Z][a-z]+)",
+                                prompt.system_prompt,
+                                re.IGNORECASE,
+                            )
+                            if name_match:
+                                extracted = name_match.group(1).strip()
+                                if extracted.lower() not in ("an", "a", "the", "here", "designed"):
+                                    assistant_name = extracted
+                except Exception as e:
+                    logger.debug(f"[GREETING-LLM] Could not extract name for small talk: {e}")
+
+            # Build a small-talk specific system-style prompt for the LLM
+            assistant_clause = f" named {assistant_name}" if assistant_name else ""
+            system_instructions = SMALL_TALK_SYSTEM_PROMPT.format(assistant_clause=assistant_clause)
+
+            # Optionally include a tiny bit of recent history if available (for future extensibility)
+            history_snippet = ""
+            if conversation_history:
+                try:
+                    recent = conversation_history[-3:]
+                    lines = []
+                    for msg in recent:
+                        role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", "user")
+                        content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
+                        if content:
+                            lines.append(f"{role.capitalize()}: {content[:120]}")
+                    if lines:
+                        history_snippet = "\n\nRecent conversation:\n" + "\n".join(lines)
+                except Exception as e:
+                    logger.debug(f"[GREETING-LLM] Failed to include history snippet: {e}")
+
+            prompt = (
+                f"{system_instructions}\n\n"
+                f"User message: {query}\n"
+                f"Assistant:{history_snippet}\n"
+            )
+
+            logger.info("[GREETING-LLM] Calling LLM for small-talk response...")
+
+            raw_answer, _ = self.call_ai(
+                prompt,
+                model=self.default_model,
+                max_tokens=min(self.default_max_tokens, 256),
+                temperature=self.default_temperature,
+            )
+
+            answer = (raw_answer or "").strip()
+
+            # Very defensive fallback if LLM returns nothing usable
+            if not answer:
+                logger.warning("[GREETING-LLM] Empty LLM response for small talk; falling back to static handler.")
+                return self._handle_small_talk(query, collection_id=collection_id)
+
+            return {
+                "answer": answer,
+                "is_generic": True,  # greetings are generic by design
+                "answer_mode": "FULL",
+            }
+
+        except Exception as e:
+            logger.error(f"[GREETING-LLM] Small-talk LLM handler failed: {e}")
+            return self._handle_small_talk(query, collection_id=collection_id)
 
     def _parse_ai_response(self, raw_response: str) -> Dict[str, any]:
         """Parse AI response to extract the classification tag and clean answer.
@@ -210,7 +1937,39 @@ class RAG:
         # Remove trailing horizontal rule separators (---) that sometimes appear
         cleaned_response = re.sub(r'\s*-{3,}\s*$', '', cleaned_response).strip()
         
-        return {"answer": cleaned_response, "is_generic": is_generic}
+        # New: Extract referenced sources if present in a "Sources:" or "References:" section
+        referenced_sources = []
+        # Look for a Sources section at the end
+        sources_match = re.search(r'(?:Sources?|References?):\s*(.*)', raw_response, re.IGNORECASE | re.DOTALL)
+        if sources_match:
+            sources_text = sources_match.group(1).strip()
+            # Try to find [Title](URL) patterns
+            referenced_sources = re.findall(r'\[(.*?)\]', sources_text)
+            if not referenced_sources:
+                # Fallback: Find lines that look like filenames or bullet points
+                for line in sources_text.split('\n'):
+                    line = line.strip().lstrip('-*• ').strip()
+                    if line and len(line) < 100: # Avoid capturing long sentences
+                        referenced_sources.append(line)
+        
+        return {
+            "answer": cleaned_response, 
+            "is_generic": is_generic,
+            "referenced_sources": list(set(referenced_sources)) # Deduplicate
+        }
+
+    def _fetch_known_people(self) -> List[str]:
+        """Get known person names from background-refreshed cache (zero latency).
+        
+        The background cache is managed by PersonCacheManager which:
+        - Refreshes on startup (async, non-blocking)
+        - Refreshes every hour via background thread
+        - Can be triggered manually after crawl completion
+        
+        This replaces the expensive 9 Qdrant scroll calls that were blocking requests.
+        """
+        from app.core.background_cache import get_known_people
+        return get_known_people()
 
     def get_prompt_for_collection(self, collection_id: str) -> Optional[SystemPrompt]:
         """Get the active prompt for a specific collection from database"""
@@ -237,290 +1996,730 @@ class RAG:
             logging.error(f"Error getting prompt for collection {collection_id}: {e}")
             return None
 
-    def retrieve_chunks(self, query: str, top_k: int = 5, collection_id: Optional[str] = None) -> List[Dict]:
+    def retrieve_chunks(
+        self, 
+        query: str, 
+        top_k: int = 5, 
+        collection_id: Optional[str] = None, 
+        prior_context: Optional[Dict] = None,
+        request_cache: Optional[Dict] = None 
+    ) -> List[Dict]:
         """Search vector DB and return top matching chunks with metadata.
         
-        Includes query expansion for 'who is X' or title-based queries.
-        Applies keyword-based score boosting for both names and job titles.
+        Enhancements:
+        - Query Classification & Person Detection
+        - Metadata Filtering
+        - Advanced Reranking & Diversity
+        - FIX 20: Request-Level Caching
         """
+        # Check for greetings/small talk - return empty chunks so caller can handle it
+        if self._is_small_talk(query):
+            logger.info(f"[RAG] Greeting detected: '{query}' - returning empty chunks for greeting handler")
+            return []
+        
+        # FIX 20: Check Cache
+        if request_cache is not None:
+             cache_key = f"retrieve:{query}:{collection_id}:{top_k}"
+             if cache_key in request_cache:
+                 logger.info(f"[RAG CACHE] Hit for query: {query}")
+                 return request_cache[cache_key]
+
         # Handle None collection_id properly
         collection_id_str = collection_id if collection_id is not None else None
         
-        # Detect search subjects (names or titles)
-        search_term = None
+        # Step 1: Analyze Query
+        # Fetch known people for fuzzy correction
+        known_people = self._fetch_known_people()
+
+        # Normalize strictly for classification and logic
+        normalized_query = normalize_text(query)
         
-        # 1. Check for "who is X" patterns
-        who_is_pattern = re.match(r"(?:who\s+is|who's|tell\s+me\s+about|information\s+(?:on|about))\s+(.+)", query.lower().strip())
-        if who_is_pattern:
-            search_term = who_is_pattern.group(1).strip().rstrip("?.,!")
-        # 2. If no prefix, but query is short, treat it as a potential name/title
-        elif len(query.split()) <= 4:
-            # Clean common filler words
-            search_term = re.sub(r"^(?:find|search|get|show|for|a)\s+", "", query.lower().strip())
+        query_classification = classify_query(normalized_query)
         
-        # Query expansion (limited to MAX_QUERY_EXPANSIONS)
-        expanded_queries = [query]  # Always include original query
+        # Target org will be inferred from chunks later
+        # Initialize with None - will be populated dynamically from collection/chunks
+        target_org = None  # Will be inferred from chunks after retrieval
+        rag_state = {
+            "intent": query_classification.get("query_type"),
+            "target_org": target_org,
+            "target_org_confidence": 0.5  # Low confidence until we have chunks
+        }
+
         
-        if search_term:
-            logger.info(f"[RAG QUERY EXPANSION] Detected search term: '{search_term}'")
+        # Pass query_type into detect_person_query via prior_context if not already there
+        merged_context = prior_context or {}
+        if "query_type" not in merged_context:
+            merged_context = merged_context.copy()
+            merged_context["query_type"] = query_classification["query_type"]
             
-            # Limited expansion queries to prevent overload
-            expansion_candidates = [
-                search_term,
-                f"{search_term} staff directory contacts",
-            ]
-            # Take at most (MAX_QUERY_EXPANSIONS - 1) expansions
-            expanded_queries.extend(expansion_candidates[:MAX_QUERY_EXPANSIONS - 1])
-            logger.info(f"[RAG QUERY EXPANSION] Total queries: {len(expanded_queries)} (max: {MAX_QUERY_EXPANSIONS})")
+        person_detection = detect_person_query(normalized_query, prior_context=merged_context, known_people=known_people)
         
-        # Collect results from all expanded queries
+        logger.info(
+            f"[RAG ANALYSIS] Type: {query_classification['query_type']}, Person: {person_detection['is_person_query']}",
+            extra={
+                "original_query": query,
+                "normalized_query": normalized_query
+            }
+        )
+        if person_detection.get('is_person_query'):
+            logger.info(f"[RAG PERSON] Name: {person_detection.get('person_name')}, Title: {person_detection.get('role_title')}")
+
+        # --- CACHE CHECK (Retrieval) ---
+        cache = get_rag_cache()
+        cache_key = generate_cache_key(
+            collection_id=collection_id_str or "default",
+            intent=query_classification.get("query_type", "general"),
+            query=query,
+            person_name=person_detection.get("person_name"),
+            role_title=person_detection.get("role_title"),
+            query_org=target_org  # Include inferred org in key
+        )
+        
+        cached_chunks = cache.get_retrieval(cache_key)
+        if cached_chunks is not None:
+             logger.info(f"[CACHE HIT] Retrieval found for key: {cache_key}")
+             if request_cache is not None:
+                 request_cache[f"retrieve:{query}:{collection_id}:{top_k}"] = cached_chunks
+             return cached_chunks
+
+        # Step 2: Adjust Retrieval Parameters (Change 1: intent-aware thresholds)
+        search_top_k = top_k
+        min_score = getattr(settings, "RAG_MIN_SCORE", GENERAL_MIN_SCORE)
+        
+        # Dynamic adjustments
+        # NOTE: Check leadership_list FIRST since it also sets is_person_query=True
+        # Check factual BEFORE person to handle product questions correctly
+        if query_classification["query_type"] == "leadership_list":
+            search_top_k = 50  # FIX: Increase for leadership to get all potential directors (increased from 40 to ensure Krishna Prasad is included)
+            min_score = getattr(settings, "RAG_LEADERSHIP_MIN_SCORE", LEADERSHIP_MIN_SCORE)  # 0.15 for leadership
+        elif query_classification["query_type"] == "factual":
+            # Factual/product queries - check BEFORE person detection to avoid misclassifying products as people
+            search_top_k = 40  # More context for product/factual questions
+            min_score = 0.20  # Lower threshold to capture all relevant features/components
+        elif person_detection["is_person_query"]:
+            search_top_k = 20 # Fetch more for person queries to ensure we find the right profile
+            min_score = 0.15  # Lower threshold to capture potential matches before reranking
+        elif query_classification["query_type"] == "procedural":
+            search_top_k = 15 # More context for steps
+            
+        # Step 3: Build Filters (Soft filtering enabled)
+        filters = build_retrieval_filters(
+            collection_id=collection_id_str,
+            query_classification=query_classification,
+            person_detection=person_detection,
+            soft=True
+        )
+        
+        # Step 4: Perform Search (with Mutation/Expansion)
+        # Keep existing expansion logic but simplified
+        expanded_queries = [query]
+        
+        # Add basic expansion if relevant
+        # Add basic expansion if relevant
+        if person_detection["person_name"]:
+             expanded_queries.append(person_detection["person_name"])
+             # --- FIX 2: START REMOVED AUTOMATIC LEADERSHIP EXPANSION ---
+             # expanded_queries.append("leadership team management executives")
+             # expanded_queries.append("CEO CTO Founder Director President")
+             # --- FIX 2: END REMOVED AUTOMATIC LEADERSHIP EXPANSION ---
+             
+        elif query_classification["query_type"] == "leadership_list":
+             # FIX 4: Role-first retrieval strategy
+             # Search for role + org
+             org_scope = prior_context.get("scope", "") if prior_context else ""
+             expanded_queries.append(f"directors and leadership at {org_scope}")
+             expanded_queries.append(f"management board executives {org_scope}")
+             expanded_queries.append(f"vp head director {org_scope}")
+             
+        elif query_classification["query_type"] == "role_lookup":
+             # --- FIX 3: Role Lookup Expansion ---
+             role = person_detection.get("role_title", "staff")
+             expanded_queries.append(f"{role} manager lead head")
+             expanded_queries.append(f"{role} department team contact")
+             # CRITICAL: Do NOT add generic leadership terms here
+             
+        elif query_classification["query_type"] == "factual":
+             # Expansion for product/factual queries to get comprehensive context
+             # Extract the key subject from the query
+             subject = query.replace("what is", "").replace("what are", "").replace("?", "").strip()
+             if subject:
+                 expanded_queries.append(f"{subject} features capabilities")
+                 expanded_queries.append(f"{subject} components modules products")
+                 expanded_queries.append(f"{subject} benefits use cases")
+        else:
+             # Basic keyword expansion for other types
+             if len(query.split()) < 4:
+                 expanded_queries.append(query + " details")
+        
+        # Limit expansions
+        expanded_queries = expanded_queries[:5]
+        
         all_results = []
-        seen_texts = set()  # For deduplication
+        seen_ids = set()
         
-        for i, exp_query in enumerate(expanded_queries):
-            # Fetch more results to allow for boosting (especially for specific names/titles)
-            search_limit = max(50, top_k * 5)
-            results = self.vector_store.search(exp_query, top_k=search_limit, collection_id=collection_id_str)
-            
-            if i == 0:
-                logger.info(f"[RAG RETRIEVE] Original query returned {len(results)} results")
-            else:
-                logger.debug(f"[RAG RETRIEVE] Expanded query '{exp_query}' returned {len(results)} results")
+        for q in expanded_queries:
+            # We fetch more results than needed to allow for reranking
+            # IMPORTANT: Reverting to non-filtered vector search if filtered search fails/timeouts
+            # Or just doing Python-side filtering for robustness (since it worked before)
+            try:
+                # First try with basic collection filter only (lightest)
+                results = self.vector_store.search(
+                    q, 
+                    top_k=search_top_k * 2, 
+                    collection_id=collection_id_str
+                )
+            except Exception as e:
+                logger.warning(f"[RAG SEARCH] Filtered search failed: {e}. Falling back to raw search.")
+                results = self.vector_store.search(q, top_k=search_top_k * 4)
             
             for r in results:
                 payload = r.get("payload", {})
-                text = payload.get("text", "")
                 
-                # Deduplicate by text content
-                text_hash = hash(text[:200]) if text else hash("")
-                if text_hash in seen_texts:
-                    continue
-                seen_texts.add(text_hash)
+                # Precise Python-side collection filtering for safety
+                if collection_id_str:
+                    p_coll = payload.get("collection_id")
+                    if not p_coll or str(p_coll) != str(collection_id_str):
+                        continue
+
+                # Deduplicate by ID if available, otherwise by text hash
+                res_id = r.get("id") or hash(payload.get("text", ""))
                 
-                # Store original vector score for hybrid fusion
-                vector_score = r.get("score", 0)
-                r["vector_score"] = vector_score
-                r["original_score"] = vector_score
-                all_results.append(r)
-        
-        logger.info(f"[RAG RETRIEVE] Total unique results: {len(all_results)}")
-        
-        # ============================================
-        # [PURE VECTOR SEARCH - Enhanced Name Boosting]
-        # ============================================
-        
-        # Use pure vector scores from Qdrant as baseline
-        for r in all_results:
-            payload = r.get("payload", {})
-            text = payload.get("text", "")
-            vector_score = r.get("vector_score", r.get("score", 0))
-            
-            # Start with pure vector score
-            final_score = vector_score
-            
-            # Apply enhanced boosting for name/title queries
-            if search_term:
-                text_lower = text.lower()
-                term_lower = search_term.lower()
-                
-                # 1. Exact Full Match (Highest Priority)
-                # Matches "John Doe" in "John Doe is the CEO..."
-                if term_lower in text_lower:
-                    # Give a significant boost for exact matches
-                    # But don't exceed 1.0
-                    final_score = max(final_score, 0.90)
-                
-                # 2. Key Term Presence (High Priority)
-                search_parts = term_lower.split()
-                excluded_words = {"who", "is", "about", "the", "and", "for", "with", "from", "staff", "directory", "contact"}
-                meaningful_parts = [p for p in search_parts if len(p) > 2 and p not in excluded_words]
-                
-                if meaningful_parts:
-                    matches = [p for p in meaningful_parts if p in text_lower]
-                    match_ratio = len(matches) / len(meaningful_parts) if meaningful_parts else 0
+                if res_id not in seen_ids:
+                    seen_ids.add(res_id)
+                    all_results.append(r)
                     
-                    if match_ratio >= 1.0:
-                        # Mentioned all words (e.g., both "John" and "Doe") but not necessarily together
-                        final_score = max(final_score, 0.82)
-                    elif match_ratio >= 0.5:
-                        # Mentioned most words
-                        final_score = max(final_score, 0.70)
-                    elif matches:
-                        # Mentioned at least one word
-                        final_score = max(final_score, 0.60)
-            
-            # Store final score and metadata
-            r["score"] = final_score
-            r["keyword_score"] = 0.0
-            r["fuzzy_score"] = 0.0
-            r["fusion_method"] = "vector_only_with_name_boost"
+        logger.info(f"[RAG RETRIEVE] Retrieved {len(all_results)} raw results after Python filtering")
+
+        # Step 5: Rerank Results
+        # Reranking logic is already robust (handles missing metadata)
+        reranked_results = rerank_results(
+            all_results, 
+            query, 
+            query_classification, 
+            person_detection,
+            query_org=prior_context.get("scope") if prior_context else None,
+            rag_state=rag_state,  # Pass the locked org state
+            embeddings_model=self.vector_store.embeddings if self.vector_store else None # FIX 16
+        )
         
-        # Log scoring summary
-        if all_results:
-            top_result = max(all_results, key=lambda x: x.get("score", 0))
-            logger.info(f"[VECTOR SEARCH] Top result: score={top_result.get('score', 0):.4f}, Boosted: {search_term is not None}")
+        # Step 6: Filter by Score & Final Top-K
+        final_results = []
+        for r in reranked_results:
+            if r["score"] >= min_score:
+                final_results.append(r)
+                
+        # Hard limit - use search_top_k for leadership and factual to get more comprehensive results
+        # This ensures all potential features/details are included
+        query_type = query_classification.get("query_type")
+        final_top_k = search_top_k if query_type in ["leadership_list", "factual"] else top_k
+        final_results = final_results[:final_top_k]
         
-        # ============================================
-        # [END VECTOR SEARCH]
-        # ============================================
-        
-        # Filter by minimum similarity score (after hybrid fusion, before sorting)
-        # Use configurable RAG_MIN_SCORE from settings (default: 0.35)
-        min_score = getattr(settings, "RAG_MIN_SCORE", 0.25)
-        pre_filter_count = len(all_results)
-        all_results = [r for r in all_results if r.get("score", 0) >= min_score]
-        filtered_by_score = pre_filter_count - len(all_results)
-        if filtered_by_score > 0:
-            logger.info(f"[RAG RETRIEVE] Filtered {filtered_by_score} chunks below MIN_SCORE={min_score}")
-        
-        # Filter by collection_id BEFORE sort and top_k (Bug Fix #2)
-        if collection_id is not None:
-            filtered_results = []
-            filtered_count = 0
-            for r in all_results:
-                payload = r.get("payload", {})
-                payload_collection_id = payload.get("collection_id")
-                if payload_collection_id is None or str(payload_collection_id) != str(collection_id):
-                    filtered_count += 1
-                    continue
-                filtered_results.append(r)
-            all_results = filtered_results
-            if filtered_count > 0:
-                logger.info(f"[RAG RETRIEVE] Filtered {filtered_count} chunks due to collection_id mismatch")
-        
-        # GLOBAL sort by boosted scores
-        all_results.sort(key=lambda x: x.get("score", 0), reverse=True)
-        # HARD top_k limit - no exceptions (Bug Fix #2)
-        results = all_results[:top_k]
-        logger.info(f"[RAG RETRIEVE] Final result count after hard top_k={top_k}: {len(results)}")
-        
+        logger.info(f"[RAG FINAL] Selected {len(final_results)} chunks after reranking (Top-K: {final_top_k})")
+        if final_results:
+             logger.info(f"[RAG SCORE] Top score: {final_results[0]['score']:.4f}")
+             
+        # Format for return
         chunks_with_sources = []
-        for r in results:
+        for r in final_results:
             payload = r.get("payload", {})
             score = r.get("score", 0)
             
+            # REQUIREMENT: If it can't be downloaded or visited, don't show (and don't give to LLM)
+            file_id = payload.get("file_id", "")
+            url = payload.get("url", "") or payload.get("canonical_url", "")
+            
+            if not file_id and not url:
+                logger.warning(f"[RAG RETRIEVE] Skipping chunk with no file_id or url to prevent 'Unknown File' sources.")
+                continue
+
+            # Improved filename fallback
+            file_name = payload.get("file_name")
+            if not file_name or file_name == "Unknown File":
+                file_name = payload.get("title") or payload.get("page_title")
+                if not file_name and url:
+                    # Clean fallback from URL
+                    file_name = url.split('/')[-1] or url
+                if not file_name:
+                    file_name = "Relevant Document"
+            
             chunks_with_sources.append({
                 "text": payload.get("text", ""),
-                "file_name": payload.get("file_name", "Unknown File"),
-                "file_id": payload.get("file_id", ""),
+                "file_name": file_name,
+                "file_id": file_id,
                 "chunk_index": payload.get("chunk_index", 0),
                 "source_type": payload.get("source_type", "file"),
-                "url": payload.get("url", ""),
-                "canonical_url": payload.get("canonical_url", ""),
+                "url": url,
+                "canonical_url": url,
                 "score": score,
-                # Hybrid search metadata for debugging
+                "payload": payload, # Pass full payload for formatting later
+                # Analysis metadata
                 "metadata": {
-                    "vector_score": r.get("vector_score", score),
-                    "keyword_score": r.get("keyword_score", 0.0),
-                    "fuzzy_score": r.get("fuzzy_score", 0.0),
-                    "fusion_method": r.get("fusion_method", "vector_only")
+                    "vector_score": r.get("original_score", 0),
+                    "boost_factor": r.get("boost_factor", 1.0),
+                    "query_type": query_classification["query_type"],
+                    "person_detected": r.get("person_detected"),
+                    "leadership_detected": r.get("leadership_detected"),
+                    "person_presence": r.get("person_presence")
                 }
             })
         
+        if request_cache is not None:
+             request_cache[cache_key] = chunks_with_sources
+
+        # --- CACHE SET (Retrieval) ---
+        if not chunks_with_sources:
+             cache.set_retrieval(cache_key, []) # Cache empty result (Short Term)
+        else:
+             cache.set_retrieval(cache_key, chunks_with_sources)
+
         return chunks_with_sources
 
     # ------------------------------------------------------------------
     # Follow-up Question Detection and Generation
     # ------------------------------------------------------------------
     
-    def needs_followup(self, question: str, chunks: list, threshold: float = None) -> Tuple[bool, str]:
+    def needs_followup(
+        self,
+        query: str,
+        chunks: List[Dict],
+        conversation_history: Optional[List[Dict]] = None,
+        query_classification: Optional[Dict] = None,
+        person_detection: Optional[Dict] = None,
+        conversation_state: Optional[Dict] = None # New Arg
+    ) -> Dict[str, Any]:
         """
-        Determine if a follow-up question should be asked instead of answering.
-        
-        IMPORTANT: Only ask follow-up when clarification could actually help.
-        Do NOT ask follow-up when:
-        - Knowledge base simply doesn't have the information (no chunks = no data)
-        - Query is clear but scores are low (just answer with available info)
-        
-        Only ask follow-up when:
-        - Query uses vague pronouns (it, this, that) without context
-        - Query is genuinely ambiguous and chunks exist that MIGHT be relevant
-        - Missing critical domain context that user could provide
-        
-        Returns:
-            tuple: (needs_followup: bool, reason: str)
-            Reasons: "ambiguous_phrasing", "vague_pronoun", "missing_context", "confident"
+        Determine if the chatbot should ask a clarifying question.
+        Returns a dict with 'needs_followup' (bool) and 'reason' (str).
         """
-        # Use configurable RAG_MIN_SCORE from settings if threshold not provided
-        if threshold is None:
-            threshold = getattr(settings, "RAG_MIN_SCORE", 0.25)
+        # ─────────────────────────────────────────────────────────
+        # FIX 6: STATE-BASED GATING (The "Hard Rule")
+        # ─────────────────────────────────────────────────────────
+        if conversation_state:
+            # If we already resolved the Entity or have a strong Scope + Last Intent
+            if conversation_state.get("active_entity") or (conversation_state.get("scope") and conversation_state.get("last_intent")):
+                logger.info(f"[FOLLOWUP] Gating disabled due to resolved state: {conversation_state}")
+                # We FORCE false, effectively trusting the RAG pipeline to have found the right chunks
+                return {
+                    "needs_followup": False,
+                    "reason": "state_resolved",
+                    "confidence": 1.0,
+                    "suggested_topics": [],
+                    "missing_context": []
+                }
+
+        # ─────────────────────────────────────────────────────────
+        # RULE 0: Basic Validity Checks
+        # ─────────────────────────────────────────────────────────
         
-        if not question:
-            return True, "empty_question"
+        # FIX 3: LEADERSHIP/EXECUTIVE INTENTS ARE COMPLETE
+        kw = query.lower()
+        # If query contains leadership keywords, it's specific enough
+        if "director" in kw or "leadership" in kw or "executive" in kw or "management team" in kw or (query_classification and query_classification.get("query_type") == "leadership_list"):
+             return {
+                "needs_followup": False,
+                "reason": "leadership_intent_complete",
+                "confidence": 1.0,
+                "suggested_topics": [],
+                "missing_context": []
+            }
+        result = {
+            "needs_followup": False,
+            "reason": None,
+            "confidence": 0.0,
+            "suggested_topics": [],
+            "missing_context": []
+        }
         
-        normalized = question.strip().lower()
+        if not query:
+            return result
+
+        # use normalized query for consistency
+        try:
+             normalized_query = normalize_text(query)
+             query_lower = normalized_query # normalize_text already lowercases
+        except Exception:
+             normalized_query = query.lower().strip()
+             query_lower = normalized_query
         
-        # =============================================================
-        # CRITICAL: Do NOT ask follow-up for "no data" situations
-        # =============================================================
-        # If no chunks found OR low scores, the KB doesn't have the info.
-        # Asking for clarification won't help - just answer with what we have
-        # (or say "I don't have information")
+        # ─────────────────────────────────────────────────────────
+        # NEW RULE: DIRECT ANSWER INTENT DETECTION
+        # ─────────────────────────────────────────────────────────
         
-        # 1. No chunks = KB doesn't have data, skip follow-up
-        if not chunks or len(chunks) == 0:
-            logger.info(f"[FOLLOWUP] Skipping: no_relevant_chunks - KB has no data, will respond directly")
-            return False, "confident"  # Let answer() handle the "no info" response
-        
-        # 2. Low scores with a CLEAR query = KB doesn't have good matches
-        #    Only consider follow-up if query itself is ambiguous
-        top_score = chunks[0].get("score", 0) if chunks else 0
-        query_is_clear = self._is_clear_query(question)
-        
-        if top_score < threshold and query_is_clear:
-            logger.info(f"[FOLLOWUP] Skipping: low_score ({top_score:.4f}) but query is clear - will answer with available info")
-            return False, "confident"  # Answer with available chunks or say "no info"
-        
-        # =============================================================
-        # Only ask follow-up for GENUINELY AMBIGUOUS queries
-        # =============================================================
-        
-        # 3. Vague pronouns WITHOUT context (these genuinely need clarification)
-        vague_patterns = [
-            r"^(?:what|how|why|when|where)\s+(?:is|are|was|were|does|do|did)\s+(?:it|this|that|these|those)\??$",
-            r"^(?:explain|describe|tell me about)\s+(?:it|this|that|these|those)\??$",
-            r"^(?:it|this|that)\s+(?:is|was|does|did|has|have)\s+\w+\??$",
+        # Detect frustration signals - user wants direct answer NOW
+        frustration_signals = [
+            "just", "please", "simply", "only", "i said", "i asked",
+            "stop asking", "enough", "already told you"
         ]
-        for pattern in vague_patterns:
-            if re.match(pattern, normalized):
-                logger.info(f"[FOLLOWUP] Triggered: vague_pronoun for query: {question[:50]}")
-                return True, "vague_pronoun"
+        has_frustration = any(signal in query_lower for signal in frustration_signals)
         
-        # 4. Ambiguous phrases that genuinely need clarification
-        #    BUT only if we have SOME context to clarify against
-        if top_score >= 0.25:
+        # Detect summary/overview requests - these should get direct answers
+        summary_requests = [
+            "summary", "summarize", "overview", "brief", "tell me about",
+            "what is", "what are", "describe", "explain", "introduction"
+        ]
+        has_summary_request = any(req in query_lower for req in summary_requests)
+        
+        # Detect direct informational intent
+        direct_info_patterns = [
+            r"^(tell me about|what is|what are|describe|explain)\s+\w+",
+            r"(brief|quick|short)\s+(summary|overview|description|intro)",
+            r"(give me|show me|provide)\s+(a|an|the)?\s*(summary|overview|info|information|details)"
+        ]
+        has_direct_intent = any(re.search(pattern, query_lower) for pattern in direct_info_patterns)
+        
+        # If user shows frustration OR explicitly requests summary/overview, skip follow-up
+        if has_frustration or has_summary_request or has_direct_intent:
+            # Additional check: do we have any chunks at all?
+            if chunks and len(chunks) > 0:
+                logger.info(f"[FOLLOWUP] Direct answer intent detected. Skipping follow-up. (frustration={has_frustration}, summary={has_summary_request}, direct={has_direct_intent})")
+                return {
+                    "needs_followup": False,
+                    "reason": "direct_answer_intent",
+                    "confidence": 1.0,
+                    "suggested_topics": [],
+                    "missing_context": []
+                }
+        
+        # ─────────────────────────────────────────────────────────
+        # NEW RULE: FACTUAL QUERY WITH GOOD CHUNKS
+        # ─────────────────────────────────────────────────────────
+        
+        # If it's a factual query and we have decent chunks, trust the RAG pipeline
+        if query_classification and query_classification.get("query_type") == "factual":
+            if chunks and len(chunks) > 0:
+                max_score = max(c.get("score", 0) for c in chunks)
+                # If we have at least one chunk with decent score, provide answer
+                if max_score >= 0.20:
+                    logger.info(f"[FOLLOWUP] Factual query with good chunks (max_score={max_score:.2f}). Skipping follow-up.")
+                    return {
+                        "needs_followup": False,
+                        "reason": "factual_with_context",
+                        "confidence": 0.9,
+                        "suggested_topics": [],
+                        "missing_context": []
+                    }
+        
+        # ─────────────────────────────────────────────────────────
+        # NEW RULE: FOLLOW-UP FATIGUE DETECTION
+        # ─────────────────────────────────────────────────────────
+        
+        # Count how many follow-up questions we've already asked in this conversation
+        if conversation_history:
+            followup_count = 0
+            for msg in conversation_history:
+                # Handle both dict and Pydantic models
+                role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", "user")
+                content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
+                
+                # Check if assistant message contains multiple questions (likely a follow-up)
+                if role == "assistant" and content.count("?") >= 2:
+                    followup_count += 1
+            
+            # If we've asked 2+ follow-ups already, stop and provide best-effort answer
+            if followup_count >= 2 and chunks and len(chunks) > 0:
+                logger.info(f"[FOLLOWUP] Follow-up fatigue detected ({followup_count} previous follow-ups). Providing direct answer.")
+                return {
+                    "needs_followup": False,
+                    "reason": "followup_fatigue",
+                    "confidence": 0.8,
+                    "suggested_topics": [],
+                    "missing_context": []
+                }
+        
+        # ─────────────────────────────────────────────────────────
+        # RULE 1: Check conversation context for unresolved references
+        # ─────────────────────────────────────────────────────────
+        
+        has_conversation = conversation_history and len(conversation_history) > 0
+        
+        # Pronouns without clear antecedent
+        vague_pronouns = ["it", "this", "that", "these", "those", "them", "they"]
+        
+        # Improved regex-based detection
+        contains_pronoun = any(re.search(rf"\b{p}\b", normalized_query) for p in vague_pronouns)
+        starts_with_pronoun = any(normalized_query.startswith(p + " ") or normalized_query == p for p in vague_pronouns)
+        
+        if contains_pronoun or starts_with_pronoun:
+            # Check if conversation history provides context
+            if not has_conversation or len(conversation_history) < 2:
+                result.update({
+                    "needs_followup": True,
+                    "reason": "vague_pronoun_no_context",
+                    "confidence": 0.9,
+                    "missing_context": ["Hai!/n/What specific topic are you asking about?"]
+                })
+                # Placeholder for metric logging
+                logger.info("[FOLLOWUP_METRIC] Triggered: vague_pronoun_no_context", extra={"query": query})
+                return result
+            
+            # If conversation exists, check if pronoun reference is clear
+            last_exchange = conversation_history[-2:]  # Last Q&A
+            last_topics = extract_topics_from_history(last_exchange)
+            
+            if not last_topics:
+                result.update({
+                    "needs_followup": True,
+                    "reason": "unclear_pronoun_reference",
+                    "confidence": 0.8,
+                    "missing_context": ["Which topic from our conversation are you referring to?"]
+                })
+                logger.info("[FOLLOWUP_METRIC] Triggered: unclear_pronoun_reference", extra={"query": query})
+                return result
+        
+        # ─────────────────────────────────────────────────────────
+        # RULE 2: Detect incomplete or fragmented queries
+        # BUT: Skip if we have context with an active entity
+        # ─────────────────────────────────────────────────────────
+        
+        # Check if we have conversation state with an active entity
+        has_context_entity = False
+        active_entity = None
+        if conversation_state:
+            active_entity = conversation_state.get('active_entity')
+            has_context_entity = bool(active_entity)
+        
+        # Contextual/affirmative responses that should use existing context
+        contextual_patterns = [
+            r"^yes\b",
+            r"^yeah\b", 
+            r"^yep\b",
+            r"^sure\b",
+            r"^okay\b",
+            r"^ok\b",
+            r"\b(about|regarding|concerning)\s+(its|their|the)\s+\w+",
+            r"\b(features|details|information|more|pricing|benefits|capabilities)\b"
+        ]
+        
+        # If query matches contextual patterns AND we have an active entity, skip follow-up
+        if has_context_entity:
+            for pattern in contextual_patterns:
+                if re.search(pattern, query_lower, re.IGNORECASE):
+                    logger.info(f"[FOLLOWUP] Skipping: contextual response with active entity '{active_entity}'")
+                    return {
+                        "needs_followup": False,
+                        "reason": "context_entity_exists",
+                        "confidence": 1.0,
+                        "suggested_topics": [],
+                        "missing_context": []
+                    }
+        
+        # Original incomplete query patterns (only trigger if NO context entity)
+        incomplete_patterns = [
+            r"^(what about|how about|and)\s",  # "what about...", "and..."
+            r"^(more|else|also)\s",             # "more on...", "also..."
+            r"^(the|a)\s\w+\s*$",               # Just "the thing" with no verb
+            r"^\w+\s*\?*$"                      # Single word queries
+        ]
+        
+        for pattern in incomplete_patterns:
+            if re.match(pattern, query_lower):
+                # Only trigger if NO context entity exists
+                if not has_context_entity:
+                    result.update({
+                        "needs_followup": True,
+                        "reason": "incomplete_query",
+                        "confidence": 0.85,
+                        "missing_context": ["Could you provide more details about what you'd like to know?"]
+                    })
+                    logger.info("[FOLLOWUP_METRIC] Triggered: incomplete_query", extra={"query": query})
+                    return result
+                else:
+                    logger.info(f"[FOLLOWUP] Skipping incomplete_query: has context entity '{active_entity}'")
+
+        
+        # ─────────────────────────────────────────────────────────
+        # RULE 3: No chunks found - check if query is valid
+        # ─────────────────────────────────────────────────────────
+        
+        if not chunks or len(chunks) == 0:
+            # If it's a person query but no people found
+            if person_detection and person_detection.get("is_person_query"):
+                person_name = person_detection.get("person_name")
+                role_title = person_detection.get("role_title")
+                
+                if person_name:
+                    result.update({
+                        "needs_followup": True,
+                        "reason": "person_not_found",
+                        "confidence": 0.7,
+                        "missing_context": [
+                            f"I couldn't find information about '{person_name}' in our knowledge base.",
+                            "Could you verify the name spelling or provide their role/department?"
+                        ]
+                    })
+                    return result
+                
+                if role_title:
+                    result.update({
+                        "needs_followup": True,
+                        "reason": "role_not_found",
+                        "confidence": 0.7,
+                        "missing_context": [
+                            f"I couldn't find who holds the '{role_title}' position.",
+                            "Could you provide more context or check the title?"
+                        ]
+                    })
+                    return result
+            
+            # General query with no results - query might be too vague
+            if len(query.split()) < 3:
+                result.update({
+                    "needs_followup": True,
+                    "reason": "query_too_vague_no_results",
+                    "confidence": 0.75,
+                    "missing_context": ["Could you provide more specific details about what you're looking for?"]
+                })
+                return result
+            
+            # Don't trigger follow-up - let it generate "not found" answer
+            return result
+        
+        # ─────────────────────────────────────────────────────────
+        # RULE 4: Low relevance scores (existing logic enhanced)
+        # ─────────────────────────────────────────────────────────
+        
+        avg_score = sum(c.get("score", 0) for c in chunks) / len(chunks)
+        max_score = max(c.get("score", 0) for c in chunks)
+        
+        # Adjust threshold based on query type (Change 1: leadership uses lower bar)
+        min_score_threshold = getattr(settings, "RAG_MIN_SCORE", 0.35)
+        
+        if query_classification:
+            qtype = query_classification.get("query_type")
+            if qtype == "factual":
+                min_score_threshold = 0.40  # Higher bar for factual
+            elif qtype == "exploratory":
+                min_score_threshold = 0.25  # Lower bar for exploratory
+            elif qtype == "leadership_list":
+                min_score_threshold = getattr(settings, "RAG_LEADERSHIP_MIN_SCORE", LEADERSHIP_MIN_SCORE)  # 0.15
+        
+        if max_score < min_score_threshold:
+            # Low scores + ambiguous query = follow-up needed
             ambiguous_phrases = [
-                "tell me more",
-                "explain this",
-                "can you elaborate",
-                "explain that",
-                "tell me about it",
-                "what does it mean",
-                "what is it",
-                "what are they",
+                "tell me more", "explain", "elaborate", "details",
+                "information about", "anything", "something"
             ]
-            for phrase in ambiguous_phrases:
-                if phrase in normalized:
-                    # Check if it's JUST the phrase
-                    if normalized == phrase or normalized == phrase + "?":
-                        logger.info(f"[FOLLOWUP] Triggered: ambiguous_phrasing ('{phrase}') for query: {question[:50]}")
-                        return True, "ambiguous_phrasing"
+            
+            is_ambiguous = any(phrase in query_lower for phrase in ambiguous_phrases)
+            
+            if is_ambiguous:
+                # Extract topics from low-scoring chunks for suggestions
+                topics = extract_available_topics(chunks[:5])
+                
+                result.update({
+                    "needs_followup": True,
+                    "reason": "low_relevance_ambiguous",
+                    "confidence": 0.7,
+                    "suggested_topics": topics[:3],  # Top 3 related topics
+                    "missing_context": ["Your question is quite broad. What specific aspect are you interested in?"]
+                })
+                logger.info("[FOLLOWUP_METRIC] Triggered: low_relevance_ambiguous", extra={"query": query})
+                return result
         
-        # 5. Missing critical domain context (only if chunks exist and logic suggests it)
-        if top_score >= 0.30 and self._missing_critical_context(question):
-            logger.info(f"[FOLLOWUP] Triggered: missing_context for query: {question[:50]}")
-            return True, "missing_context"
+        # ─────────────────────────────────────────────────────────
+        # RULE 5: Multi-part or compound questions
+        # ─────────────────────────────────────────────────────────
         
-        # 6. Low score with SOME potential (Top score is low but query isn't generic)
-        if 0.15 <= top_score < threshold and not self._is_small_talk(question):
-             # If it's not small talk but score is very low, maybe a clarify would help
-             # BUT only if query is reasonably long (meaning user is trying to say something)
-             if len(normalized.split()) >= 3:
-                 logger.info(f"[FOLLOWUP] Triggered: low_relevance_score ({top_score:.4f}) for query: {question[:50]}")
-                 return True, "low_relevance_score"
+        # Detect questions with multiple parts
+        question_markers = query_lower.count("?")
+        and_or_markers = query_lower.count(" and ") + query_lower.count(" or ")
         
-        # All checks passed - confident to answer
-        return False, "confident"
+        if question_markers > 1 or (question_markers == 1 and and_or_markers >= 2):
+            result.update({
+                "needs_followup": True,
+                "reason": "multi_part_question",
+                "confidence": 0.65,
+                "missing_context": [
+                    "I notice you're asking about multiple things.",
+                    "Which aspect would you like me to focus on first?"
+                ]
+            })
+            return result
+        
+        # ─────────────────────────────────────────────────────────
+        # RULE 6: Context-dependent queries that need clarification
+        # ─────────────────────────────────────────────────────────
+        
+        # Check if query mentions concepts that require additional context
+        if query_classification and query_classification.get("query_type") == "procedural":
+            # "How to" questions missing important context
+            procedural_keywords = ["configure", "setup", "install", "implement"]
+            has_procedural_keyword = any(kw in query_lower for kw in procedural_keywords)
+            
+            if has_procedural_keyword:
+                # Check if critical context is missing (platform, version, environment)
+                context_markers = ["windows", "linux", "mac", "version", "environment", "production", "development"]
+                has_context = any(marker in query_lower for marker in context_markers)
+                
+                if not has_context and avg_score < 0.5:
+                    result.update({
+                        "needs_followup": True,
+                        "reason": "procedural_missing_context",
+                        "confidence": 0.6,
+                        "missing_context": [
+                            "To provide accurate setup instructions, I need more details.",
+                            "What platform/environment are you working with?"
+                        ]
+                    })
+                    return result
+        
+        # ─────────────────────────────────────────────────────────
+        # RULE 7: Domain-specific context requirements (P0 FIX)
+        # ─────────────────────────────────────────────────────────
+        
+        # Check if chunks mention specific domains that need context
+        chunk_texts = " ".join([c.get("payload", {}).get("text", "") for c in chunks[:3]])
+        
+        # Domain-specific patterns that often need clarification
+        # FIX: "role" keyword made more specific to avoid false positives
+        domain_patterns = {
+            "version": ["Which version are you using?", "Version-specific details might apply."],
+            "plan": ["Which plan or tier are you on?", "Features vary by plan."],
+            "depends on your role": ["What's your role or permission level?", "Access might differ by role."]
+        }
+        
+        for keyword, questions in domain_patterns.items():
+            if keyword in chunk_texts.lower() and keyword not in query_lower:
+                # P0 FIX: Difference between missing context (FOLLOWUP) and domain mismatch (PARTIAL)
+                # If intent is exploratory/overview OR FACTUAL, prefer PARTIAL answer
+                # Added "factual" to allow general questions like "Tell me about X" to proceed even if roles are mentioned
+                if query_classification and query_classification.get("query_type") in ["exploratory", "overview", "history", "factual"]:
+                    logger.info(f"[FOLLOWUP] Domain mismatch detected ({keyword}) but intent is {query_classification.get('query_type')}. Switching to PARTIAL_TRANSPARENT.")
+                    return {
+                        "needs_followup": False,
+                        "reason": "domain_mismatch_partial",
+                        "confidence": 0.0,
+                        "missing_context": []
+                    }
+                
+                # Otherwise, strict follow-up for procedural/specific queries
+                result.update({
+                    "needs_followup": True,
+                    "reason": f"missing_{keyword.split(' ')[-1]}_context", # Use last word for reason key
+                    "confidence": 0.55,
+                    "missing_context": questions
+                })
+                return result
+        
+        # ─────────────────────────────────────────────────────────
+        # RULE 8: Clear Query Override (P2 FIX)
+        # ─────────────────────────────────────────────────────────
+        if self._is_clear_query(query) and chunks and len(chunks) > 0:
+            # If we have a clear query and chunks, avoid nitpicking follow-ups
+            # (Unless explicitly caught by above strict rules)
+            current_max = max(c.get("score", 0) for c in chunks)
+            if current_max > 0.45:
+                logger.info("[FOLLOWUP] Query is clear and has relevant chunks. Skipping verification.")
+                result["needs_followup"] = False
+                result["reason"] = "confident"
+                return result
+        
+        # ─────────────────────────────────────────────────────────
+        # No follow-up needed
+        # ─────────────────────────────────────────────────────────
+        
+        result["reason"] = "confident"
+        return result
 
     def _is_clear_query(self, question: str) -> bool:
         """
@@ -621,7 +2820,7 @@ class RAG:
         
         return False
 
-    def generate_followup_questions(self, question: str, chunks: list, reason: str) -> str:
+    def _generate_followup_questions_deprecated(self, question: str, chunks: list, reason: str) -> str:
         """
         Generate 1-2 specific clarifying questions using the AI model.
         
@@ -716,6 +2915,515 @@ Respond with ONLY the clarifying question(s), nothing else."""
         
         return fallbacks.get(reason, "Could you please clarify your question so I can better assist you?")
 
+    def generate_followup_questions(
+        self,
+        query: str,
+        followup_result: Dict,
+        chunks: List[Dict],
+        conversation_history: Optional[List[Dict]] = None
+    ) -> List[str]:
+        """
+        Generate intelligent, context-aware follow-up questions.
+        
+        Uses AI to generate specific, helpful questions based on:
+        - Why follow-up is needed (reason)
+        - Available content in KB (chunks)
+        - Conversation context
+        - Suggested topics
+        """
+        
+        reason = followup_result.get("reason")
+        suggested_topics = followup_result.get("suggested_topics", [])
+        missing_context = followup_result.get("missing_context", [])
+        
+        # ─────────────────────────────────────────────────────────
+        # Build context for AI
+        # ─────────────────────────────────────────────────────────
+        
+        context_for_ai = f"User query: {query}\n\n"
+        context_for_ai += f"Follow-up reason: {reason}\n\n"
+        
+        # Add available topics from KB
+        if suggested_topics:
+            context_for_ai += f"Related topics in knowledge base: {', '.join(suggested_topics)}\n\n"
+        
+        # Add snippet of available content
+        if chunks:
+            context_for_ai += "Available information includes:\n"
+            for i, chunk in enumerate(chunks[:3], 1):
+                text_preview = chunk.get("payload", {}).get("text", "")[:200]
+                context_for_ai += f"{i}. {text_preview}...\n"
+            context_for_ai += "\n"
+        
+        # Add conversation context if available
+        if conversation_history and len(conversation_history) > 0:
+            context_for_ai += "Recent conversation:\n"
+            for msg in conversation_history[-4:]:  # Last 2 exchanges
+                # Handle both dict and Pydantic models
+                role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", "user")
+                content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
+                
+                context_for_ai += f"{role.capitalize()}: {content[:150]}\n"
+            context_for_ai += "\n"
+        
+        # ─────────────────────────────────────────────────────────
+        # Build AI prompt based on reason
+        # ─────────────────────────────────────────────────────────
+        
+        prompts_by_reason = {
+            "vague_pronoun_no_context": """
+The user used a pronoun ('it', 'this', 'that') but there's no clear context about what they're referring to.
+
+Generate 2 clarifying questions that:
+1. Ask what specific topic/item they're referring to
+2. Suggest possible topics from the knowledge base if available
+
+Keep questions friendly and helpful.
+""",
+            
+            "unclear_pronoun_reference": """
+The user used a pronoun, but it's unclear which topic from our conversation they mean.
+
+Generate 2 questions that:
+1. Ask which specific aspect of the previous discussion they want to know about
+2. List possible topics they might be referring to
+
+Reference the recent conversation context.
+""",
+            
+            "incomplete_query": """
+The user's query is incomplete or fragmented (e.g., just "what about...", "and...").
+
+Generate 2 questions that:
+1. Ask them to complete their thought
+2. Suggest what additional information would be helpful
+
+Be encouraging and guide them to ask a complete question.
+""",
+            
+            "person_not_found": """
+The user asked about a person who is not in our knowledge base.
+
+Generate 2 questions that:
+1. Politely confirm the person's name spelling
+2. Ask if they know the person's role, department, or any other identifying information
+
+Be helpful and suggest alternative ways to find the person.
+""",
+            
+            "role_not_found": """
+The user asked about a role/position that we couldn't find.
+
+Generate 2 questions that:
+1. Ask them to clarify or rephrase the role/title
+2. Suggest they might provide department or team name
+
+Offer to help find the person another way.
+""",
+            
+            "query_too_vague_no_results": """
+The user's query is very short and vague, and we found no relevant results.
+
+Generate 2 questions that:
+1. Ask for more specific details about what they're looking for
+2. Suggest they might rephrase with more keywords
+
+Provide guidance on how to ask better questions.
+""",
+            
+            "low_relevance_ambiguous": """
+The user's query is broad/ambiguous and we only found low-relevance results.
+
+Generate 2 questions that:
+1. Ask what specific aspect they're interested in
+2. Offer the suggested related topics as options: {topics}
+
+Help narrow down their question to something we can answer well.
+""",
+            
+            "multi_part_question": """
+The user asked multiple questions at once.
+
+Generate 2 questions that:
+1. Acknowledge they asked about multiple things
+2. Ask which aspect they'd like answered first
+3. Optionally list the different parts we detected
+
+Be organized and help them break down their question.
+""",
+            
+            "procedural_missing_context": """
+The user asked a "how-to" question but is missing important context (platform, version, environment).
+
+Generate 2 questions that:
+1. Ask for the missing context (which platform/version/environment)
+2. Explain why this context matters for accurate instructions
+
+Be professional and helpful.
+""",
+            
+            "missing_version_context": """
+The content mentions version-specific information, but the user didn't specify a version.
+
+Generate 2 questions that:
+1. Ask which version they're using
+2. Explain that the answer may vary by version
+
+Provide helpful context.
+"""
+        }
+        
+        # Get prompt template for this reason, or use default
+        prompt_template = prompts_by_reason.get(reason, """
+The user's query needs clarification.
+
+Generate 2 helpful questions that:
+1. Address the specific issue: {reason}
+2. Guide them toward providing the missing information
+
+Be helpful and specific.
+""")
+        
+        # Replace placeholders
+        if "{topics}" in prompt_template and suggested_topics:
+            topics_str = ", ".join(suggested_topics[:5])
+            prompt_template = prompt_template.replace("{topics}", topics_str)
+        
+        prompt_template = prompt_template.replace("{reason}", reason or "unclear query")
+        
+        # ─────────────────────────────────────────────────────────
+        # Call AI to generate questions
+        # ─────────────────────────────────────────────────────────
+        
+        full_prompt = context_for_ai + prompt_template + """
+
+Generate exactly 2 clarifying questions. Format:
+1. [First question]
+2. [Second question]
+
+Questions should be:
+- Specific to the situation
+- Helpful and actionable
+- Friendly and professional
+- Concise (one sentence each)
+"""
+        
+        try:
+            # Call existing AI function
+            followup_text, _ = self.call_ai(
+                prompt=full_prompt,
+                max_tokens=200,
+                temperature=0.7
+            )
+            
+            # Parse response
+            questions = []
+            
+            # Try to extract numbered questions
+            lines = followup_text.strip().split("\n")
+            for line in lines:
+                # Match "1. Question?" or "- Question?" patterns
+                match = re.match(r'^[\d\-\*\.]+\s*(.+)$', line.strip())
+                if match:
+                    question = match.group(1).strip()
+                    if question and len(question) > 10:
+                        questions.append(question)
+            
+            # If parsing failed, try splitting by punctuation
+            if not questions:
+                # Remove brackets [RESPONSE_TYPE...] first
+                cleaned = re.sub(r'\[RESPONSE_TYPE:\w+\]', '', followup_text)
+                sentences = re.split(r'[.!?]+', cleaned)
+                questions = [s.strip() + "?" for s in sentences if len(s.strip()) > 10]
+            
+            if questions and len(questions) >= 1:
+                logger.info(f"[FOLLOWUP] Generated questions: {len(questions)}")
+                return questions[:2]
+            
+        except Exception as e:
+            logger.warning(f"[FOLLOWUP] AI follow-up generation failed: {e}")
+        
+        # ─────────────────────────────────────────────────────────
+        # Fallback: Use template-based questions
+        # ─────────────────────────────────────────────────────────
+        
+        if missing_context:
+            # Use the pre-generated missing_context questions
+            return missing_context[:2]
+        
+        # Ultimate fallback
+        fallback_questions = [
+            "Could you provide more details about what you're looking for?",
+            "What specific aspect would you like to know more about?"
+        ]
+        
+        if suggested_topics:
+            fallback_questions[1] = f"Are you asking about: {', '.join(suggested_topics[:3])}?"
+        
+        return fallback_questions
+
+    # ------------------------------------------------------------------
+    # Post-Answer Suggestion Generation
+    # ------------------------------------------------------------------
+    
+    def generate_post_answer_suggestions(
+        self,
+        query: str,
+        answer: str,
+        chunks: List[Dict],
+        query_classification: Optional[Dict] = None,
+        conversation_state: Optional[Dict] = None
+    ) -> List[str]:
+        """
+        Generate 2-3 intelligent follow-up suggestions based on the answer given.
+        
+        Args:
+            query: Original user query
+            answer: The answer that was provided
+            chunks: Retrieved chunks used to generate the answer
+            query_classification: Classification info from the query
+            conversation_state: Current conversation state with active entity
+            
+        Returns:
+            List of 2-3 suggested follow-up questions
+        """
+        try:
+            # Extract key entities and topics from the answer and chunks
+            entities = []
+            topics = []
+            specific_items = []  # NEW: Extract specific product/module/feature names
+            
+            # Get active entity from conversation state
+            if conversation_state and conversation_state.get('active_entity'):
+                entity_data = conversation_state['active_entity']
+                if isinstance(entity_data, dict):
+                    entities.append(entity_data.get('person_name') or entity_data.get('name', ''))
+                else:
+                    entities.append(str(entity_data))
+            
+            # NEW: Extract specific items mentioned in the answer (product names, modules, features)
+            # Look for patterns like "**Module Name**" or capitalized terms
+            if answer:
+                # Extract bold headers (likely module/section names)
+                bold_items = re.findall(r'\*\*([A-Z][A-Za-z0-9\s\-]+)\*\*', answer)
+                specific_items.extend([item.strip() for item in bold_items if len(item) < 50])
+                
+                # Extract capitalized multi-word terms (likely product/feature names)
+                cap_terms = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b', answer)
+                specific_items.extend([term for term in cap_terms if len(term) > 3 and len(term) < 40])
+            
+            # Extract topics from chunk content
+            for chunk in chunks[:5]:  # Top 5 most relevant chunks
+                payload = chunk.get('payload', {})
+                content = payload.get('text', chunk.get('text', ''))
+                content_lower = content.lower()
+                
+                # Extract page title for entity context
+                page_title = payload.get('page_title', payload.get('file_name', ''))
+                if page_title and ' - ' in page_title:
+                    # Extract product/company from title
+                    parts = page_title.split(' - ')
+                    if len(parts) >= 2:
+                        specific_items.append(parts[0].strip())
+                
+                # Topic detection
+                if 'feature' in content_lower:
+                    topics.append('features')
+                if 'benefit' in content_lower or 'advantage' in content_lower:
+                    topics.append('benefits')
+                if 'pricing' in content_lower or 'cost' in content_lower or 'price' in content_lower:
+                    topics.append('pricing')
+                if 'integration' in content_lower or 'integrate' in content_lower:
+                    topics.append('integrations')
+                if 'support' in content_lower or 'help' in content_lower:
+                    topics.append('support')
+                if 'security' in content_lower:
+                    topics.append('security')
+                if 'compliance' in content_lower:
+                    topics.append('compliance')
+                if 'api' in content_lower:
+                    topics.append('API')
+                if 'demo' in content_lower or 'trial' in content_lower:
+                    topics.append('demo or trial')
+                if 'workflow' in content_lower or 'process' in content_lower:
+                    topics.append('workflows')
+                if 'report' in content_lower or 'analytics' in content_lower:
+                    topics.append('reporting')
+            
+            entities = list(set([e for e in entities if e]))[:2]  # Deduplicate and limit
+            topics = list(set(topics))[:6]
+            specific_items = list(set([s for s in specific_items if s]))[:5]  # Deduplicate
+            
+            # Build prompt for LLM to generate suggestions
+            answer_preview = answer[:800] + "..." if len(answer) > 800 else answer
+            
+            suggestion_prompt = f"""Based on the following Q&A, generate 2-3 highly specific follow-up questions.
+
+User's Question: {query}
+
+Answer Provided:
+{answer_preview}
+
+Specific Items Mentioned: {', '.join(specific_items) if specific_items else 'general content'}
+Available Topics: {', '.join(topics) if topics else 'general information'}
+Key Entities: {', '.join(entities) if entities else 'none'}
+
+Generate 2-3 natural follow-up questions that:
+1. Drill deeper into specific items/modules mentioned in the answer
+2. Explore UNCOVERED aspects (e.g., if features were explained, ask about pricing, integrations, or implementation)
+3. Are practical and actionable (e.g., "How do I get started with X?", "What are the requirements for Y?")
+4. If applicable, include a role-based question like "As a [role], how would I use..."
+
+Make questions SPECIFIC to the content, not generic.
+
+Format as JSON array:
+["Question 1?", "Question 2?", "Question 3?"]
+
+Only return the JSON array."""
+
+            # Call LLM to generate suggestions
+            response_text, _ = self.call_ai(
+                prompt=suggestion_prompt,
+                max_tokens=250,
+                temperature=0.7
+            )
+            
+            suggestions_text = response_text.strip()
+            
+            # Parse JSON response
+            import json
+            # Remove markdown code blocks if present
+            suggestions_text = suggestions_text.replace('```json', '').replace('```', '').strip()
+            
+            # Try to parse as JSON
+            try:
+                suggestions = json.loads(suggestions_text)
+            except json.JSONDecodeError:
+                # Fallback: Try to extract questions using regex
+                suggestions = re.findall(r'"([^"]+\?)"', suggestions_text)
+            
+            # Validate and limit to 3 suggestions
+            if isinstance(suggestions, list):
+                suggestions = [s for s in suggestions if isinstance(s, str) and len(s) > 10 and s.strip().endswith('?')][:5]  # Get up to 5 candidates
+                
+                if suggestions:
+                    # NEW: Validate each suggestion to ensure it can be answered
+                    validated_suggestions = []
+                    
+                    # Get collection name from chunks (if available)
+                    collection_name = None
+                    if chunks and len(chunks) > 0:
+                        # Try to extract collection from first chunk
+                        first_chunk = chunks[0]
+                        if 'collection' in first_chunk:
+                            collection_name = first_chunk['collection']
+                        elif 'payload' in first_chunk and 'collection' in first_chunk['payload']:
+                            collection_name = first_chunk['payload']['collection']
+                    
+                    # If no collection found, use default from settings
+                    if not collection_name:
+                        collection_name = getattr(settings, 'DEFAULT_COLLECTION_NAME', 'default')
+                    
+                    logger.info(f"[SUGGESTIONS] Validating {len(suggestions)} candidate suggestions using collection '{collection_name}'")
+                    
+                    for suggestion in suggestions:
+                        is_answerable = self._validate_suggestion_answerable(
+                            suggestion=suggestion,
+                            collection_name=collection_name,
+                            min_score=0.20  # Same threshold as factual queries
+                        )
+                        
+                        if is_answerable:
+                            validated_suggestions.append(suggestion)
+                            logger.info(f"[SUGGESTIONS] ✓ Valid: '{suggestion[:60]}...'")
+                        else:
+                            logger.info(f"[SUGGESTIONS] ✗ Filtered out (no data): '{suggestion[:60]}...'")
+                        
+                        # Stop once we have 3 valid suggestions
+                        if len(validated_suggestions) >= 3:
+                            break
+                    
+                    if validated_suggestions:
+                        logger.info(f"[SUGGESTIONS] Returning {len(validated_suggestions)} validated suggestions")
+                        return validated_suggestions
+                    else:
+                        logger.warning("[SUGGESTIONS] All suggestions failed validation, using fallback")
+            
+            logger.warning("[SUGGESTIONS] Invalid suggestions format from LLM, using fallback")
+            return self._get_fallback_suggestions(query, conversation_state)
+                
+        except Exception as e:
+            logger.error(f"[SUGGESTIONS] Error generating suggestions: {str(e)}")
+            # Return fallback suggestions
+            return self._get_fallback_suggestions(query, conversation_state)
+
+    def _validate_suggestion_answerable(
+        self,
+        suggestion: str,
+        collection_name: str,
+        min_score: float = 0.20
+    ) -> bool:
+        """
+        Test if a suggestion can be answered by checking if we can retrieve relevant chunks.
+        
+        Args:
+            suggestion: The suggested question to validate
+            collection_name: Collection to search in
+            min_score: Minimum score threshold for considering a chunk relevant
+            
+        Returns:
+            True if we can find relevant chunks for this question, False otherwise
+        """
+        try:
+            # Perform a test retrieval with the suggestion
+            test_chunks = self.retrieve_chunks(
+                query=suggestion,
+                collection_name=collection_name,
+                limit=3  # Only need a few chunks to validate
+            )
+            
+            if not test_chunks or len(test_chunks) == 0:
+                return False
+            
+            # Check if any chunk meets the minimum score threshold
+            max_score = max(chunk.get('score', 0) for chunk in test_chunks)
+            
+            # Log for debugging
+            logger.debug(f"[SUGGESTION VALIDATION] '{suggestion[:50]}...' -> max_score={max_score:.3f}, threshold={min_score}")
+            
+            return max_score >= min_score
+            
+        except Exception as e:
+            logger.error(f"[SUGGESTION VALIDATION] Error validating suggestion: {str(e)}")
+            # On error, be conservative and assume it's not answerable
+            return False
+
+    def _get_fallback_suggestions(
+        self,
+        query: str,
+        conversation_state: Optional[Dict] = None
+    ) -> List[str]:
+        """Fallback suggestions when LLM generation fails."""
+        entity = None
+        if conversation_state and conversation_state.get('active_entity'):
+            entity_data = conversation_state['active_entity']
+            if isinstance(entity_data, dict):
+                entity = entity_data.get('person_name') or entity_data.get('name')
+            else:
+                entity = str(entity_data)
+        
+        if entity:
+            return [
+                f"What are the key features of {entity}?",
+                f"How does {entity} compare to alternatives?"
+            ]
+        else:
+            # Generic fallback based on common topics
+            return [
+                "What are the main features?",
+                "How can I get started?"
+            ]
+
     def summarize_conversation(self, older_messages: List) -> str:
         """
         Summarize older conversation messages to preserve context without overwhelming the LLM.
@@ -804,7 +3512,7 @@ Summary:"""
             return f"Earlier in the conversation, the user asked about: {topics}..."
         return "The conversation covered various topics earlier."
 
-    def _resolve_prompt_settings(self, collection_id: Optional[str] = None):
+    def _resolve_prompt_settings(self, collection_id: Optional[str] = None, scope: Optional[str] = None, intent: Optional[str] = None, answer_mode: Optional[str] = None):
         """Determine system prompt and model configuration for the given collection.
         
         Note: model, max_tokens, and temperature are ALWAYS taken from environment
@@ -821,6 +3529,40 @@ Summary:"""
         else:
             system_prompt = self.default_system_prompt
         
+        # ANSWER QUALITY ENHANCEMENT: Always append comprehensive answer instructions
+        # This works with any user-configured prompt from the database
+        system_prompt += """
+
+ANSWER QUALITY GUIDELINES (CRITICAL - Always Apply):
+- Be EXHAUSTIVE: Read ALL context carefully and include EVERY relevant detail, feature, component, and capability mentioned
+- For product questions: List ALL modules/components, ALL features, ALL benefits mentioned anywhere in context
+- Be STRUCTURED: Use headers (**bold**) and bullet points to organize information clearly
+- SYNTHESIZE: Combine information from multiple context snippets into one cohesive answer
+- Don't abbreviate or summarize when more detail is available - include everything
+- Infer organization name from context (page titles, URLs, content)
+- Do NOT add disclaimers about "limited context" or "additional documentation needed"
+- Do NOT mention what is missing - answer confidently with what you have"""
+            
+        # FIX 2: SCOPE INJECTION
+        if scope:
+             # Prevent "which company" questions by explicitly grounding the prompt
+             system_prompt += f"\n\nIMPORTANT CONTEXT: The user is asking about '{scope}'. Assume all questions relate to {scope} unless specified otherwise."
+
+        # FIX 10: INTENT-AWARE SYSTEM PROMPTS
+        if intent:
+            if intent in ["history", "overview", "exploratory"]:
+                system_prompt += "\n\nRESPONSE GUIDELINE: Provide a high-level summary. Focus on narrative flow, key events, and broad concepts rather than minute details."
+            elif intent in ["policy", "admin"]:
+                system_prompt += "\n\nRESPONSE GUIDELINE: Be precise and authoritative. Quote relevant policy clauses where possible. Differentiate between strict rules and general guidelines."
+            elif intent in ["people", "leadership"]:
+                system_prompt += "\n\nRESPONSE GUIDELINE: Focus on role, responsibilities, and professional background. If multiple people match, list them clearly."
+            elif intent in ["procedural", "troubleshooting"]:
+                system_prompt += "\n\nRESPONSE GUIDELINE: Provide step-by-step instructions. Use numbered lists. Highlight any prerequisites or warnings."
+
+        # FIX 1: PARTIAL ANSWER TRANSPARENCY
+        if answer_mode == "PARTIAL_TRANSPARENT":
+            system_prompt += "\n\nIMPORTANT: The available context might be from a different domain than requested (e.g., policy documents for a history question). You MUST explicitly acknowledge this limitation. Start or end by saying something like 'Based on the available [domain] documents...'"
+
         # ALWAYS use env defaults for model configuration
         model = self.default_model
         max_tokens = self.default_max_tokens
@@ -909,7 +3651,6 @@ Summary:"""
 
             else:
                 raise ValueError(f"Unsupported AI_PROVIDER: {self.ai_provider}")
-
         except Exception as e:
             error_str = str(e)
             logger.error(f"AI Provider Error ({self.ai_provider}): {e}")
@@ -917,53 +3658,176 @@ Summary:"""
             # Return consistent error message for all LLM failures (tagged as generic)
             return "I encountered an error while processing your question. Please try again. [RESPONSE_TYPE:GENERIC]", None
 
-    def answer(self, query: str, top_k: int = 5, collection_id: Optional[str] = None) -> Union[str, Dict[str, any]]:
+    def _parse_ai_response(self, raw_text: str) -> Dict[str, Any]:
+        """Parse the AI response to separate answer text from classification JSON."""
+        default_response = {
+            "answer": raw_text,
+            "answer_mode": "FULL",
+            "is_generic": False
+        }
+        
+        if not raw_text:
+            return default_response
+            
+        # Look for the last integer-like structure or JSON block
+        # Our instruction asks for a JSON object on a new line at the end
+        
+        lines = raw_text.strip().split('\n')
+        last_line = lines[-1].strip()
+        
+        if last_line.startswith('{') and last_line.endswith('}'):
+            try:
+                data = json.loads(last_line)
+                # Reconstruct answer without the JSON line
+                answer_text = '\n'.join(lines[:-1]).strip()
+                return {
+                    "answer": answer_text,
+                    "answer_mode": data.get("answer_mode", "FULL"),
+                    "is_generic": data.get("is_generic", False)
+                }
+            except json.JSONDecodeError:
+                pass
+                
+        # Fallback: Look for [RESPONSE_TYPE:GENERIC] tag (legacy from previous prompts)
+        if "[RESPONSE_TYPE:GENERIC]" in raw_text:
+            return {
+                "answer": raw_text.replace("[RESPONSE_TYPE:GENERIC]", "").strip(),
+                "answer_mode": "GENERIC_ERROR",
+                "is_generic": True
+            }
+            
+        return default_response
+
+    def answer(
+        self, 
+        query: str, 
+        top_k: int = 5, 
+        collection_id: Optional[str] = None, 
+        prior_context: Optional[Dict] = None, 
+        conversation_state: Optional[Dict] = None,
+        request_cache: Optional[Dict] = None # FIX 20
+    ) -> Union[str, Dict[str, any]]:
         """Main pipeline: retrieve → medium-detailed answer with source references using collection-specific prompt.
         
         Returns:
             dict with 'answer' (str) and 'is_generic' (bool) for AI classification
         """
         if self._is_small_talk(query):
-            return self._handle_small_talk(query)
+            return self._handle_small_talk_via_llm(
+                query,
+                collection_id=collection_id,
+                conversation_history=None,
+            )
 
-        chunks_with_sources = self.retrieve_chunks(query, top_k=top_k, collection_id=collection_id)
+        # --- CACHE CHECK (Answer) ---
+        cache = get_rag_cache()
+        # Note: We don't have answer_mode yet, so we check for the most common "FULL" mode answer in cache
+        # or we could design a more generic key. 
+        # Requirement: Keyed by (..., answer_mode). 
+        # Since we are about to generate a FULL answer (default), we check for that.
+        cache_key = generate_cache_key(
+            collection_id=collection_id or "default",
+            intent="unknown", # We haven't classified yet, but for strict caching we should probably classify first? 
+                              # Actually, strict plan says: (collection_id, intent, normalized_query, answer_mode).
+                              # We need to run classification to get intent before checking cache if we want to be strict.
+            query=query,
+            answer_mode="FULL" # Default target mode
+        )
+        
+        # HOWEVER: Computing intent takes time (regex). 
+        # Let's peek at the classification logic. It's fast regex. 
+        # To match the plan strictness, we should lift classification up.
+        
+        try:
+             normalized_query = normalize_text(query)
+        except:
+             normalized_query = query.lower().strip()
+        
+        query_classification = classify_query(normalized_query)
+        intent = query_classification.get("query_type", "general")
+        
+        cache_key = generate_cache_key(
+            collection_id=collection_id or "default",
+            intent=intent,
+            query=query,
+            answer_mode="FULL"
+        )
+        
+        cached_answer = cache.get_answer(cache_key)
+        if cached_answer is not None:
+             logger.info(f"[CACHE HIT] Answer found for key: {cache_key}")
+             return cached_answer
+
+        chunks_with_sources = self.retrieve_chunks(
+            query, 
+            top_k=top_k, 
+            collection_id=collection_id, 
+            prior_context=prior_context,
+            request_cache=request_cache # FIX 20
+        )
         if not chunks_with_sources:
             return {
                 "answer": "I wasn't able to retrieve a confident answer, please refine your question.",
                 "is_generic": True
             }
 
-        system_prompt, model, max_tokens, temperature = self._resolve_prompt_settings(collection_id)
+        # Run classification for intent-aware prompts
+        try:
+             # normalized_query might be redundant but safely consistent
+             normalized_query = normalize_text(query)
+        except:
+             normalized_query = query.lower().strip()
+        
+        query_classification = classify_query(normalized_query)
+        intent = query_classification.get("query_type") if query_classification else None
 
-        # Build context with source information and TOKEN CAP (Bug Fix #3)
-        context_parts = []
-        source_files = {}  # Dict to store source metadata (file_id, source_type, url)
+        system_prompt, model, max_tokens, temperature = self._resolve_prompt_settings(
+            collection_id=collection_id,
+            scope=conversation_state.get("scope") if conversation_state else None,
+            intent=intent,
+            answer_mode="FULL" # 'answer' method usually implies full/direct answer
+        )
+
+        # Check for person data to adjust formatting
+        person_chunks = [c for c in chunks_with_sources if c.get("payload", {}).get("chunk_type") == "person_profile"]
+        has_person_data = len(person_chunks) > 0
+        
+        # Build context
+        source_files = {}
         total_tokens = 0
         
+        # Use appropriate formatter
+        if has_person_data:
+            # For person queries, we use a specialized formatter
+            # We still need to populate source_files for the response
+            # So we iterate chunks just to build source_files, but context string comes from formatter
+            context = format_person_context(chunks_with_sources, detect_person_query(query, prior_context=prior_context))
+            
+            # Add person-specific instructions to prompt
+            system_prompt += """
+            
+When answering questions about people:
+- Present information in a clear, structured format
+- Include: Full name, Title/Role, Department (if available)
+- Add contact information if available (LinkedIn, email)
+- Keep the tone professional and factual
+- If multiple people match, list all relevant matches
+"""
+        else:
+            # Standard formatting
+            context = format_general_context(chunks_with_sources)
+            
+        # Build source_files dict (common for both paths)
         for i, chunk in enumerate(chunks_with_sources):
-            chunk_text = chunk['text']
-            chunk_tokens = _estimate_tokens(chunk_text)
-            
-            # Check token cap before adding
-            max_tokens = _get_max_context_tokens()
-            if total_tokens + chunk_tokens > max_tokens:
-                logger.info(f"[RAG TOKEN CAP] Stopping at {i} chunks, {total_tokens} tokens (limit: {max_tokens})")
-                break
-            
-            total_tokens += chunk_tokens
-            context_parts.append(f"Source {i+1} (from {chunk['file_name']}):\n{chunk_text}")
-            # Store source metadata for frontend rendering
-            if chunk['file_name'] not in source_files:
-                source_files[chunk['file_name']] = {
+             file_name = chunk.get("file_name", "Unknown File")
+             if file_name not in source_files:
+                source_files[file_name] = {
                     'file_id': chunk.get('file_id', ''),
                     'source_type': chunk.get('source_type', 'file'),
-                    'url': chunk.get('url', '') or chunk.get('canonical_url', '')
+                    'url': chunk.get('url', '') or chunk.get('canonical_url', ''),
+                    'payload': chunk.get('payload', {}) # Store payload for API response
                 }
-        
-        logger.info(f"[RAG CONTEXT] Using {len(context_parts)} chunks, ~{total_tokens} tokens")
-        
-        context = "\n\n---\n\n".join(context_parts)
-        
+
         # Enhanced prompt with source instruction + classification instruction (tamper-proof)
         enhanced_prompt = f"""{system_prompt}
 
@@ -1015,7 +3879,39 @@ Answer:"""
         # Remove any existing sources section (case-insensitive) - handles with or without preceding newline
         answer = re.sub(r'(?:^|\n)\s*\**\s*\bSources?\b:?\s*\**\s*(?:\n[\s\S]*)?$', '', answer, flags=re.IGNORECASE).strip()
         
-        logger.info(f"[RAG DEBUG] After sources strip length: {len(answer)} chars")
+        # NEW: Filter source_files based on AI's referenced sources
+        referenced_sources = parsed.get("referenced_sources", [])
+        if referenced_sources and not is_generic:
+            filtered_source_files = {}
+            for ref in referenced_sources:
+                ref_norm = (ref or "").lower().strip()
+                if not ref_norm: continue
+                # Match against filename and URL
+                for fn, info in source_files.items():
+                    fn_norm = fn.lower()
+                    url_norm = (info.get('url') or "").lower()
+                    if ref_norm in fn_norm or fn_norm in ref_norm or (url_norm and ref_norm in url_norm):
+                        filtered_source_files[fn] = info
+            
+            # Only use filtered list if we found matches (safety fallback)
+            if filtered_source_files:
+                logger.info(f"[RAG SOURCES] Filtered sources from {len(source_files)} to {len(filtered_source_files)} based on AI references")
+                source_files = filtered_source_files
+            else:
+                # Fallback: If AI provided sources but they don't match, 
+                # keep only the top 3 highest scoring files as a proxy for relevance
+                sorted_files = sorted(source_files.items(), 
+                                   key=lambda x: max([c.get('score', 0) for c in chunks_with_sources if c.get('file_name') == x[0]] or [0]), 
+                                   reverse=True)
+                source_files = dict(sorted_files[:3])
+                logger.info(f"[RAG SOURCES] No matching AI sources found. Falling back to top 3 files.")
+        elif not is_generic:
+            # Fallback for when AI provided NO sources segment: show top 3
+            sorted_files = sorted(source_files.items(), 
+                               key=lambda x: max([c.get('score', 0) for c in chunks_with_sources if c.get('file_name') == x[0]] or [0]), 
+                               reverse=True)
+            source_files = dict(sorted_files[:3])
+            logger.info(f"[RAG SOURCES] AI provided no sources. Showing top 3 files.")
         
         # Build and append formatted sources ONLY if not a generic response
         if True:  # Always show sources
@@ -1031,14 +3927,40 @@ Answer:"""
             if source_list:
                 answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
 
-        return {"answer": answer, "is_generic": is_generic, "tokens_used": tokens_used}
+        result = {"answer": answer, "is_generic": is_generic, "tokens_used": tokens_used, "source_files": source_files}
+
+        # --- CACHE SET (Answer) ---
+        # Generate specific key based on the ACTUAL answer mode we got
+        final_answer_mode = parsed.get("answer_mode", "FULL")
+        
+        # If we didn't use tokens (error fallback), treat as NO_DATA
+        if tokens_used is None:
+             final_answer_mode = "NO_DATA"
+
+        set_cache_key = generate_cache_key(
+            collection_id=collection_id or "default",
+            intent=intent or "general",
+            query=query,
+            answer_mode=final_answer_mode
+        )
+        
+        is_no_data = final_answer_mode in ["NO_DATA", "NO_DATA_CONFIRMED", "GENERIC_ERROR"]
+        cache.set_answer(set_cache_key, result, is_no_data=is_no_data)
+
+        # Also, if the mode is "FULL", we assume it matches our optimistic "FULL" check at the start.
+        # So this will populate the happy path for next time.
+
+        return result
 
     def answer_with_context(
         self,
         query: str,
         conversation_history: List,
         top_k: int = 5,
-        collection_id: Optional[str] = None
+        collection_id: Optional[str] = None,
+        prior_context: Optional[Dict] = None,
+        conversation_state: Optional[Dict] = None, # New Arg
+        request_cache: Optional[Dict] = None # FIX 20
     ) -> Union[str, Dict[str, any]]:
         """Main pipeline with conversation context: retrieve → contextual answer with source references.
         
@@ -1046,16 +3968,295 @@ Answer:"""
             dict with 'answer' (str) and 'is_generic' (bool) for AI classification
         """
         if self._is_small_talk(query):
-            return self._handle_small_talk(query)
+            return self._handle_small_talk_via_llm(
+                query,
+                collection_id=collection_id,
+                conversation_history=conversation_history,
+            )
 
-        chunks_with_sources = self.retrieve_chunks(query, top_k=top_k, collection_id=collection_id)
-        if not chunks_with_sources:
+        # --- CACHE CHECK (Answer) ---
+        cache = get_rag_cache()
+        
+        # Resolve intent for key (lightweight regex)
+        try:
+             normalized_query = normalize_text(query)
+        except:
+             normalized_query = query.lower().strip()
+        
+        query_classification = classify_query(normalized_query)
+        intent = query_classification.get("query_type", "general")
+        
+        cache_key = generate_cache_key(
+            collection_id=collection_id or "default",
+            intent=intent,
+            query=query,
+            answer_mode="FULL" # Optimistic check
+        )
+        
+        cached_answer = cache.get_answer(cache_key)
+        if cached_answer is not None:
+             logger.info(f"[CACHE HIT] Answer found for key: {cache_key}")
+             return cached_answer
+            
+        # FIX 4: AFFIRMATION HANDLING ("Yes", "Everything")
+        # Reuse last intent if available
+        if conversation_state and conversation_state.get("last_intent") == "leadership_list":
+             normalized = query.lower().strip()
+             affirmations = ["yes", "ya", "yeah", "yep", "sure", "correct", "everything", "all of them", "all"]
+             if any(a in normalized for a in affirmations) or normalized in affirmations:
+                 logger.info("[INTENT] Detected affirmation for Leadership List. Expanding query.")
+                 # Rewrite query to force expansion
+                 query = "detailed profiles of the leadership team executives"
+                 # Force high retrieval count
+                 top_k = 15 
+        
+        # Step 1: Analyze Query to prep for retrieval and follow-up
+        try:
+             # normalized_query might be redundant if retrieve_chunks does it, 
+             # but we need it for pre-retrieval logic
+             normalized_query = normalize_text(query)
+        except:
+             normalized_query = query.lower().strip()
+
+        # FIX: Define query_classification before using it
+        query_classification = classify_query(normalized_query)
+
+        # Inject query_type and scope for detection and retrieval gating
+        merged_context = prior_context or {}
+        if "query_type" not in merged_context or (conversation_state and conversation_state.get("scope") and "scope" not in merged_context):
+            merged_context = merged_context.copy()
+            if "query_type" not in merged_context:
+                merged_context["query_type"] = query_classification["query_type"]
+            if conversation_state and conversation_state.get("scope") and "scope" not in merged_context:
+                merged_context["scope"] = conversation_state.get("scope")
+            
+        person_detection = detect_person_query(normalized_query, prior_context=merged_context)
+        query_name = person_detection.get("person_name")
+
+        chunks_with_sources = self.retrieve_chunks(
+            query, 
+            top_k=top_k, 
+            collection_id=collection_id, 
+            prior_context=merged_context,
+            request_cache=request_cache # FIX 20
+        )
+        
+        # Step 2: Enhanced follow-up detection
+        followup_result = self.needs_followup(
+            query=query,
+            chunks=chunks_with_sources,
+            conversation_history=conversation_history,
+            query_classification=query_classification,
+            person_detection=person_detection,
+            conversation_state=conversation_state 
+        )
+        
+        # Leadership short-circuit: ONLY return path for leadership_list. Must run BEFORE answer_mode / NO_DATA.
+        if (
+            query_classification.get("query_type") == "leadership_list"
+            and chunks_with_sources
+        ):
+            # Infer target org FIRST so we can filter entities properly
+            org_from_state = (conversation_state or {}).get("scope")
+            inferred_org = org_from_state or infer_org_from_chunks(chunks_with_sources) or "the organization"
+            
+            # Extract entities AND get the chunks that contributed to them
+            leadership_entities, contributing_chunks = extract_leadership_entities(
+                chunks_with_sources, target_org=inferred_org, query_type="leadership_list"
+            )
+            top_score_val = chunks_with_sources[0].get("score", 0)
+            if leadership_entities and top_score_val >= getattr(settings, "RAG_LEADERSHIP_MIN_SCORE", LEADERSHIP_MIN_SCORE):
+                org_display = inferred_org or "the organization"
+                answer_text = generate_leadership_response(leadership_entities, top_score_val, org_display)
+                
+                # FIX: Only include sources from chunks that contributed to the answer
+                source_files_lead = {}
+                for chunk in contributing_chunks:  # Use contributing_chunks instead of all chunks
+                    fn = chunk.get("file_name", "Unknown File")
+                    if fn not in source_files_lead:
+                        source_files_lead[fn] = {
+                            "file_id": chunk.get("file_id", ""),
+                            "source_type": chunk.get("source_type", "file"),
+                            "url": chunk.get("url", "") or chunk.get("canonical_url", ""),
+                            "payload": chunk.get("payload", {}),
+                        }
+                source_list = []
+                for file_name, info in sorted(source_files_lead.items()):
+                    ref = info.get("url") if info.get("source_type") == "web_crawl" else info.get("file_id", "")
+                    source_list.append(f"- [{file_name}]({ref}|{info.get('source_type', 'file')})")
+                if source_list:
+                    answer_text += "\n\n**Sources:**\n" + "\n".join(source_list)
+                final_mode = AnswerMode.PARTIAL_TRANSPARENT if top_score_val < 0.25 else AnswerMode.FULL
+                logger.info(f"[RAG LEADERSHIP] Short-circuit (score={top_score_val:.4f}, entities={len(leadership_entities)}, sources={len(source_files_lead)}, org={org_display})")
+                return {
+                    "answer": answer_text,
+                    "is_generic": False,
+                    "answer_mode": final_mode,
+                    "sources": list(source_files_lead.keys()),
+                    "chunk_count": len(contributing_chunks),  # Report contributing chunks, not all
+                }
+        
+        # DETERMINE ANSWER MODE (Fix 4 & 8)
+        person_detected = False
+        leadership_detected = False
+        target_org = infer_org_from_chunks(chunks_with_sources) if chunks_with_sources else None
+        has_internal_data = False
+        
+        if chunks_with_sources:
+             # Retrieve signals from reranker (stored in the first chunk's root)
+             first_chunk = chunks_with_sources[0]
+             
+             # Use propagated flags from reranker
+             person_detected = first_chunk.get("person_detected", False)
+             leadership_detected = first_chunk.get("leadership_detected", False)
+             
+             # FIX 8: Check for ANY internal data
+             for c in chunks_with_sources:
+                 org = c.get("payload", {}).get("organization")
+                 if org and normalize_text(org) == target_org:
+                     has_internal_data = True
+                     break
+             
+             # Fallback for person_detected
+             if not person_detected and query_name:
+                 query_name_norm = normalize_text(query_name)
+                 for chunk in chunks_with_sources:
+                     payload = chunk.get("payload", {})
+                     p_name = payload.get("person_name")
+                     if p_name and query_name_norm in normalize_text(p_name):
+                         person_detected = True
+                         break
+
+        answer_mode = AnswerMode.FULL
+        if followup_result.get("reason") == "domain_mismatch_partial":
+            answer_mode = AnswerMode.PARTIAL_TRANSPARENT
+        elif followup_result.get("needs_followup"):
+            answer_mode = AnswerMode.FOLLOWUP
+        else:
+             # --- FIX 4: INTENT-AWARE ANSWER MODE ---
+             # Priority 1: Existence check for Person/Role queries
+             # If we found chunks for a specific person/role, we show them (FULL/PARTIAL), even if "internal" flag is missing.
+             
+             intent = person_detection.get("query_type") # e.g. "specific_person", "role_lookup"
+             has_results = len(chunks_with_sources) > 0
+             
+             if intent == "role_lookup":
+                 if has_results:
+                      answer_mode = AnswerMode.FULL
+                 else:
+                      # STRICT FAIL: Role lookup with no results -> NO_DATA (or Followup if generated above)
+                      # We explicitly want to avoid leadership fallback here.
+                      answer_mode = AnswerMode.NO_DATA_CONFIRMED
+                      
+             elif person_detection.get("is_person_query"):
+                 if has_results:
+                     # If we have results and a person was detected in text, show it.
+                     if person_detected:
+                         answer_mode = AnswerMode.FULL
+                         # Downgrade to PARTIAL if leadership was asked but not found?
+                         # For now, consistent with "Fix 12", we want to show what we found.
+                     else:
+                         # Results exist but fuzzy match didn't confirm person name?
+                         # This happens if we retrieved "Ramya" for query "Remya" (fuzzy success)
+                         # Trust the retrieval if score is decent.
+                         if chunks_with_sources[0].get("score", 0) > 0.4:
+                              answer_mode = AnswerMode.FULL
+                         else:
+                              answer_mode = AnswerMode.NO_DATA_CONFIRMED
+                 else:
+                     answer_mode = AnswerMode.NO_DATA_CONFIRMED
+
+             elif intent == "leadership_list":
+                 # Change 1 & 2: Use top_score and accept partial leadership data
+                 top_score_val = chunks_with_sources[0].get("score", 0) if chunks_with_sources else 0
+                 leadership_entities = extract_leadership_entities(
+                     chunks_with_sources, target_org=target_org, query_type="leadership_list"
+                 ) if chunks_with_sources else []
+                 if len(leadership_entities) >= 1:
+                     if top_score_val >= 0.25:
+                         answer_mode = AnswerMode.FULL
+                     elif top_score_val >= LEADERSHIP_MIN_SCORE:
+                         answer_mode = AnswerMode.PARTIAL_TRANSPARENT
+                     else:
+                         answer_mode = AnswerMode.NO_DATA_CONFIRMED
+                 elif has_internal_data:
+                     answer_mode = AnswerMode.FULL
+                 elif has_results:
+                     answer_mode = AnswerMode.PARTIAL_TRANSPARENT
+                 else:
+                     answer_mode = AnswerMode.NO_DATA_CONFIRMED
+                     
+             else:
+                 # Default logic for other queries
+                 if not has_internal_data and not has_results:
+                      answer_mode = AnswerMode.NO_DATA_CONFIRMED
+                 else:
+                      answer_mode = AnswerMode.FULL
+                      
+        logger.info(f"[ANSWER_MODE] Selected mode: {answer_mode} (Intent: {person_detection.get('query_type')}, Results: {len(chunks_with_sources)})")
+        
+        # Step 3: If follow-up needed, generate questions
+        # Enforce confidence threshold
+        FOLLOWUP_CONFIDENCE_THRESHOLD = getattr(settings, "RAG_FOLLOWUP_CONFIDENCE_THRESHOLD", 0.6)
+        
+        if answer_mode == AnswerMode.FOLLOWUP and followup_result["confidence"] >= FOLLOWUP_CONFIDENCE_THRESHOLD:
+            followup_questions = self.generate_followup_questions(
+                query=query,
+                followup_result=followup_result,
+                chunks=chunks_with_sources,
+                conversation_history=conversation_history
+            )
+            
+            # Format follow-up response
+            followup_text = "\n\n".join(followup_questions)
+            
             return {
-                "answer": "I wasn't able to retrieve a confident answer, please refine your question.",
-                "is_generic": True
+                "answer": followup_text,
+                "is_followup": True,
+                "is_generic": False, # Technically it's a specific follow-up
+                "item_mode": AnswerMode.FOLLOWUP, # P5 FIX
+                "answer_mode": AnswerMode.FOLLOWUP,
+                "sources": [],
+                "chunk_count": 0,
+                "followup_reason": followup_result["reason"],
+                "followup_confidence": followup_result["confidence"],
+                "suggested_topics": followup_result.get("suggested_topics", [])
             }
+        
+        # If we had a potential follow-up but confidence was low, we fall through to FULL/PARTIAL answer logic
+        
+        # Check if this is a capability/identity question (e.g., "what can you do?")
+        # These should be answered by the LLM using the system prompt, NOT from KB search
+        is_capability = self._is_capability_question(query)
+        
+        # Fallback to standard generic response if chunks are missing but no follow-up triggered
+        # EXCEPTION: Capability questions should go through to LLM even with no chunks
+        if (not chunks_with_sources or answer_mode == AnswerMode.NO_DATA_CONFIRMED) and not is_capability:
+            if query_classification.get("query_type") == "leadership_list":
+                # Never use raw scope: can be None → "None leadership". Always fallback.
+                org_display = ((conversation_state or {}).get("scope") or "the organization")
+                return {
+                    "answer": f"I don't have information about {org_display} leadership in the knowledge base.",
+                    "is_generic": True,
+                    "answer_mode": AnswerMode.NO_DATA_CONFIRMED
+                }
+            return {
+                "answer": f"I don't have sufficient information about {query_name or 'this person'} in the knowledge base." if person_detection.get("is_person_query") else "I wasn't able to retrieve a confident answer, please refine your question.",
+                "is_generic": True,
+                "answer_mode": AnswerMode.NO_DATA_CONFIRMED
+            }
+        
+        # For capability questions with no KB data, set mode to FULL so LLM can answer from system prompt
+        if is_capability and not chunks_with_sources:
+            answer_mode = AnswerMode.FULL
+            logger.info(f"[CAPABILITY] Allowing LLM to answer capability question from system prompt")
 
-        system_prompt, model, max_tokens, temperature = self._resolve_prompt_settings(collection_id)
+        system_prompt, model, max_tokens, temperature = self._resolve_prompt_settings(
+            collection_id=collection_id,
+            scope=conversation_state.get("scope") if conversation_state else None,
+            intent=query_classification.get("query_type") if query_classification else None,
+            answer_mode=answer_mode
+        )
 
         # Build conversation context with summarization for long histories
         conversation_context = ""
@@ -1064,17 +4265,14 @@ Answer:"""
             
             # Check if we need to summarize older messages
             if history_length > SUMMARY_TRIGGER_THRESHOLD:
-                # Split: older messages (to summarize) + recent messages (verbatim)
+                # Split: older (summarize) + recent (verbatim)
                 older_messages = conversation_history[:-MAX_VERBATIM_MESSAGES]
                 recent_messages = conversation_history[-MAX_VERBATIM_MESSAGES:]
                 
-                logger.info(f"[CONTEXT] History length {history_length} exceeds threshold {SUMMARY_TRIGGER_THRESHOLD}")
-                logger.info(f"[CONTEXT] Summarizing {len(older_messages)} older messages, keeping {len(recent_messages)} verbatim")
-                
-                # Generate summary of older messages
+                # Generate summary
                 summary = self.summarize_conversation(older_messages)
                 
-                # Build context with summary + recent verbatim messages
+                # Build context
                 conversation_context = "\n\n[Conversation Summary (earlier messages)]:\n"
                 conversation_context += f"{summary}\n"
                 conversation_context += "\n[Recent Conversation (last 10 Q&A pairs)]:\n"
@@ -1099,86 +4297,124 @@ Answer:"""
                         content = msg.get("content", "")
                     conversation_context += f"{role}: {content}\n"
 
-        # Build context with source information and TOKEN CAP (Bug Fix #3)
-        context_parts = []
-        source_files = {}  # Dict to store source metadata (file_id, source_type, url)
-        total_tokens = 0
+        # Check for person data to adjust formatting
+        person_chunks = [c for c in chunks_with_sources if c.get("payload", {}).get("chunk_type") == "person_profile"]
+        has_person_data = len(person_chunks) > 0
         
-        for i, chunk in enumerate(chunks_with_sources):
-            chunk_text = chunk['text']
-            chunk_tokens = _estimate_tokens(chunk_text)
-            
-            # Check token cap before adding
-            max_tokens = _get_max_context_tokens()
-            if total_tokens + chunk_tokens > max_tokens:
-                logger.info(f"[RAG TOKEN CAP] Stopping at {i} chunks, {total_tokens} tokens (limit: {max_tokens})")
-                break
-            
-            total_tokens += chunk_tokens
-            context_parts.append(f"Source {i+1} (from {chunk['file_name']}):\n{chunk_text}")
-            # Store source metadata for frontend rendering
-            if chunk['file_name'] not in source_files:
-                source_files[chunk['file_name']] = {
+        # Base system prompt (from settings); may be extended for person queries
+        prompt_header = system_prompt
+        
+        # Build context
+        source_files = {}
+        # Pre-populate source_files from all retrieved chunks
+        for chunk in chunks_with_sources:
+             fn = chunk.get("file_name", "Unknown File")
+             if fn not in source_files:
+                source_files[fn] = {
                     'file_id': chunk.get('file_id', ''),
                     'source_type': chunk.get('source_type', 'file'),
-                    'url': chunk.get('url', '') or chunk.get('canonical_url', '')
+                    'url': chunk.get('url', '') or chunk.get('canonical_url', ''),
+                    'payload': chunk.get('payload', {})
                 }
+        total_tokens = 0
         
-        logger.info(f"[RAG CONTEXT] Using {len(context_parts)} chunks, ~{total_tokens} tokens")
+        # Use appropriate formatter
+        if has_person_data:
+            context = format_person_context(chunks_with_sources, detect_person_query(query, prior_context=prior_context))
+            # FIX 17: Enforce strict person formatting in prompt
+            prompt_header += """
+            
+Response Guidelines for Person Queries:
+- Use the provided 'PRIMARY PROFILES' as the main source of truth.
+- Format the answer clearly: Name, Title, Organization.
+- If multiple people match, list them all.
+- If the role is found but no specific person is named in context, state that clearly (ROLE_PRESENT_NO_OWNER).
+"""
+        else:
+            context = format_general_context(chunks_with_sources)
         
-        context = "\n\n---\n\n".join(context_parts)
-        
-        prompt_header = system_prompt
-        if conversation_context:
-            prompt_header = f"{system_prompt}{conversation_context}"
+        # For capability questions with no KB data, include system prompt as context
+        # so the LLM can answer "what can you do?" based on its instructions
+        if is_capability and not chunks_with_sources:
+            context = f"""ASSISTANT INSTRUCTIONS (use this to answer capability questions):
+{system_prompt}
 
-        enhanced_prompt = f"""{prompt_header}
+Note: The user is asking about your capabilities. Answer based on the instructions above.
+Introduce yourself and explain what you can help with, based on your role described above."""
+            
+        # FIX 17 & 22: Add classification instruction
+        full_system_prompt = f"{prompt_header}\n\n{CLASSIFICATION_INSTRUCTION}"
 
-IMPORTANT: At the end of your response, always include a "Sources:" section listing the specific files you referenced.
 
-Context from uploaded documents:
+
+        # Construct final user prompt with enhanced instructions
+        user_prompt = f"""Context information is below.
+---------------------
 {context}
+---------------------
 
-Question: {query}
+Given the context information (and not prior knowledge), provide a COMPREHENSIVE answer.
+Query: {query}
 Answer:"""
-        # Append classification instruction (cannot be overridden by user-configurable prompts)
-        enhanced_prompt += CLASSIFICATION_INSTRUCTION
+
+        # Debug logging
+        logger.info(f"[RAG AI CALL] Generating answer with mode={answer_mode}...")
         
-        # Extract values from SQLAlchemy model objects
-        model_value = model if isinstance(model, str) else getattr(model, 'model_name', self.default_model)
-        max_tokens_value = max_tokens if isinstance(max_tokens, int) else getattr(max_tokens, 'max_tokens', self.default_max_tokens)
-        temperature_value = temperature if isinstance(temperature, (int, float)) else getattr(temperature, 'temperature', self.default_temperature)
-        
-        # Debug logging to trace max_tokens value
-        logger.info(f"[RAG AI CALL WITH CONTEXT] Using max_tokens={max_tokens_value}, model={model_value}, temperature={temperature_value}")
-        
+        # Call AI
         raw_answer, tokens_used = self.call_ai(
-            enhanced_prompt,
-            model=model_value,
-            max_tokens=max_tokens_value,
-            temperature=temperature_value,
+            user_prompt, # Put everything in the prompt if system prompt is not supported by call_ai wrapper or merge them
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature
         )
         
-        # Log LLM response details
-        logger.info(f"[LLM RESPONSE] Provider: {self.ai_provider}, Model: {model_value}")
-        logger.info(f"[LLM RESPONSE] Tokens used: {tokens_used}")
-        logger.info(f"[LLM RESPONSE] Response length: {len(raw_answer)} chars")
-        logger.info(f"[LLM RESPONSE] Full response:\n{raw_answer}")
-        
-        # Parse AI response to extract classification
+        # FIX 17: Parsing Logic
         parsed = self._parse_ai_response(raw_answer)
-        answer = parsed["answer"]
+        final_answer = parsed["answer"]
+        ai_determined_mode = parsed.get("answer_mode", "FULL") # Fallback to FULL
         is_generic = parsed["is_generic"]
         
-        # Force is_generic=True if AI call failed (no tokens used or error text detected)
-        if tokens_used is None or "I encountered an error while processing your question" in answer:
-            is_generic = True
-        
+        # Trust AI's "NoData" if we aren't already sure
+        if ai_determined_mode == "NoData" and answer_mode != AnswerMode.NO_DATA_CONFIRMED:
+             answer_mode = AnswerMode.NO_DATA_CONFIRMED
+             
+        # Fallback if AI failed to classify
+        if is_generic and "error" in final_answer.lower():
+             answer_mode = AnswerMode.NO_DATA_CONFIRMED
+
         # ALWAYS add formatted sources - remove any AI-generated sources section first
-        # Format: [file_name](reference|source_type) for frontend parsing
-        # reference = file_id for files, url for web_crawl
-        # Remove any existing sources section (case-insensitive) - handles with or without preceding newline
-        answer = re.sub(r'(?:^|\n)\s*\**\s*\bSources?\b:?\s*\**\s*(?:\n[\s\S]*)?$', '', answer, flags=re.IGNORECASE).strip()
+        final_answer = re.sub(r'(?:^|\n)\s*\**\s*\bSources?\b:?\s*\**\s*(?:\n[\s\S]*)?$', '', final_answer, flags=re.IGNORECASE).strip()
+        
+        # NEW: Filter source_files based on AI's referenced sources
+        referenced_sources = parsed.get("referenced_sources", [])
+        if referenced_sources and not is_generic:
+            filtered_source_files = {}
+            for ref in referenced_sources:
+                ref_norm = (ref or "").lower().strip()
+                if not ref_norm: continue
+                for fn, info in source_files.items():
+                    fn_norm = fn.lower()
+                    url_norm = (info.get('url') or "").lower()
+                    if ref_norm in fn_norm or fn_norm in ref_norm or (url_norm and ref_norm in url_norm):
+                        filtered_source_files[fn] = info
+            
+            if filtered_source_files:
+                logger.info(f"[RAG SOURCES] Filtered sources from {len(source_files)} to {len(filtered_source_files)} based on AI references")
+                source_files = filtered_source_files
+            else:
+                # Fallback: top 3 by score
+                sorted_files = sorted(source_files.items(), 
+                                   key=lambda x: max([c.get('score', 0) for c in chunks_with_sources if c.get('file_name') == x[0]] or [0]), 
+                                   reverse=True)
+                source_files = dict(sorted_files[:3])
+                logger.info(f"[RAG SOURCES] No matching AI sources found. Falling back to top 3 files.")
+        elif not is_generic:
+            # Fallback: top 3 by score
+            sorted_files = sorted(source_files.items(), 
+                               key=lambda x: max([c.get('score', 0) for c in chunks_with_sources if c.get('file_name') == x[0]] or [0]), 
+                               reverse=True)
+            source_files = dict(sorted_files[:3])
+            logger.info(f"[RAG SOURCES] AI provided no sources. Showing top 3 files.")
         
         # Build and append formatted sources ONLY if not a generic response
         if True:  # Always show sources
@@ -1192,6 +4428,41 @@ Answer:"""
                 source_list.append(f"- [{file_name}]({reference}|{source_type})")
             
             if source_list:
-                answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
+                final_answer += f"\n\n**Sources:**\n" + "\n".join(source_list)
 
-        return {"answer": answer, "is_generic": is_generic, "tokens_used": tokens_used}
+        # Mask PARTIAL_TRANSPARENT from frontend to hide the warning banner
+        # We still used it internally to shape the prompt.
+        final_answer_mode = answer_mode
+        if answer_mode == AnswerMode.PARTIAL_TRANSPARENT:
+            final_answer_mode = AnswerMode.FULL
+
+        result = {
+            "answer": final_answer, 
+            "is_generic": is_generic, 
+            "tokens_used": tokens_used, 
+            "source_files": source_files, 
+            "answer_mode": final_answer_mode,
+            "person_presence": {
+                "found": person_detected,
+                "has_title": any(c.get("payload", {}).get("person_title") for c in chunks_with_sources),
+                "has_leadership_keyword": leadership_detected,
+                "source_domains": list(set(c.get("payload", {}).get("domain", "general") for c in chunks_with_sources))
+            } if person_detection.get("is_person_query") else None
+        }
+
+        # --- CACHE SET (Answer) ---
+        cache_mode_for_key = final_answer_mode
+        if tokens_used is None:
+             cache_mode_for_key = "NO_DATA"
+
+        set_cache_key = generate_cache_key(
+            collection_id=collection_id or "default",
+            intent=intent or "general",
+            query=query,
+            answer_mode=cache_mode_for_key
+        )
+        
+        is_no_data = cache_mode_for_key in ["NO_DATA", "NO_DATA_CONFIRMED", "GENERIC_ERROR"]
+        cache.set_answer(set_cache_key, result, is_no_data=is_no_data)
+
+        return result

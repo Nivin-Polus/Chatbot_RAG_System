@@ -130,7 +130,7 @@ class DuplicateDetector:
         
         # Pagination detection
         self.url_patterns: Dict[str, int] = defaultdict(int)  # Pattern -> count
-        self.max_pagination_pages = 3
+        self.max_pagination_pages = 50
     
     def normalize_url(self, url: str) -> str:
         """Normalize URL for comparison."""

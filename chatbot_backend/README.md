@@ -68,36 +68,52 @@ py -3.10 -m pip install -r requirements.txt
 
 ### 3. Environment Configuration
 
-Create a `.env` file in the backend root:
-
-```env
-# 🤖 Claude AI Configuration
-CLAUDE_API_KEY=your_claude_api_key_here
-CLAUDE_MODEL=claude-3-haiku-20240307
-CLAUDE_MAX_TOKENS=1000
-CLAUDE_TEMPERATURE=0.0
-
-# 🗃️ Qdrant Vector Database
-VECTOR_DB_URL=http://localhost:6333
-
-# ⚡ Redis Cache (Optional)
-USE_REDIS=false
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_DB=0
-
-# 🔐 JWT Authentication
-SECRET_KEY=your-super-secret-jwt-key-here
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-
-# 📁 File Upload Settings
-MAX_FILE_SIZE_MB=25
-ALLOWED_FILE_TYPES=pdf,docx,pptx,xlsx,txt
-
-# 🚀 Application Mode
-APP_MODE=api
+Create a `.env` file in the backend root. You can copy the example file:
+```bash
+cp .env.example .env
 ```
+
+#### Configuration Variables
+
+| Category | Variable | Default | Description |
+|----------|----------|---------|-------------|
+| **AI Provider** | `AI_PROVIDER` | `claude` | AI provider to use (`claude`, `bedrock`) |
+| **Claude** | `CLAUDE_API_KEY` | - | API Key for Anthropic Claude |
+| | `CLAUDE_MODEL` | `claude-3-haiku...` | Model to use |
+| | `CLAUDE_MAX_TOKENS` | `4096` | Max tokens for response |
+| | `CLAUDE_TEMPERATURE` | `0.0` | Temperature for generation |
+| | `SYSTEM_PROMPT` | `""` | Optional system prompt override |
+| **AWS Bedrock** | `AWS_REGION` | `us-east-1` | AWS Region |
+| | `AWS_ACCESS_KEY_ID` | - | AWS Access Key |
+| | `AWS_SECRET_ACCESS_KEY` | - | AWS Secret Key |
+| | `AWS_MODEL` | `anthropic.claude...` | Bedrock Model ID |
+| **Database** | `DATABASE_TYPE` | `mysql` | `mysql`, `postgresql`, or `sqlite` |
+| | `DATABASE_HOST` | `localhost` | DB Host |
+| | `DATABASE_PORT` | `3306` | DB Port |
+| | `DATABASE_NAME` | `chatbot_rag` | DB Name |
+| | `DATABASE_USER` | `root` | DB User |
+| | `DATABASE_PASSWORD` | - | DB Password |
+| | `DATABASE_SSL_DISABLED` | `False` | Disable SSL for DB connection |
+| **Vector DB** | `VECTOR_DB_URL` | `http://localhost:6333` | Qdrant URL |
+| | `VECTOR_DB_FALLBACK` | `True` | Fallback to keyword search if Vector DB fails |
+| **Redis** | `USE_REDIS` | `False` | Enable Redis caching |
+| | `REDIS_HOST` | `localhost` | Redis Host |
+| | `REDIS_PORT` | `6379` | Redis Port |
+| **Security** | `SECRET_KEY` | - | **REQUIRED** JWT signing key |
+| | `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Token validity duration |
+| | `CORS_ORIGINS` | `http://localhost:3000` | Allowed CORS origins (comma-separated) |
+| **Server** | `SERVER_HOST` | `0.0.0.0` | Host to bind to |
+| | `SERVER_PORT` | `8000` | Port to bind to |
+| | `APP_MODE` | `api` | `api` or `ui` |
+| **RAG** | `RAG_MIN_SCORE` | `0.25` | Min similarity score for retrieval |
+| | `RAG_LEADERSHIP_MIN_SCORE` | `0.15` | Min score for leadership queries |
+| | `SOURCE_MIN_SCORE` | `0.15` | Min score to display a source |
+| | `MAX_CONTEXT_TOKENS` | `4000` | Max context window for LLM |
+| **Rate Limit** | `RATE_LIMIT_ENABLED` | `True` | Enable rate limiting |
+| | `RATE_LIMIT_DEFAULT` | `100/minute` | Default rate limit |
+| **Files** | `UPLOAD_DIR` | `uploads` | Directory for file uploads |
+| | `MAX_FILE_SIZE_MB` | `25` | Max upload size |
+| | `ALLOWED_FILE_TYPES` | `pdf,docx...` | Allowed extensions |
 
 ### 4. Start Required Services
 

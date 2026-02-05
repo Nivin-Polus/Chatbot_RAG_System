@@ -1,6 +1,9 @@
 // ui.js
 import { CONFIG } from './config.js';
 
+/** Unique root class so plugin styles never affect the host page */
+export const PLUGIN_ROOT_CLASS = 'rag-chatbot-widget';
+
 export class ChatbotUI {
   constructor() {
     this.isOpen = false;
@@ -41,7 +44,7 @@ export class ChatbotUI {
   /** Create Floating Toggle Button */
   createToggleButton() {
     this.toggleBtn = document.createElement("button");
-    this.toggleBtn.className = "plugin-chat-toggle chat-toggle";
+    this.toggleBtn.className = `${PLUGIN_ROOT_CLASS} plugin-chat-toggle chat-toggle`;
     this.toggleBtn.type = "button";
     this.toggleBtn.setAttribute("aria-expanded", "false");
     this.toggleBtn.innerHTML = `
@@ -55,7 +58,7 @@ export class ChatbotUI {
   /** Create Main Chat Panel */
   createChatPanel() {
     this.chatPanel = document.createElement("div");
-    this.chatPanel.className = "plugin-chat-panel chat-panel";
+    this.chatPanel.className = `${PLUGIN_ROOT_CLASS} plugin-chat-panel chat-panel`;
 
     const placeholderText = CONFIG.ui.inputPlaceholder || "";
     const welcomeMessage = CONFIG.ui.welcomeMessage || "";

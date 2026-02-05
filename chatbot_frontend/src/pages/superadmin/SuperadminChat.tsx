@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Trash2, Users, Search, Loader2, MoreHorizontal, Bot, MessageSquare, User, Send, ExternalLink, FileText, Download } from 'lucide-react';
+import { Trash2, Users, Search, Loader2, MoreHorizontal, Bot, MessageSquare, User, Send, ExternalLink, FileText, Download, AlertTriangle } from 'lucide-react';
 import { ChatMessage, ChatSource } from '@/types/auth';
 import { toast } from 'sonner';
 import { apiGet, apiPost } from '@/utils/api';
@@ -225,7 +225,7 @@ export default function SuperadminChat() {
 
   // --- Updated Typing Animation ---
   const streamAssistantResponse = useCallback(
-    (rawContent: string, sources?: ChatSource[], isFollowup?: boolean) => {
+    (rawContent: string, sources?: ChatSource[], isFollowup?: boolean, answerMode?: 'FULL' | 'PARTIAL_TRANSPARENT' | 'FOLLOWUP') => {
       const content = rawContent && rawContent.trim().length > 0
         ? rawContent
         : 'I was unable to generate a response.';
@@ -248,8 +248,11 @@ export default function SuperadminChat() {
           timestamp,
           sources,
           isFollowup,
+          answer_mode: answerMode,
         },
       ]);
+
+
 
       return new Promise<void>((resolve) => {
         setIsStreaming(true);
@@ -261,7 +264,7 @@ export default function SuperadminChat() {
             if (currentStored) {
               const updatedMsgs = currentStored.messages.map(m =>
                 m.id === messageId
-                  ? { ...m, content: finalContent, sources, isFollowup }
+                  ? { ...m, content: finalContent, sources, isFollowup, answer_mode: answerMode }
                   : m
               );
 
@@ -272,8 +275,10 @@ export default function SuperadminChat() {
                   content: finalContent,
                   timestamp,
                   sources,
-                  isFollowup
+                  isFollowup,
+                  answer_mode: answerMode
                 });
+
               }
 
               saveSession(targetSessionId, updatedMsgs, selectedCollection, user.user_id, user.role || 'superadmin', true);
@@ -290,7 +295,7 @@ export default function SuperadminChat() {
           if (sessionIdRef.current === targetSessionId) {
             setMessages((prev) =>
               prev.map((msg) =>
-                msg.id === messageId ? { ...msg, content, sources, isFollowup } : msg
+                msg.id === messageId ? { ...msg, content, sources, isFollowup, answer_mode: answerMode } : msg
               )
             );
             if (isStreaming) {
@@ -333,7 +338,7 @@ export default function SuperadminChat() {
           index += 1;
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.id === messageId ? { ...msg, content: content.slice(0, index), sources, isFollowup } : msg
+              msg.id === messageId ? { ...msg, content: content.slice(0, index), sources, isFollowup, answer_mode: answerMode } : msg
             )
           );
           scrollToBottom();
@@ -520,10 +525,12 @@ export default function SuperadminChat() {
       // NEW: Handle follow-up responses
       if (dataResponse.is_followup) {
         const followupContent = dataResponse.followup_questions || 'Could you please clarify your question?';
-        await streamAssistantResponse(followupContent, undefined, true);
+        await streamAssistantResponse(followupContent, undefined, true, 'FOLLOWUP');
         setIsLoading(false);
         return;
       }
+
+      const answerMode = dataResponse.answer_mode;
 
       let assistantContent =
         dataResponse.response || dataResponse.answer || dataResponse.content || 'I was unable to generate a response.';
@@ -583,7 +590,7 @@ export default function SuperadminChat() {
         });
       }
 
-      await streamAssistantResponse(assistantContent, sources);
+      await streamAssistantResponse(assistantContent, sources, false, answerMode);
       setIsLoading(false);
 
       if (user?.access_token && selectedCollection) {
@@ -673,8 +680,9 @@ export default function SuperadminChat() {
   );
 
   const renderMessageContent = useCallback(
-    (content: string, messageId: string, messageSources?: ChatSource[]) => {
+    (content: string, messageId: string, messageSources?: ChatSource[], answerMode?: 'FULL' | 'PARTIAL_TRANSPARENT' | 'FOLLOWUP') => {
       const nodes: ReactNode[] = [];
+
       const lines = content.split('\n');
       let inSourcesSection = false;
       let keyCounter = 0;
@@ -1288,7 +1296,7 @@ export default function SuperadminChat() {
                     <div className="flex items-center justify-center text-muted-foreground dark:text-gray-300 h-[50vh]">
                       <div className="flex flex-col items-center gap-3 text-center">
                         <MessageSquare className="h-12 w-12 opacity-50" />
-                        <p className="text-base font-medium">You can start the conversation by sending a message below.</p>
+                        <p className="text-base font-medium">How can I help you?</p>
                       </div>
                     </div>
                   ) : (
@@ -1337,7 +1345,7 @@ export default function SuperadminChat() {
                               </p>
                             </div>
                             <div className="flex flex-col gap-0.5 text-sm leading-snug">
-                              {renderMessageContent(message.content, message.id, message.sources)}
+                              {renderMessageContent(message.content, message.id, message.sources, message.answer_mode)}
                             </div>
                           </div>
                         </div>

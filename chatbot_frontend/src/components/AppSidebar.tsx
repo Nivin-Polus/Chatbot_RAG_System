@@ -13,6 +13,7 @@ import {
   SidebarFooter,
   useSidebar,
   SidebarMenuAction,
+  SidebarTrigger,
 } from '@/components/ui/sidebar';
 import {
   Database,
@@ -30,7 +31,8 @@ import {
   Pencil,
   Check,
   X,
-  HelpCircle
+  HelpCircle,
+  Rocket
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -42,8 +44,7 @@ import { ThemeToggle } from './ThemeToggle';
 const superadminNav = [
   { title: 'Knowledge Base', url: '/superadmin', icon: Layers },
   { title: 'Users', url: '/superadmin/users', icon: Users },
-  { title: 'Plugins', url: '/superadmin/plugins', icon: Link2 },
-  { title: 'Help Pages', url: '/superadmin/help-page', icon: HelpCircle },
+  { title: 'Deployment', url: '/superadmin/deployment', icon: Rocket },
   { title: 'Chat', url: '/superadmin/chat', icon: MessageSquare },
   { title: 'Activity', url: '/superadmin/activity', icon: Activity },
   { title: 'Settings', url: '/superadmin/settings', icon: Settings },
@@ -219,34 +220,30 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar className="border-r border-sidebar-border">
+    <Sidebar className="border-r border-sidebar-border" collapsible="icon">
       <SidebarContent>
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-3">
-              <div className={`rounded-lg border border-logo flex items-center justify-center p-1 ${user?.role === 'plugin_user' ? 'h-14 w-14' : 'h-10 w-10'}`}>
-                <img
-                  src={getAssetUrl('leto.svg')}
-                  alt="Leto Logo"
-                  className={`${user?.role === 'plugin_user' ? 'h-12 w-12' : 'h-8 w-8'} object-contain`}
-                />
-              </div>
-              {open && user?.role !== 'plugin_user' && (
-                <div>
-                  <h2 className="text-lg font-semibold">{sidebarHeading(user?.role)}</h2>
-                  <p className="text-xs text-muted-foreground capitalize">{user?.role}</p>
-                </div>
-              )}
+        <div className="p-4 group-data-[collapsible=icon]:p-2">
+          {/* Logo Section - Logo Left, Trigger Right */}
+          <div className="flex items-center justify-between mb-6 group-data-[collapsible=icon]:mb-4 group-data-[collapsible=icon]:justify-center">
+            <div className="rounded-lg border border-logo flex items-center justify-center p-2 h-14 w-14 group-data-[collapsible=icon]:hidden">
+              <img
+                src={getAssetUrl('leto.svg')}
+                alt="Leto Logo"
+                className="h-10 w-10 object-contain"
+              />
             </div>
+            <SidebarTrigger className="text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:h-10 group-data-[collapsible=icon]:w-10 group-data-[collapsible=icon]:[&_svg]:size-6" />
           </div>
-          {open && isActive(getChatBaseUrl()) && (
+
+          {isActive(getChatBaseUrl()) && (
             <Button
-              variant="outline"
-              className="w-full justify-start gap-2 mt-2"
+              variant="default"
+              className="w-full justify-start gap-2 group-data-[collapsible=icon]:p-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:h-12 group-data-[collapsible=icon]:w-12 group-data-[collapsible=icon]:mx-auto"
               onClick={() => navigate(getChatBaseUrl())}
+              title={!open ? "New Chat" : undefined}
             >
-              <Plus className="h-4 w-4" />
-              <span>New Chat</span>
+              <Plus className="h-4 w-4 group-data-[collapsible=icon]:h-6 group-data-[collapsible=icon]:w-6" />
+              {open && <span>New Chat</span>}
             </Button>
           )}
         </div>
@@ -259,7 +256,7 @@ export function AppSidebar() {
                 const active = isActive(item.url);
                 return (
                   <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild>
+                    <SidebarMenuButton asChild tooltip={item.title} className="group-data-[collapsible=icon]:!h-12 group-data-[collapsible=icon]:!w-12 group-data-[collapsible=icon]:justify-center">
                       <NavLink
                         to={item.url}
                         className={`flex items-center gap-2 rounded-md px-2 py-2 transition-colors 
@@ -268,7 +265,7 @@ export function AppSidebar() {
                             : 'hover:bg-sidebar-accent/50 text-muted-foreground'
                           }`}
                       >
-                        <item.icon className="h-4 w-4" />
+                        <item.icon className="h-4 w-4 group-data-[collapsible=icon]:h-6 group-data-[collapsible=icon]:w-6" />
                         {open && <span>{item.title}</span>}
                       </NavLink>
                     </SidebarMenuButton>
@@ -279,10 +276,10 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* History Section */}
-        {sessions.length > 0 && isActive(getChatBaseUrl()) && (
-          <SidebarGroup>
-            {open && <SidebarGroupLabel>History</SidebarGroupLabel>}
+        {/* History Section - Only visible when open */}
+        {sessions.length > 0 && isActive(getChatBaseUrl()) && open && (
+          <SidebarGroup className="group-data-[collapsible=icon]:hidden">
+            <SidebarGroupLabel>History</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {sessions.map((session) => {
@@ -346,12 +343,13 @@ export function AppSidebar() {
         )}
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border p-4">
+      <SidebarFooter className="border-t border-sidebar-border p-4 group-data-[collapsible=icon]:p-2">
         {user?.role !== 'plugin_user' && (
           <Button
             variant="ghost"
-            className="w-full justify-start"
+            className="w-full justify-start group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-2"
             onClick={logout}
+            title={!open ? "Logout" : undefined}
           >
             <LogOut className="h-4 w-4" />
             {open && <span>Logout</span>}

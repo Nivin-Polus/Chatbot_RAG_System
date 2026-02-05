@@ -1,5 +1,5 @@
 // index.js
-import { ChatbotUI } from "./ui.js";
+import { ChatbotUI, PLUGIN_ROOT_CLASS } from "./ui.js";
 import { ChatService } from "./chat.js";
 import { AuthService } from "./auth.js";
 import { CONFIG, initConfig } from "./config.js";
@@ -362,11 +362,12 @@ import "./styles.css";
 
   if (CONFIG.ui.logoUrl) {
     const headerLogo = document.querySelector('.header .logo');
-    if (headerLogo && !headerLogo.querySelector('img.chat-global-logo')) {
+    const injectedLogoClass = `${PLUGIN_ROOT_CLASS}-global-logo`;
+    if (headerLogo && !headerLogo.querySelector(`img.${injectedLogoClass}`)) {
       const img = document.createElement('img');
       img.src = CONFIG.ui.logoUrl;
       img.alt = CONFIG.ui.logoAlt || 'Logo';
-      img.className = 'chat-global-logo';
+      img.className = injectedLogoClass;
       headerLogo.prepend(img);
     }
   }
@@ -416,7 +417,7 @@ import "./styles.css";
 
   // Guard against any host-page form submission triggered from within the plugin UI
   document.addEventListener("submit", (e) => {
-    const panel = document.querySelector(".plugin-chat-panel");
+    const panel = document.querySelector(`.${PLUGIN_ROOT_CLASS}`);
     if (panel && e.target && panel.contains(e.target)) {
       e.preventDefault();
       e.stopPropagation();

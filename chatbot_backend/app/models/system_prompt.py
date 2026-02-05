@@ -4,7 +4,7 @@ from sqlalchemy import Column, String, DateTime, Boolean, Text, Integer, Float, 
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.models.base import Base
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 import uuid
 
@@ -104,6 +104,7 @@ class SystemPrompt(Base):
 
 class SystemPromptCreate(BaseModel):
     """Pydantic model for system prompt creation"""
+    model_config = ConfigDict(protected_namespaces=())
     name: str
     description: Optional[str] = None
     system_prompt: str
@@ -119,6 +120,7 @@ class SystemPromptCreate(BaseModel):
 
 class SystemPromptUpdate(BaseModel):
     """Pydantic model for system prompt updates"""
+    model_config = ConfigDict(protected_namespaces=())
     name: Optional[str] = None
     description: Optional[str] = None
     system_prompt: Optional[str] = None
@@ -133,6 +135,7 @@ class SystemPromptUpdate(BaseModel):
 
 class SystemPromptResponse(BaseModel):
     """Pydantic model for system prompt response"""
+    model_config = ConfigDict(protected_namespaces=())
     prompt_id: str
     name: str
     description: Optional[str] = None
