@@ -1,6 +1,9 @@
 // ui.js
 import { CONFIG } from './config.js';
 
+/** Unique root class so plugin styles never affect the host page */
+export const PLUGIN_ROOT_CLASS = 'rag-chatbot-widget';
+
 export class ChatbotUI {
   constructor() {
     this.isOpen = false;
@@ -34,13 +37,19 @@ export class ChatbotUI {
   }
 
   init() {
-    this.createToggleButton();
-    this.createChatPanel();
+    // Create a dedicated root wrapper so styles can scope to it
+    this.rootEl = document.createElement("div");
+    this.rootEl.className = PLUGIN_ROOT_CLASS;
+    document.body.appendChild(this.rootEl);
+
+    this.createToggleButton(this.rootEl);
+    this.createChatPanel(this.rootEl);
   }
 
   /** Create Floating Toggle Button */
-  createToggleButton() {
+  createToggleButton(rootEl) {
     this.toggleBtn = document.createElement("button");
+    // Root class now lives on wrapper; keep only widget-specific classes here
     this.toggleBtn.className = "plugin-chat-toggle chat-toggle";
     this.toggleBtn.type = "button";
     this.toggleBtn.setAttribute("aria-expanded", "false");
@@ -49,12 +58,13 @@ export class ChatbotUI {
            alt="Open chat" class="plugin-icon icon"/>`;
 
     this.toggleBtn.addEventListener("click", () => this.toggleChat());
-    document.body.appendChild(this.toggleBtn);
+    (rootEl || document.body).appendChild(this.toggleBtn);
   }
 
   /** Create Main Chat Panel */
-  createChatPanel() {
+  createChatPanel(rootEl) {
     this.chatPanel = document.createElement("div");
+    // Root class now lives on wrapper; keep only widget-specific classes here
     this.chatPanel.className = "plugin-chat-panel chat-panel";
 
     const placeholderText = CONFIG.ui.inputPlaceholder || "";
@@ -134,11 +144,12 @@ export class ChatbotUI {
 
             <div class="plugin-chat-input chat-input">
                 <div class="plugin-chat-input-field chat-input-field">
-                <input type="text" 
+                <textarea 
                         id="chat-message" 
                         placeholder=" " 
                         aria-label="${this.escapeHtml(welcomeMessage)}" 
-                        maxlength="500"/>
+                        maxlength="500"
+                        rows="1"></textarea>
                 <span class="plugin-custom-placeholder custom-placeholder">${welcomeMessage}</span>
                 </div>
                 <button type="button" id="chat-stop" title="Stop" style="display:none" aria-label="Stop">
@@ -156,7 +167,7 @@ export class ChatbotUI {
       </div>
     `;
 
-    document.body.appendChild(this.chatPanel);
+    (rootEl || document.body).appendChild(this.chatPanel);
 
     this.chatPanel.setAttribute("aria-hidden", "true");
 
@@ -211,7 +222,18 @@ export class ChatbotUI {
         inputField.classList.toggle("has-value", hasValue);
       };
 
-      inputElement.addEventListener("input", togglePlaceholderState);
+      const autoResize = () => {
+        inputElement.style.height = 'auto';
+        const style = window.getComputedStyle(inputElement);
+        const borderHeight = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+        const newHeight = inputElement.scrollHeight + borderHeight;
+        inputElement.style.height = newHeight + 'px';
+      };
+
+      inputElement.addEventListener("input", () => {
+        togglePlaceholderState();
+        autoResize();
+      });
       inputElement.addEventListener("focus", () => {
         inputField.classList.add("plugin-is-focused");
         inputField.classList.add("is-focused");
@@ -223,6 +245,8 @@ export class ChatbotUI {
       });
 
       togglePlaceholderState();
+      // Initial resize
+      autoResize();
     }
 
     /** Close button */
