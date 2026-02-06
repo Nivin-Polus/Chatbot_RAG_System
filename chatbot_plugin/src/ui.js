@@ -37,14 +37,20 @@ export class ChatbotUI {
   }
 
   init() {
-    this.createToggleButton();
-    this.createChatPanel();
+    // Create a dedicated root wrapper so styles can scope to it
+    this.rootEl = document.createElement("div");
+    this.rootEl.className = PLUGIN_ROOT_CLASS;
+    document.body.appendChild(this.rootEl);
+
+    this.createToggleButton(this.rootEl);
+    this.createChatPanel(this.rootEl);
   }
 
   /** Create Floating Toggle Button */
-  createToggleButton() {
+  createToggleButton(rootEl) {
     this.toggleBtn = document.createElement("button");
-    this.toggleBtn.className = `${PLUGIN_ROOT_CLASS} plugin-chat-toggle chat-toggle`;
+    // Root class now lives on wrapper; keep only widget-specific classes here
+    this.toggleBtn.className = "plugin-chat-toggle chat-toggle";
     this.toggleBtn.type = "button";
     this.toggleBtn.setAttribute("aria-expanded", "false");
     this.toggleBtn.innerHTML = `
@@ -52,13 +58,14 @@ export class ChatbotUI {
            alt="Open chat" class="plugin-icon icon"/>`;
 
     this.toggleBtn.addEventListener("click", () => this.toggleChat());
-    document.body.appendChild(this.toggleBtn);
+    (rootEl || document.body).appendChild(this.toggleBtn);
   }
 
   /** Create Main Chat Panel */
-  createChatPanel() {
+  createChatPanel(rootEl) {
     this.chatPanel = document.createElement("div");
-    this.chatPanel.className = `${PLUGIN_ROOT_CLASS} plugin-chat-panel chat-panel`;
+    // Root class now lives on wrapper; keep only widget-specific classes here
+    this.chatPanel.className = "plugin-chat-panel chat-panel";
 
     const placeholderText = CONFIG.ui.inputPlaceholder || "";
     const welcomeMessage = CONFIG.ui.welcomeMessage || "";
@@ -160,7 +167,7 @@ export class ChatbotUI {
       </div>
     `;
 
-    document.body.appendChild(this.chatPanel);
+    (rootEl || document.body).appendChild(this.chatPanel);
 
     this.chatPanel.setAttribute("aria-hidden", "true");
 
