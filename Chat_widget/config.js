@@ -47,7 +47,8 @@ const WIDGET_CONFIG = {
     // ===== Branding =====
     branding: {
         // Logo file path (relative to Chat_widget folder or absolute URL)
-        logoPath: 'leto.svg',
+        // Use assets path when served from backend at /chat-widget/{token}
+        logoPath: '/chat-widget/assets/leto.svg',
 
         // Application/Assistant name shown in header
         appName: 'Chat Assistant',

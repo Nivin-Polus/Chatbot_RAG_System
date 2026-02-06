@@ -7,7 +7,7 @@
     <title>Chat Help Page</title>
     <meta name="description" content="AI-powered knowledge base chat assistant">
     <!-- Use Leto logo as favicon for the widget help page -->
-    <link rel="icon" type="image/svg+xml" href="leto.svg">
+    <link rel="icon" type="image/svg+xml" href="/chat-widget/assets/leto.svg">
 
     <!-- Open Graph metadata for rich link previews (use Leto logo) -->
     <meta property="og:title" content="Chat Widget - AI-powered knowledge base assistant">
@@ -24,9 +24,8 @@
     <meta name="twitter:description" content="Ask questions and get instant answers from your knowledge base.">
     <meta name="twitter:image" content="">
 
-    <!-- Base href removed for design mode compatibility - CSS/JS use relative paths -->
-    <!-- <base href="/chat-widget/"> -->
-    <link rel="stylesheet" href="styles.css">
+    <!-- Use /chat-widget/assets/ when served from backend at /chat-widget/{token} -->
+    <link rel="stylesheet" href="/chat-widget/assets/styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 
@@ -52,7 +51,7 @@
             <aside id="sidebar" class="sidebar">
                 <div class="sidebar-header">
                     <div class="logo-container">
-                        <img src="leto.svg" alt="Leto Logo" class="logo-icon" />
+                        <img src="/chat-widget/assets/leto.svg" alt="Leto Logo" class="logo-icon" />
                     </div>
                     <button id="toggle-sidebar" class="toggle-sidebar-btn" title="Toggle Sidebar">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -155,8 +154,8 @@
         </div>
     </div>
 
-    <script src="config.js?v=20260121_v2"></script>
-    <script src="app.js?v=20260121_v2"></script>
+    <script src="/chat-widget/assets/config.js?v=20260121_v2"></script>
+    <script src="/chat-widget/assets/app.js?v=20260121_v2"></script>
 </body>
 
 </html>
