@@ -6,7 +6,7 @@ const WIDGET_CONFIG = {
     // 'local'  = Local backend (localhost:8000)
     // 'dev'    = Dev server
     // 'prod'   = Production
-    environment: 'local',
+    environment: 'dev',
 
     // ===== Mock Mode (auto-enabled in 'design' environment) =====
     // When true, bypasses API calls and uses mock data for UI development
